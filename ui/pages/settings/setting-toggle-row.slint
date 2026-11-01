@@ -1,0 +1,67 @@
+// ============================================================================
+//  pages/settings/setting-toggle-row.slint — 开关行（图标 + 标签/描述 + 右侧开关）
+//  开关：细圆角轨道 + 圆钮，点击翻转；当前状态由 checked 双向驱动
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+export component SettingToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> desc: "";
+    in property <image> icon;
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 14px; padding-right: 14px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 18px; height: 18px;
+            vertical-alignment: center;
+            colorize: Theme.palette.icon;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.label; color: Theme.palette.text; font-size: 13.5px; overflow: elide; }
+            if (root.desc != "") : Text { text: root.desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+        }
+
+        // 开关：轨道
+        Rectangle {
+            width: 40px; height: 22px;
+            border-radius: 11px;
+            background: root.checked ? Theme.palette.primary : Theme.palette.divider-strong;
+            // 圆钮
+            Rectangle {
+                width: 18px; height: 18px;
+                border-radius: 9px;
+                x: root.checked ? parent.width - 18px - 2px : 2px;
+                y: 2px;
+                background: Theme.palette.icon-white;
+                animate x { duration: 140ms; easing: ease-out; }
+            }
+            sw-ta := TouchArea {
+                clicked => {
+                    root.checked = !root.checked;
+                    root.toggled(root.checked);
+                }
+                mouse-cursor: pointer;
+            }
+        }
+    }
+
+    row-ta := TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+        mouse-cursor: pointer;
+    }
+}

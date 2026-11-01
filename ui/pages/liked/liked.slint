@@ -1,0 +1,280 @@
+// ============================================================================
+//  pages/liked.slint — 我的最爱页
+//  固定头部（红色主题 + 统计） + 5 分类 Tab（歌曲/歌单/专辑/MV/电台） + 滚动列表
+//  歌曲行：点击播放；资源行：点击进对应详情页；行内爱心可直接取消收藏
+// ============================================================================
+import { Song, LikedRes } from "../../components/models.slint";
+import { SongList } from "../../components/songlist.slint";
+import { PlaceholderPage } from "../placeholder/placeholder.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// ---- 收藏资源行（封面 + 名称 + 副标题 + 类型徽标 + 行内爱心） ----
+component LikedResRow inherits Rectangle {
+    in property <LikedRes> res;
+    in property <image> cover-img;
+    callback open(int, int);            // kind, id
+    callback unlike(int, int);          // kind, id
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 10px; padding-right: 10px;
+        cross-axis-alignment: center;
+
+        // 封面
+        Rectangle {
+            width: 42px; height: 42px; border-radius: 7px;
+            background: Theme.palette.divider;
+            clip: true;
+            if (cover-img.width > 0) : Image {
+                source: cover-img; width: 100%; height: 100%; image-fit: cover;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: res.name;
+                color: Theme.palette.text;
+                font-size: 13px; overflow: elide;
+            }
+            Text {
+                text: res.sub == "" ? type-label(res.kind) : res.sub;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+        }
+
+        // 类型徽标
+        Rectangle {
+            height: 18px; border-radius: 9px;
+            background: Theme.palette.active;
+            width: badge-t.preferred-width + 14px;
+            badge-t := Text {
+                text: type-label(res.kind);
+                color: Theme.palette.primary; font-size: 10px; font-weight: 600;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+
+        // 行内取消收藏
+        Rectangle {
+            width: 28px; height: 28px; border-radius: 14px;
+            background: lk-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../../assets/icons/heart-fill-red.svg");
+                width: 15px; height: 15px;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon-danger;
+            }
+            lk-ta := TouchArea { mouse-cursor: pointer; clicked => { root.unlike(res.kind, res.id); } }
+        }
+    }
+
+    function type-label(k: int) -> string {
+        k == 0 ? Language.nav-playlists : k == 1 ? Language.nav-albums : k == 3 ? Language.nav-radio : k == 4 ? Language.nav-mv : Language.liked-kind-other
+    }
+
+    row-ta := TouchArea { clicked => { root.open(res.kind, res.id); } mouse-cursor: pointer; }
+}
+
+// ---- Tab 切换条 ----
+component TabBar inherits HorizontalLayout {
+    in-out property <int> active: 0;
+    in property <[string]> labels;
+    callback changed(int);
+
+    spacing: 6px;
+    height: 30px;
+
+    for label[idx] in labels : Rectangle {
+        width: 56px;
+        border-radius: 15px;
+        background: root.active == idx ? Theme.palette.active : transparent;
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.active = idx; root.changed(idx); }
+        }
+        Text {
+            text: label;
+            color: root.active == idx ? Theme.palette.primary : Theme.palette.text-faint;
+            font-size: 12.5px;
+            font-weight: root.active == idx ? 600 : 400;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+// 根组件必须是 Rectangle（同 playlists/albums/mv/radio 验证过的模式）：
+// 继承 VerticalLayout 时页面在外层共享 sv 里被按内容全高展开，内层 sv 被撑满
+// 不滚动且吞掉滚轮事件，外层 sv 收不到 → 整页无法滚动
+export component LikedPage inherits Rectangle {
+    in property <[Song]> songs;
+    in property <[LikedRes]> playlists;
+    in property <[LikedRes]> albums;
+    in property <[LikedRes]> mvs;
+    in property <[LikedRes]> radios;
+    // 当前激活 tab（Rust 同步以决定加载哪个集合）
+    in-out property <int> tab: 0;
+    in property <int> current-id: 0;
+    callback play-song(int);
+    callback open-resource(int, int);      // kind, id
+    callback unlike-resource(int, int);    // kind, id
+
+    VerticalLayout {
+        width: 100%; height: 100%;
+        spacing: 14px;
+        padding-top: 8px;
+        padding-bottom: 0;
+        padding-left: 26px;
+        padding-right: 26px;
+
+    // ---- 固定头部（不随列表滚动） ----
+    Rectangle {
+        height: 100px;
+        border-radius: 14px;
+        clip: true;
+        background: @linear-gradient(135deg, #ef4444 0%, #ec4899 100%);
+        HorizontalLayout {
+            spacing: 16px;
+            padding: 18px;
+            cross-axis-alignment: center;
+            Rectangle {
+                width: 64px; height: 64px;
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 0.20);
+                Image {
+                    source: @image-url("../../assets/icons/heart-fill-red.svg");
+                    width: 30px; height: 30px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: Language.nav-liked; color: white; font-size: 20px; font-weight: 700; }
+                Text {
+                    text: root.songs.length + Language.liked-count-songs + " · " + (root.playlists.length + root.albums.length + root.mvs.length + root.radios.length) + Language.liked-count-favs + " · " + Language.liked-count-tail;
+                    color: rgba(255,255,255,0.85); font-size: 12.5px;
+                }
+            }
+        }
+        Rectangle {
+            width: 130px; height: 130px; border-radius: 65px;
+            x: parent.width - 40px; y: -40px;
+            background: rgba(255, 255, 255, 0.12);
+        }
+    }
+
+    // ---- 5 分类 Tab（固定，不滚动） ----
+    TabBar {
+        active: root.tab;
+        labels: [Language.suggest-kind-song, Language.nav-playlists, Language.nav-albums, Language.nav-mv, Language.nav-radio];
+        changed(idx) => { root.tab = idx; }
+    }
+
+    // ---- 滚动内容区 ----
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+        sv := ScrollView {
+            width: 100%; height: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+            VerticalLayout {
+                spacing: 0;
+                padding-bottom: 20px;
+
+                // 各 tab 内容直接放入 ScrollView 内容布局（不套无显式高度的 wrapper Rectangle），
+                // 否则 wrapper 的 preferred-height 无法被 ScrollView 协商 → 不可滚动。
+                // 与 search.slint 中 SongList 直接置于 ScrollView 内的模式一致。
+                // 资源类列表用 VerticalLayout 包装并显式高度（行数 × 行高 58px）。
+
+                // 歌曲 tab
+                if (root.tab == 0 && root.songs.length > 0) : SongList {
+                    songs: root.songs;
+                    current-id: root.current-id;
+                    song-clicked(id) => { root.play-song(id); }
+                }
+                if (root.tab == 0 && root.songs.length == 0) : PlaceholderPage {
+                    icon: "♥";
+                    title: Language.liked-empty-song-title;
+                    desc: Language.liked-empty-song-desc;
+                }
+
+                // 歌单 tab
+                if (root.tab == 1 && root.playlists.length > 0) : VerticalLayout {
+                    height: root.playlists.length * 58px;
+                    spacing: 0;
+                    for r in root.playlists : LikedResRow {
+                        res: r;
+                        cover-img: r.cover-img;
+                        open(k, id) => { root.open-resource(k, id); }
+                        unlike(k, id) => { root.unlike-resource(k, id); }
+                    }
+                }
+                if (root.tab == 1 && root.playlists.length == 0) : PlaceholderPage {
+                    icon: "≡";
+                    title: Language.liked-empty-playlist-title;
+                    desc: Language.liked-empty-playlist-desc;
+                }
+
+                // 专辑 tab
+                if (root.tab == 2 && root.albums.length > 0) : VerticalLayout {
+                    height: root.albums.length * 58px;
+                    spacing: 0;
+                    for r in root.albums : LikedResRow {
+                        res: r;
+                        cover-img: r.cover-img;
+                        open(k, id) => { root.open-resource(k, id); }
+                        unlike(k, id) => { root.unlike-resource(k, id); }
+                    }
+                }
+                if (root.tab == 2 && root.albums.length == 0) : PlaceholderPage {
+                    icon: "◉";
+                    title: Language.liked-empty-album-title;
+                    desc: Language.liked-empty-album-desc;
+                }
+
+                // MV tab
+                if (root.tab == 3 && root.mvs.length > 0) : VerticalLayout {
+                    height: root.mvs.length * 58px;
+                    spacing: 0;
+                    for r in root.mvs : LikedResRow {
+                        res: r;
+                        cover-img: r.cover-img;
+                        open(k, id) => { root.open-resource(k, id); }
+                        unlike(k, id) => { root.unlike-resource(k, id); }
+                    }
+                }
+                if (root.tab == 3 && root.mvs.length == 0) : PlaceholderPage {
+                    icon: "▶";
+                    title: Language.liked-empty-mv-title;
+                    desc: Language.liked-empty-mv-desc;
+                }
+
+                // 电台 tab
+                if (root.tab == 4 && root.radios.length > 0) : VerticalLayout {
+                    height: root.radios.length * 58px;
+                    spacing: 0;
+                    for r in root.radios : LikedResRow {
+                        res: r;
+                        cover-img: r.cover-img;
+                        open(k, id) => { root.open-resource(k, id); }
+                        unlike(k, id) => { root.unlike-resource(k, id); }
+                    }
+                }
+                if (root.tab == 4 && root.radios.length == 0) : PlaceholderPage {
+                    icon: "◍";
+                    title: Language.liked-empty-radio-title;
+                    desc: Language.liked-empty-radio-desc;
+                }
+            }
+        }
+    }
+    }
+}

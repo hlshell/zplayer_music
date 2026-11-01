@@ -1,0 +1,72 @@
+// ============================================================================
+//  pages/settings/app_tab.slint — 应用设置
+//  主题色 / 歌词布局 / 关闭行为（弹窗选择） / 快捷键配置
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { SettingRow } from "setting-row.slint";
+import { SettingSelectRow } from "setting-select-row.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component AppTab inherits VerticalLayout {
+    in-out property <int> theme-color-index;
+    in-out property <bool> lyrics-style;
+    in-out property <int> close-behavior-index;
+    // 平台标识：web（wasm）下隐藏桌面专属行（关闭行为/快捷键）
+    in property <bool> is-web: false;
+    callback open-select(int, string, [string], int);
+    callback clicked(int);
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-app; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            tc := SettingSelectRow {
+                label: Language.app-theme-color;
+                desc: Language.app-theme-color-desc;
+                icon: @image-url("../../assets/icons/shirt.svg");
+                options: [Language.app-c-purple, Language.app-c-teal, Language.app-c-orange, Language.app-c-blue];
+                current-index <=> root.theme-color-index;
+                open-requested() => {
+                    root.open-select(7, Language.app-theme-color, [Language.app-c-purple, Language.app-c-teal, Language.app-c-orange, Language.app-c-blue], root.theme-color-index);
+                }
+            }
+            ly := SettingSelectRow {
+                label: Language.app-lyrics-layout;
+                desc: Language.app-lyrics-desc;
+                icon: @image-url("../../assets/icons/layout-rows-gray.svg");
+                options: [Language.app-lyrics-cover, Language.app-lyrics-side];
+                current-index: root.lyrics-style ? 0 : 1;
+                open-requested() => {
+                    root.open-select(14, Language.app-lyrics-layout, [Language.app-lyrics-cover, Language.app-lyrics-side], root.lyrics-style ? 0 : 1);
+                }
+            }
+            cb := SettingSelectRow {
+                visible: !root.is-web;
+                label: Language.app-close-behavior;
+                desc: Language.app-close-desc;
+                icon: @image-url("../../assets/icons/win-close-gray.svg");
+                options: [Language.app-close-ask, Language.app-close-tray, Language.app-close-exit];
+                current-index <=> root.close-behavior-index;
+                open-requested() => {
+                    root.open-select(8, Language.app-close-behavior, [Language.app-close-ask, Language.app-close-tray, Language.app-close-exit], root.close-behavior-index);
+                }
+            }
+            SettingRow {
+                visible: !root.is-web;
+                label: Language.app-shortcut;
+                desc: Language.app-shortcut-desc;
+                value: Language.app-shortcut-custom;
+                icon: @image-url("../../assets/icons/keyboard.svg");
+                clicked => { root.clicked(42); }
+            }
+        }
+    }
+}

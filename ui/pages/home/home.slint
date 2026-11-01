@@ -1,0 +1,241 @@
+﻿// ============================================================================
+//  pages/home.slint — 首页
+//  区块：Hero + 精选歌单 / 本周最热音乐 / 热门歌单推荐 / 歌手 / 专辑 / 新歌速递
+// ============================================================================
+import { PlaylistCard, SectionHeader, HeroCard } from "../../components/cards.slint";
+import { MediaCard, ArtistAvatar, NewSongRow } from "../../components/media.slint";
+import { HotSong, Playlist, Artist, Album, NewSong, HeroSong } from "../../components/models.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component HomePage inherits VerticalLayout {
+    in property <bool> playing: false;
+    in property <[HotSong]> hot-songs;
+    in property <[Playlist]> recommend-playlists;
+    in property <[Artist]> artists;
+    in property <[Album]> albums;
+    in property <[NewSong]> new-songs;
+    in property <[HeroSong]> hero-songs;
+    // Hero 卡"每日推荐 N 首"数量
+    in property <int> hero-count: 0;
+    // Hero 卡歌单封面背景（Rust 侧填充）
+    in property <image> hero-cover;
+    callback navigate(int);
+    callback play-song(int);
+    // Hero"播放全部"：把 hero 歌曲列表加入播放列表并播放第一首（与播放器播放/暂停态无关）
+    callback hero-play-all();
+    // 点击 Hero 区域（非播放按钮）：打开每日精选统一详情页
+    callback open-detail();
+    // 点击歌单/专辑/歌手卡片：打开对应资源统一详情页（kind: 0=歌单 1=专辑 2=歌手）
+    callback open-resource(int, int);
+    // 点击歌手卡：切到搜索页并搜索该歌手名
+    callback artist-clicked(string);
+
+    spacing: 18px;
+    padding-top: 8px;
+    padding-bottom: 20px;
+    padding-left: 26px;
+    padding-right: 26px;
+
+    // 内容区宽度：由 AppWindow 顶层传入（窗口宽 - 侧边栏）。
+    // 勿用 root.width —— HomePage 在 ScrollView 内，布局宽度参与 content-width 协商，
+    // 依赖它计算卡片宽会形成绑定循环（flickable.content-width ⇄ grid-card-w）
+    in property <length> page-w: 900px;
+    // 横向卡片网格列数：随内容区宽度自适应 3~6 列
+    // （可用宽 = 内容区宽 - 左右 padding 52px；每列约 172px 起放得下，取整后钳制到 3~6）
+    property <int> grid-columns: Math.max(3, Math.min(6, Math.floor((page-w - 52px) / 172px)));
+    // 单卡宽度：按列数精确均分（含列间距扣除），显式绑定绕开卡片内文字
+    // preferred 宽度对布局的干扰（否则同行卡片被文字自然宽度顶得不均）
+    property <length> grid-card-w: (page-w - 52px - 16px * (grid-columns - 1)) / grid-columns;
+    // 各区块最多显示条数：行上限 × 当前列数（随窗口 3~6 列动态）；
+    // 数据不足上限时显示全部真实数据、末尾保留孤卡（不补占位、不截断）
+    property <int> hot-show: Math.min(root.hot-songs.length, 2 * grid-columns);
+    property <int> pl-show: Math.min(root.recommend-playlists.length, 3 * grid-columns);
+    property <int> al-show: Math.min(root.albums.length, 3 * grid-columns);
+    property <int> ns-show: Math.min(root.new-songs.length, 5 * grid-columns);
+
+    // 顶部双栏：Hero + 精选歌单卡
+    HorizontalLayout { height: 240px; spacing: 16px;
+        HeroCard { horizontal-stretch: 3; songs: root.hero-songs;
+            count: root.hero-count;
+            bg-cover: root.hero-cover;
+            song-clicked(id) => { root.play-song(id); }
+            play-all() => { root.hero-play-all(); }
+            open-detail() => { root.open-detail(); }
+        }
+        Rectangle {
+            horizontal-stretch: 2; height: 100%;
+            border-radius: 14px;
+            background: Theme.palette.surface;
+            border-width: 1px; border-color: Theme.palette.divider;
+            VerticalLayout {
+                padding: 18px; spacing: 8px;
+                VerticalLayout { spacing: 6px;
+                    Text { text: Language.home-curated; color: Theme.palette.text; font-size: 17px; font-weight: 700; }
+                    Text { text: Language.home-curated-desc; color: Theme.palette.text-secondary; font-size: 13px; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout { alignment: space-between;
+                    Text { text: Language.home-curated-update; color: Theme.palette.text-faint; font-size: 12px; }
+                    Image { source: @image-url("../../assets/icons/arrow-more-faint.svg"); width: 18px; height: 18px; colorize: Theme.palette.text-faint; }
+                }
+            }
+            TouchArea { clicked => { root.navigate(2); } mouse-cursor: pointer; }
+        }
+    }
+
+    // 本周最热音乐：流式网格（3~6 列随宽度自适应，最多 2 行，数据不足保留孤卡）
+    SectionHeader { title: Language.home-trending; show-more: true; more-clicked => { root.navigate(6); } }
+    Rectangle {
+        height: Math.max(0px, Math.ceil(root.hot-show * 1.0 / grid-columns) * 192px - 16px);
+        for s[i] in root.hot-songs: MediaCard {
+            visible: i < root.hot-show;
+            x: Math.mod(i, grid-columns) * (grid-card-w + 16px);
+            // 注意：Slint 的 / 是浮点除法，行号必须 Math.floor 取整，否则每张卡片阶梯下移
+            y: Math.floor(i / grid-columns) * 192px;
+            width: grid-card-w;
+            height: 176px;
+            badge: s.rank; title: s.name; sub: s.artist;
+            from: s.from; to: s.to;
+            cover: s.cover;
+            clicked => { root.play-song(s.id); }
+        }
+    }
+
+    // 热门歌单推荐：流式网格（单模型，自动换行，最多 3 行，数据不足保留孤卡）
+    SectionHeader {
+        title: Language.home-hot-playlists; show-more: true;
+        more-clicked => { root.navigate(2); }
+    }
+    Rectangle {
+        height: Math.max(0px, Math.ceil(root.pl-show * 1.0 / grid-columns) * 192px - 16px);
+        for p[i] in root.recommend-playlists: PlaylistCard {
+            visible: i < root.pl-show;
+            x: Math.mod(i, grid-columns) * (grid-card-w + 16px);
+            y: Math.floor(i / grid-columns) * 192px;
+            width: grid-card-w;
+            height: 176px;
+            title: p.name; plays: p.plays;
+            from: p.from; to: p.to;
+            cover: p.cover;
+            clicked => { root.open-resource(0, p.id); }
+        }
+    }
+
+    // 歌手：横向滑动（hover 后鼠标滚轮横滑 / 左键拖拽 / 点击进搜索），左右留白收紧避免内容偏右
+    SectionHeader { title: Language.home-artists; }
+    Rectangle {
+        height: 150px;
+        clip: true;
+        sv := ScrollView {
+            width: 100%; height: 100%;
+            horizontal-scrollbar-policy: always-off;
+            vertical-scrollbar-policy: always-off;
+            HorizontalLayout {
+                spacing: 24px;
+                padding-left: 10px; padding-right: 10px;
+                for a in root.artists: ArtistAvatar {
+                    name: a.name; initial: a.initial;
+                    from: a.from; to: a.to;
+                    cover: a.cover;
+                }
+            }
+        }
+        // 交互层：左键拖拽横向滚动 + 滚轮(横/纵)横向滑动 + 点击歌手进搜索
+        // 统一在此处理，避免拖拽与各卡点击互相抢占
+        ta := TouchArea {
+            width: 100%; height: 100%;
+            mouse-cursor: pointer;
+            property <bool> is-down: false;
+            property <bool> dragged: false;
+            property <length> press-x: 0px;
+            property <length> start-scroll: 0px;
+            // content-x 为负值域：左端=0，向右滚动为负
+            property <length> max-scroll-x: max(0px, sv.content-width - sv.visible-width);
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    self.is-down = true; self.dragged = false;
+                    self.press-x = self.pressed-x;
+                    self.start-scroll = sv.content-x;
+                } else if (e.kind == PointerEventKind.move) {
+                    if (self.is-down) {
+                        if (Math.abs((self.mouse-x - self.press-x) / 1px) > 6) { self.dragged = true; }
+                        if (self.dragged) {
+                            sv.content-x = max(min(0px, self.start-scroll - (self.mouse-x - self.press-x)),
+                                               0px - self.max-scroll-x);
+                        }
+                    }
+                } else if (e.kind == PointerEventKind.up) {
+                    if (!self.dragged) {
+                        // 视为点击：按横向位置换算歌手索引 → 进搜索该歌手名（实际位置 = 鼠标 x - content-x）
+                        let idx = Math.floor((self.mouse-x - sv.content-x - 10px) / 108px);
+                        if (idx >= 0 && idx < root.artists.length) {
+                            root.artist-clicked(root.artists[idx].name);
+                        }
+                    }
+                    self.is-down = false; self.dragged = false;
+                }
+                EventResult.accept
+            }
+            scroll-event(e) => {
+                if (e.delta-x != 0 || e.delta-y != 0) {
+                    // hover 该区域时滚轮（横 / 纵）都换算为横向滑动
+                    let d = e.delta-x != 0 ? e.delta-x : e.delta-y;
+                    sv.content-x = max(min(0px, sv.content-x - d), 0px - self.max-scroll-x);
+                    EventResult.accept
+                } else { EventResult.reject }
+            }
+        }
+    }
+
+    // 专辑：流式网格（最多 3 行，数据不足保留孤卡）
+    SectionHeader { title: Language.nav-albums; show-more: true; more-clicked => { root.navigate(3); } }
+    Rectangle {
+        height: Math.max(0px, Math.ceil(root.al-show * 1.0 / grid-columns) * 192px - 16px);
+        for al[i] in root.albums: MediaCard {
+            visible: i < root.al-show;
+            x: Math.mod(i, grid-columns) * (grid-card-w + 16px);
+            y: Math.floor(i / grid-columns) * 192px;
+            width: grid-card-w;
+            height: 176px;
+            badge: al.year; title: al.name; sub: al.artist;
+            from: al.from; to: al.to;
+            cover: al.cover;
+            clicked => { root.open-resource(1, al.id); }
+        }
+    }
+
+    // 新歌速递（双列歌曲行）
+    HorizontalLayout {
+        height: 34px;
+        alignment: space-between;
+        cross-axis-alignment: center;
+        HorizontalLayout { spacing: 8px; cross-axis-alignment: center;
+            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: #22c55e; }
+            Text { text: Language.home-new-releases; font-size: 15px; font-weight: 700; color: Theme.palette.text; }
+        }
+        Rectangle {
+            height: 24px; border-radius: 12px;
+            background: playall-ta.has-hover ? #16a34a : #22c55e;
+            HorizontalLayout { spacing: 4px; padding-left: 10px; padding-right: 10px;
+                Image { source: @image-url("../../assets/icons/play-white.svg"); width: 12px; height: 12px; vertical-alignment: center; colorize: Theme.palette.icon-white; }
+                Text { text: Language.detail-play-all; color: Theme.palette.icon-white; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+            }
+            playall-ta := TouchArea { clicked => { } mouse-cursor: pointer; }
+        }
+    }
+    // 新歌速递：3~6 列网格（维持 NewSongRow 行卡风格，单一数据模型），最多 5 行，数据不足保留孤卡
+    Rectangle {
+        height: Math.max(0px, Math.ceil(root.ns-show * 1.0 / grid-columns) * 82px - 10px);
+        for n[i] in root.new-songs: NewSongRow {
+            visible: i < root.ns-show;
+            x: Math.mod(i, grid-columns) * (grid-card-w + 16px);
+            y: Math.floor(i / grid-columns) * 82px;
+            width: grid-card-w;
+            height: 72px;
+            name: n.name; artist: n.artist; cover: n.cover;
+            clicked => { root.play-song(n.id); }
+        }
+    }
+}

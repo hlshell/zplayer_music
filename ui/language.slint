@@ -1,0 +1,290 @@
+// ============================================================================
+//  language.slint — 全局语言文案（i18n）
+//  类似 Theme global：任何组件直接读 Language.xxx，无需逐层传参。
+//  Rust 侧启动/切语言时从内置(ui/assets/lang/XX.json)或用户扩展(二进制/lang/XX.json)
+//  加载对应短码，把键值逐项写入本 global 属性。
+//  key 命名：模块前缀 + 连字符（如 nav-home / play-quality / sys-cache-limit）。
+// ============================================================================
+
+export global Language {
+    // ---- 通用 ----
+    in-out property <string> common-ok: "确认";
+    in-out property <string> common-close: "关闭";
+    in-out property <string> common-cancel: "取消";
+    in-out property <string> common-check-update: "检查更新";
+    in-out property <string> common-current-version: "当前版本";
+    in-out property <string> common-author-info: "作者信息";
+
+    // ---- 侧边栏导航 ----
+    in-out property <string> nav-home: "首页";
+    in-out property <string> nav-search: "搜索";
+    in-out property <string> nav-playlists: "歌单";
+    in-out property <string> nav-albums: "专辑";
+    in-out property <string> nav-mv: "MV";
+    in-out property <string> nav-radio: "电台";
+    in-out property <string> nav-toplist: "排行榜";
+    in-out property <string> nav-liked: "我的最爱";
+    in-out property <string> nav-recent: "最近播放";
+    in-out property <string> nav-local: "本地资源";
+    in-out property <string> nav-settings: "设置";
+    in-out property <string> nav-not-logged: "未登录";
+    in-out property <string> nav-login-hint: "登录后同步歌单";
+
+    // ---- 设置页 Tab ----
+    in-out property <string> tab-basic: "基础设置";
+    in-out property <string> tab-play: "播放设置";
+    in-out property <string> tab-app: "应用设置";
+    in-out property <string> tab-network: "网络设置";
+    in-out property <string> tab-system: "系统管理";
+    in-out property <string> tab-about: "关于";
+    in-out property <string> tab-donate: "捐赠支持";
+
+    // ---- 基础设置 ----
+    in-out property <string> base-theme-mode: "主题模式";
+    in-out property <string> base-theme-mode-desc: "切换浅色与深色界面主题";
+    in-out property <string> base-light: "浅色";
+    in-out property <string> base-dark: "深色";
+    in-out property <string> base-auto-launch: "开机自启";
+    in-out property <string> base-auto-launch-desc: "开机后自动启动 ZPlayer";
+    in-out property <string> base-language: "语言设置";
+    in-out property <string> base-language-desc: "选择界面显示语言";
+    in-out property <string> base-font: "字体设置";
+    in-out property <string> base-font-desc: "设置界面字体";
+    in-out property <string> base-font-default: "默认";
+    in-out property <string> base-font-yahei: "微软雅黑";
+    in-out property <string> base-font-sourcehan: "思源黑体";
+
+    // ---- 播放设置 ----
+    in-out property <string> play-quality: "音质设置";
+    in-out property <string> play-quality-desc: "选择在线播放的音质等级";
+    in-out property <string> play-q-standard: "标准 128Kbps";
+    in-out property <string> play-q-high: "高音质 320Kbps";
+    in-out property <string> play-q-lossless: "无损";
+    in-out property <string> play-source: "音源";
+    in-out property <string> play-source-desc: "查看当前可用的音乐音源";
+    in-out property <string> play-view: "查看";
+    in-out property <string> play-auto-play: "自动播放";
+    in-out property <string> play-auto-play-desc: "播放列表切换后自动开始播放";
+    in-out property <string> play-output-device: "音频输出设备";
+    in-out property <string> play-output-desc: "选择音频输出设备";
+    in-out property <string> play-script-title: "音源脚本";
+    in-out property <string> play-import-script: "导入音源脚本";
+    in-out property <string> play-import-desc: "导入洛雪 .js 音源脚本（支持多音源聚合，可自定义）";
+    in-out property <string> play-select-file: "选择文件";
+    in-out property <string> play-check-update-script: "检查更新音源";
+    in-out property <string> play-check-update-desc: "从内置维护清单拉取最新音源脚本";
+    in-out property <string> play-auto-update-script: "自动更新音源";
+    in-out property <string> play-auto-update-desc: "启动时检查并更新社区音源脚本";
+    in-out property <string> play-lx-fallback: "洛雪兜底";
+    in-out property <string> play-lx-fallback-desc: "网易云直链失败后尝试音源脚本解析";
+    in-out property <string> play-no-scripts: "暂无音源脚本，点击上方导入";
+
+    // ---- 应用设置 ----
+    in-out property <string> app-theme-color: "主题色";
+    in-out property <string> app-theme-color-desc: "选择界面强调色";
+    in-out property <string> app-c-purple: "紫青渐变";
+    in-out property <string> app-c-teal: "青绿渐变";
+    in-out property <string> app-c-orange: "橙红渐变";
+    in-out property <string> app-c-blue: "蓝紫渐变";
+    in-out property <string> app-lyrics-layout: "歌词布局";
+    in-out property <string> app-lyrics-desc: "选择歌词与封面的排布方式";
+    in-out property <string> app-lyrics-cover: "上封面模式";
+    in-out property <string> app-lyrics-side: "左右模式";
+    in-out property <string> app-close-behavior: "关闭行为";
+    in-out property <string> app-close-desc: "关闭窗口时执行的操作";
+    in-out property <string> app-close-ask: "每次询问";
+    in-out property <string> app-close-tray: "最小化到托盘";
+    in-out property <string> app-close-exit: "直接退出";
+    // ---- 关闭确认卡片 ----
+    in-out property <string> close-title: "关闭应用";
+    in-out property <string> close-subtitle: "请选择关闭方式";
+    in-out property <string> close-remember: "记住我的选择";
+    in-out property <string> close-exit-app: "退出应用";
+    in-out property <string> app-shortcut: "快捷键配置";
+    in-out property <string> app-shortcut-desc: "自定义全局快捷键";
+    in-out property <string> app-shortcut-custom: "自定义";
+
+    // ---- 网络设置 ----
+    in-out property <string> net-threads: "下载线程数";
+    in-out property <string> net-threads-desc: "并发下载线程数，越大下载越快";
+    in-out property <string> net-buffer-note: "网络缓冲时长暂不适用：当前采用整曲下载后播放";
+    in-out property <string> net-proxy: "代理设置";
+    in-out property <string> net-proxy-desc: "通过代理服务器访问网络";
+    in-out property <string> net-configure: "配置";
+    in-out property <string> net-realip: "realip 设置";
+    in-out property <string> net-realip-desc: "开启后使用真实 IP 访问";
+    in-out property <string> net-realip-placeholder: "realip 地址";
+    in-out property <string> net-proxy-addr: "代理地址";
+    in-out property <string> net-proxy-port: "端口";
+    in-out property <string> net-proxy-host-ph: "例如 127.0.0.1";
+    in-out property <string> net-proxy-port-ph: "例如 7890";
+    in-out property <string> proxy-title: "代理配置";
+    in-out property <string> proxy-type: "代理类型";
+
+    // ---- 系统管理 ----
+    in-out property <string> sys-cache: "磁盘缓存";
+    in-out property <string> sys-cache-desc: "启用磁盘缓存以加速播放与加载";
+    in-out property <string> sys-cache-dir: "缓存目录";
+    in-out property <string> sys-cache-dir-desc: "自定义缓存根目录（歌曲/封面/歌词统一存放）";
+    in-out property <string> sys-cache-limit: "缓存上限";
+    in-out property <string> sys-cache-limit-desc: "缓存占用上限，0 表示不限制";
+    in-out property <string> sys-mb: "MB";
+    in-out property <string> sys-evict: "缓存清理策略";
+    in-out property <string> sys-evict-desc: "空间不足时按此策略优先清理";
+    in-out property <string> sys-evict-lru: "最近少用 (LRU)";
+    in-out property <string> sys-evict-fifo: "先进先出 (FIFO)";
+    in-out property <string> sys-status-title: "缓存状态";
+    in-out property <string> sys-manage-title: "缓存管理";
+    in-out property <string> sys-clear-music: "清理音乐";
+    in-out property <string> sys-clear-lyrics: "清理歌词";
+    in-out property <string> sys-clear-covers: "清理封面";
+    in-out property <string> sys-clear-all: "全部清理";
+    in-out property <string> sys-music-count: "音乐 ";
+    in-out property <string> sys-lyric-count: "歌词 ";
+    in-out property <string> sys-cover-count: "封面 ";
+    in-out property <string> sys-unit-song: " 首";
+    in-out property <string> sys-unit-cover: " 张";
+
+    // ---- 关于 ----
+    in-out property <string> about-author-value: "ZPlayer 团队";
+    in-out property <string> about-tagline: "ZPlayer Music — 用 Slint 构建的跨平台音乐播放器";
+
+    // ---- 捐赠 ----
+    in-out property <string> donate-intro: "ZPlayer Music 是免费、开源的音乐播放器。\n如果你喜欢它，可以捐赠以支持持续开发：";
+    in-out property <string> donate-purpose: "你的支持将用于：服务器维护、版权合规、功能开发与设计优化。";
+    in-out property <string> donate-button: "支持我们";
+
+    // ---- 音源查看弹窗 ----
+    in-out property <string> sources-title: "可用音源";
+    in-out property <string> sources-connected: "已接入";
+    in-out property <string> sources-pending: "未接入";
+    in-out property <string> sources-netease: "网易云音乐";
+    in-out property <string> sources-soundcloud: "SoundCloud";
+    in-out property <string> sources-qq: "QQ音乐";
+    in-out property <string> sources-kugou: "酷狗";
+    in-out property <string> sources-kuwo: "酷我";
+    in-out property <string> sources-migu: "咪咕";
+    in-out property <string> sources-youtube: "YouTube";
+
+    // ---- 详情 / 卡片 ----
+    in-out property <string> detail-play-all: "播放全部";
+    in-out property <string> detail-favorite: "收藏";
+    in-out property <string> cards-more: "更多";
+    in-out property <string> cards-daily-title: "每日为你精选";
+    in-out property <string> cards-count-songs: "首歌";
+
+    // ---- 通用组件 ----
+    in-out property <string> loading-tip: "加载中…";
+    in-out property <string> lyrics-cover-mode: "封面模式";
+    in-out property <string> lyrics-split-mode: "分栏模式";
+    in-out property <string> lyrics-immersive-mode: "沉浸模式";
+    in-out property <string> mini-not-playing: "未播放";
+    in-out property <string> playlist-title: "播放列表";
+    in-out property <string> songlist-col-title: "标题";
+    in-out property <string> songlist-col-duration: "时长";
+    in-out property <string> suggest-kind-song: "单曲";
+    in-out property <string> suggest-kind-artist: "歌手";
+    in-out property <string> suggest-kind-album: "专辑";
+    in-out property <string> suggest-kind-playlist: "歌单";
+    in-out property <string> suggest-kind-lyric: "歌词";
+    in-out property <string> suggest-kind-radio: "电台";
+    in-out property <string> suggest-kind-mixed: "联想";
+    in-out property <string> titlebar-search-placeholder: "搜索音乐、歌手、专辑";
+    in-out property <string> titlebar-search: "搜索";
+
+    // ---- 详情页 ----
+    in-out property <string> detail-search-song: "搜索歌曲";
+    in-out property <string> detail-song-unit: " 首";
+
+    // ---- 首页 ----
+    in-out property <string> home-curated: "精选歌单";
+    in-out property <string> home-curated-desc: "发现最新发行的好歌";
+    in-out property <string> home-curated-update: "每日更新 · 海量精选";
+    in-out property <string> home-trending: "本周最热音乐";
+    in-out property <string> home-hot-playlists: "热门歌单推荐";
+    in-out property <string> home-artists: "歌手";
+    in-out property <string> home-new-releases: "新歌速递";
+
+    // ---- 搜索页 ----
+    in-out property <string> search-hot: "热门搜索";
+    in-out property <string> search-hot-list: "热搜列表";
+    in-out property <string> search-hot-list-desc: "探索当下最热门的搜索趋势";
+    in-out property <string> search-history: "搜索历史";
+    in-out property <string> search-history-clear: "清空";
+    in-out property <string> search-back: "返回";
+    in-out property <string> search-result-prefix: "搜索结果（";
+    in-out property <string> search-result-suffix: " 首）";
+    in-out property <string> search-empty-title: "搜索音乐";
+    in-out property <string> search-empty-desc: "在顶部搜索框输入关键词，搜索网易云曲库";
+
+    // ---- 网格页（专辑/歌单/MV/电台）----
+    in-out property <string> page-all-albums: "全部专辑";
+    in-out property <string> page-all-playlists: "每日推荐";
+    in-out property <string> page-all-mv: "全部MV";
+    in-out property <string> page-all-radio: "推荐电台";
+    in-out property <string> page-sub-albums: "最新专辑 · 每日更新";
+    in-out property <string> page-sub-playlists: "发现更多好听的歌单";
+    in-out property <string> page-sub-mv: "高清音乐视频精选";
+    in-out property <string> page-sub-radio: "精彩电台，随时倾听";
+    in-out property <string> page-notready-title: "数据 Web 端待补充";
+    in-out property <string> page-notready-desc: "当前音源暂不支持此接口，数据接入后开放";
+    in-out property <string> page-no-more: "—— 没有更多了 ——";
+
+    // ---- 本地资源 ----
+    in-out property <string> local-stat-song: "歌曲";
+    in-out property <string> local-stat-video: "视频";
+    in-out property <string> local-stat-album: "专辑";
+    in-out property <string> local-stat-artist: "艺术家";
+    in-out property <string> local-stat-total: "总时长";
+    in-out property <string> local-empty-title-web: "Web 端暂不支持本地资源";
+    in-out property <string> local-empty-desc-web: "网页版无法读取本地文件，请在桌面端使用";
+    in-out property <string> local-empty-title: "本地资源为空";
+    in-out property <string> local-empty-desc: "将本地音频/视频文件放入 MusicPlayer 目录后自动扫描";
+    in-out property <string> local-empty-video-title: "暂无本地视频";
+    in-out property <string> local-empty-video-desc: "将视频文件放入 MusicPlayer 目录后自动扫描";
+    in-out property <string> local-search-placeholder: "搜索本地歌曲或视频...";
+    in-out property <string> local-tab-song: "歌曲";
+    in-out property <string> local-tab-video: "视频";
+
+    // ---- 我的最爱 ----
+    in-out property <string> liked-count-songs: " 首歌曲";
+    in-out property <string> liked-count-favs: " 个收藏";
+    in-out property <string> liked-count-tail: "心动的旋律都在这里";
+    in-out property <string> liked-kind-other: "资源";
+    in-out property <string> liked-empty-song-title: "还没有喜欢的歌曲";
+    in-out property <string> liked-empty-song-desc: "点击播放器的爱心按钮收藏喜欢的音乐";
+    in-out property <string> liked-empty-playlist-title: "还没有收藏歌单";
+    in-out property <string> liked-empty-playlist-desc: "在歌单详情页点爱心收藏";
+    in-out property <string> liked-empty-album-title: "还没有收藏专辑";
+    in-out property <string> liked-empty-album-desc: "在专辑详情页点爱心收藏";
+    in-out property <string> liked-empty-mv-title: "还没有收藏 MV";
+    in-out property <string> liked-empty-mv-desc: "在 MV 详情页点爱心收藏";
+    in-out property <string> liked-empty-radio-title: "还没有收藏电台";
+    in-out property <string> liked-empty-radio-desc: "在电台详情页点爱心收藏";
+
+    // ---- 最近播放 ----
+    in-out property <string> recent-count-prefix: "最近听过的 ";
+    in-out property <string> recent-count-unit: " 首歌";
+    in-out property <string> recent-clear: "清空记录";
+    in-out property <string> recent-empty-title: "暂无播放记录";
+    in-out property <string> recent-empty-desc: "播放过的歌曲会出现在这里";
+    in-out property <string> recent-empty-mv-title: "暂无 MV 播放记录";
+    in-out property <string> recent-empty-mv-desc: "播放过的 MV 会出现在这里";
+
+    // ---- 排行榜 ----
+    in-out property <string> toplist-official: "官方榜";
+    in-out property <string> toplist-global: "全球榜";
+    in-out property <string> toplist-update-live: "实时更新";
+    in-out property <string> toplist-update-daily: "每日更新";
+    in-out property <string> toplist-update-weekly: "每周更新";
+    in-out property <string> toplist-name-1: "飙升榜";
+    in-out property <string> toplist-name-2: "热歌榜";
+    in-out property <string> toplist-name-3: "新歌榜";
+    in-out property <string> toplist-name-4: "原创榜";
+    in-out property <string> toplist-name-5: "云音乐特色榜";
+    in-out property <string> toplist-name-6: "欧美金曲榜";
+
+    // ---- 占位页 ----
+    in-out property <string> placeholder-title: "页面占位";
+    in-out property <string> placeholder-desc: "数据未接入，敬请期待";
+}

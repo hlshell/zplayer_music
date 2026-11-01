@@ -1,0 +1,139 @@
+// ============================================================================
+//  共享数据模型：首页区块与播放条的真实数据（由 Rust 侧填充）
+//  封面：cover 为 image 类型（Rust 侧从网络封面 URL 解码后填充；
+//        空 image 时 UI 回退到 from/to 渐变）
+// ============================================================================
+
+// 本周最热音乐（卡片网格，带排名角标）
+export struct HotSong {
+    id: int,
+    rank: string,
+    name: string,
+    artist: string,
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// 热门歌单推荐 / 精选歌单（歌单卡）
+export struct Playlist {
+    id: int,
+    name: string,
+    plays: string,
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// 歌手（圆形头像）
+export struct Artist {
+    id: int,
+    name: string,
+    initial: string,
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// 专辑（卡片网格，年份角标）
+export struct Album {
+    id: int,
+    name: string,
+    artist: string,
+    year: string,
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// 电台（节目卡：订阅数角标 + 描述副标题）
+export struct Radio {
+    id: int,
+    name: string,
+    desc: string,
+    plays: string,   // 订阅数
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// MV（视频卡：时长角标 + 歌手副标题）
+export struct MvItem {
+    id: int,
+    name: string,
+    artist: string,
+    duration: string, // 时长角标
+    plays: string,    // 播放数
+    // 封面 URL：搜索结果进入 MV 播放器时用于构建队列封面
+    url: string,
+    cover: image,
+    from: color,
+    to: color,
+}
+
+// MV 播放队列条目（MV 播放器右侧抽屉数据源；Rust 侧由 MvQueue 同步）
+export struct MvQueueEntry {
+    id: int,
+    name: string,
+    artist: string,
+    duration: string, // "mm:ss"，未知为空串
+    playing: bool,    // 当前播放行高亮
+    cover: image,     // MV 封面（Rust 侧解码填充；空 image 时 UI 用 from/to 渐变回退）
+    from: color,      // 封面渐变回退起始色
+    to: color,        // 封面渐变回退结束色
+}
+
+// 新歌速递（横向歌曲行）
+export struct NewSong {
+    id: int,
+    name: string,
+    artist: string,
+    cover: image,
+}
+
+// Hero「每日为你精选」歌曲列表
+export struct HeroSong {
+    id: int,
+    rank: string,
+    name: string,
+    artist: string,
+}
+
+// 收藏的资源（歌单/专辑/MV/电台；kind 与详情页一致：0=歌单 1=专辑 3=电台 4=MV）
+export struct LikedRes {
+    kind: int,
+    id: int,
+    name: string,
+    sub: string,
+    cover: string,
+    ts: int,
+    // 封面图（Rust 填充时同步查磁盘缓存，无缓存为空图）
+    cover-img: image,
+}
+
+// 播放队列/当前曲目
+export struct Song {
+    id: int,
+    name: string,
+    artist: string,
+    album: string,
+    cover: image,
+    duration: string,
+    duration-sec: float,
+    // 封面来源 URL：供封面磁盘缓存命中/启动恢复使用
+    url: string,
+    // 是否已收藏：抽屉行内爱心显示源；点击切换时 Rust 侧 set_row_data 刷新对应行
+    liked: bool,
+}
+
+// 搜索建议（下拉联想项）
+export struct SuggestItem {
+    keyword: string,
+    kind: string,   // song / artist / album / playlist / mv / lyric / radio / keyword
+}
+
+// 热搜榜条目（搜索主页热搜列表；tag: "" / "爆" / "↑"，由 iconType 映射）
+export struct HotItem {
+    word: string,
+    tag: string,
+}

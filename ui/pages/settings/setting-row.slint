@@ -1,0 +1,45 @@
+// ============================================================================
+//  pages/settings/setting-row.slint — 普通设置行（图标 + 标签/描述 + 值 + 右箭头）
+//  B 方案：属设置页 Tab 体系，留在 settings 目录内，不进全局 components/
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+export component SettingRow inherits Rectangle {
+    in property <string> label;
+    in property <string> desc: "";
+    in property <string> value;
+    in property <image> icon;
+    callback clicked;
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 14px; padding-right: 14px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 18px; height: 18px;
+            vertical-alignment: center;
+            colorize: Theme.palette.icon;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.label; color: Theme.palette.text; font-size: 13.5px; overflow: elide; }
+            if (root.desc != "") : Text { text: root.desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+        }
+        Text { text: root.value; color: Theme.palette.text-faint; font-size: 12px; overflow: elide; }
+        Image {
+            source: @image-url("../../assets/icons/arrow-more-faint.svg");
+            width: 16px; height: 16px;
+            vertical-alignment: center;
+            colorize: Theme.palette.text-faint;
+        }
+    }
+
+    row-ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+}

@@ -1,0 +1,65 @@
+// ============================================================================
+//  toast.slint — 全局轻提示（Toast）——右下角显示，宽度随文字自适应
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+export component Toast inherits Rectangle {
+    in-out property <bool> show: false;
+    in property <string> text: "";
+    in property <string> kind: "info";      // success | info | error
+    in property <length> win-width: 0px;
+    in property <length> win-height: 0px;
+
+    // 按类型取主色（success/error 为语义色，info 走主题主色）
+    property <color> tint: root.kind == "success" ? #22c55e
+                         : root.kind == "error" ? #ef4444
+                         : Theme.palette.primary;
+
+    // 宽度自适应：随文字长短变化（下限 140px，上限 360px，超长省略号截断）
+    // 46px = 左内边距 16 + 圆点 8 + 间距 8 + 右内边距 14
+    width: min(360px, max(140px, txt.preferred-width + 46px));
+
+    // 右下角（右缘留 20px，底部在播放条上方 12px）
+    property <length> base-y: root.win-height - 76px - 12px - root.height;
+    x: root.win-width - root.width - 20px;
+    y: root.show ? root.base-y : root.base-y + 14px;
+    opacity: root.show ? 1.0 : 0.0;
+    animate opacity { duration: 220ms; easing: ease-out; }
+    animate y { duration: 220ms; easing: ease-out; }
+
+    // 圆角胶囊 + 阴影
+    height: 34px;
+    border-radius: 17px;
+    background: #1f2430;
+    drop-shadow-blur: 16px; drop-shadow-color: rgba(0, 0, 0, 0.28); drop-shadow-offset-y: 4px;
+
+    // 类型圆点
+    Rectangle {
+        x: 16px;
+        y: (parent.height - 8px) / 2;
+        width: 8px; height: 8px;
+        border-radius: 4px;
+        background: root.tint;
+    }
+
+    // 文本：容器宽度不足时省略号截断
+    txt := Text {
+        x: 32px;
+        y: 0;
+        height: 100%;
+        width: min(self.preferred-width, parent.width - 46px);
+        text: root.text;
+        color: Theme.palette.icon-white;
+        font-size: 12.5px;
+        font-weight: 500;
+        vertical-alignment: center;
+        wrap: no-wrap;
+        overflow: elide;
+    }
+
+    // 拦截点击，防止穿透
+    TouchArea {
+        x: 0; y: 0; width: 100%; height: 100%;
+        clicked => { }
+    }
+}

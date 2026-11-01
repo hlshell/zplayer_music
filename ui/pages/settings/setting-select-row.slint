@@ -1,0 +1,53 @@
+// ============================================================================
+//  pages/settings/setting-select-row.slint — 选择行（图标 + 标签/描述 + 当前值 + 箭头）
+//  点击触发 open-requested()，由 settings.slint 外壳渲染居中弹窗（按钮式选项）；
+//  选中后回写 current-index 并回调 selected(index)。active 指示本行是否为当前展开项。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+export component SettingSelectRow inherits Rectangle {
+    in property <string> label;
+    in property <string> desc: "";
+    in property <image> icon;
+    in property <[string]> options: [];
+    in-out property <int> current-index: 0;
+    callback selected(int);
+    in property <bool> active: false;
+    callback open-requested();
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover || root.active ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 14px; padding-right: 14px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 18px; height: 18px;
+            vertical-alignment: center;
+            colorize: Theme.palette.icon;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.label; color: Theme.palette.text; font-size: 13.5px; overflow: elide; }
+            if (root.desc != "") : Text { text: root.desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+        }
+        Text {
+            text: root.current-index >= 0 && root.current-index < root.options.length
+                ? root.options[root.current-index] : "";
+            color: Theme.palette.text-faint; font-size: 12px; overflow: elide;
+        }
+        Image {
+            source: @image-url("../../assets/icons/arrow-more-faint.svg");
+            width: 16px; height: 16px;
+            vertical-alignment: center;
+            colorize: Theme.palette.text-faint;
+        }
+    }
+
+    row-ta := TouchArea { clicked => { root.open-requested(); } mouse-cursor: pointer; }
+}

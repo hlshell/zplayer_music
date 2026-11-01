@@ -1,0 +1,225 @@
+// ============================================================================
+//  pages/local.slint — 本地资源页
+//  搜索框 + 分类 Tab（歌曲/视频）+ 统计卡片 + 滚动列表
+//  歌曲行：点击播放；视频行：点击用 MV 播放器播放（支持拖拽文件到播放器）
+// ============================================================================
+import { Song } from "../../components/models.slint";
+import { SongList } from "../../components/songlist.slint";
+import { PlaceholderPage } from "../placeholder/placeholder.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { ScrollView, LineEdit } from "std-widgets.slint";
+
+component StatCard inherits Rectangle {
+    in property <string> value;
+    in property <string> label;
+    in property <color> tint;
+
+    height: 84px;
+    border-radius: 12px;
+    background: Theme.palette.surface;
+    border-width: 1px; border-color: Theme.palette.divider;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 4px;
+        Text { text: root.value; color: root.tint; font-size: 20px; font-weight: 700; horizontal-alignment: center; }
+        Text { text: root.label; color: Theme.palette.text-faint; font-size: 11.5px; horizontal-alignment: center; }
+    }
+}
+
+// ---- 本地视频行（封面占位 + 名称 + 格式徽标） ----
+component LocalVideoRow inherits Rectangle {
+    in property <Song> video;
+    callback play(int);
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 10px; padding-right: 10px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 42px; height: 42px; border-radius: 7px;
+            background: Theme.palette.divider;
+            Image {
+                source: @image-url("../../assets/icons/mv-gray.svg");
+                width: 20px; height: 20px;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon-faint;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: video.name;
+                color: Theme.palette.text;
+                font-size: 13px; overflow: elide;
+            }
+            Text {
+                text: video.album == "" ? video.artist : video.album;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+        }
+        Rectangle {
+            height: 18px; border-radius: 9px;
+            background: Theme.palette.active;
+            width: t.preferred-width + 14px;
+            t := Text {
+                text: video.duration;
+                color: Theme.palette.primary; font-size: 10px; font-weight: 600;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+    }
+    row-ta := TouchArea { clicked => { root.play(video.id); } mouse-cursor: pointer; }
+}
+
+// ---- Tab 切换条（与 liked/recent 同款） ----
+component TabBar inherits HorizontalLayout {
+    in-out property <int> active: 0;
+    in property <[string]> labels;
+    callback changed(int);
+
+    spacing: 6px;
+    height: 30px;
+
+    for label[idx] in labels : Rectangle {
+        width: 56px;
+        border-radius: 15px;
+        background: root.active == idx ? Theme.palette.active : transparent;
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.active = idx; root.changed(idx); }
+        }
+        Text {
+            text: label;
+            color: root.active == idx ? Theme.palette.primary : Theme.palette.text-faint;
+            font-size: 12.5px;
+            font-weight: root.active == idx ? 600 : 400;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+export component LocalPage inherits Rectangle {
+    in property <[Song]> songs;
+    in property <[Song]> videos;
+    in-out property <int> tab: 0;
+    in-out property <string> search-text: "";
+    in property <int> current-id: 0;
+    in property <bool> is-web: false;
+    callback play-song(int);
+    callback play-video(int);
+    callback search-changed(string);
+    callback tab-changed(int);
+
+    VerticalLayout {
+        width: 100%; height: 100%;
+        spacing: 14px;
+        padding-top: 8px;
+        padding-bottom: 0;
+        padding-left: 26px;
+        padding-right: 26px;
+
+    // ---- 标题 ----
+    Rectangle {
+        height: 36px;
+        Text {
+            text: Language.nav-local;
+            color: Theme.palette.text;
+            font-size: 20px; font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+
+    // ---- 搜索框 ----
+    Rectangle {
+        height: 40px;
+        border-radius: 20px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        HorizontalLayout {
+            spacing: 10px;
+            padding-left: 14px; padding-right: 14px;
+            cross-axis-alignment: center;
+            Image {
+                source: @image-url("../../assets/icons/search-gray.svg");
+                width: 16px; height: 16px;
+                colorize: Theme.palette.icon-faint;
+            }
+            input := LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.search-text;
+                placeholder-text: Language.local-search-placeholder;
+                edited => { root.search-changed(input.text); }
+            }
+        }
+        // 搜索框失焦/回车都触发搜索（Slint LineEdit 的 edited 回调）
+        // 用 input 的 text changed 已经通过 <=> 同步到 root.search-text，
+        // Rust 侧通过 local-search-changed 监听。
+    }
+
+    // ---- 统计卡片 ----
+    HorizontalLayout { spacing: 16px;
+        StatCard { value: root.songs.length; label: Language.local-stat-song; tint: #6c5ce7; horizontal-stretch: 1; }
+        StatCard { value: root.videos.length; label: Language.local-stat-video; tint: #0ea5e9; horizontal-stretch: 1; }
+        StatCard { value: "—"; label: Language.local-stat-album; tint: #ec4899; horizontal-stretch: 1; }
+        StatCard { value: "00:00"; label: Language.local-stat-total; tint: #f59e0b; horizontal-stretch: 1; }
+    }
+
+    // ---- 分类 Tab ----
+    TabBar {
+        active: root.tab;
+        labels: [Language.local-tab-song, Language.local-tab-video];
+        changed(idx) => { root.tab = idx; root.tab-changed(idx); }
+    }
+    Text { text: "DEBUG tab=" + root.tab; color: red; font-size: 14px; }
+
+    // ---- 滚动内容区 ----
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+        sv := ScrollView {
+            width: 100%; height: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+            VerticalLayout {
+                spacing: 0;
+                padding-bottom: 20px;
+
+                // 歌曲 tab
+                if (root.tab == 0 && root.songs.length > 0) : SongList {
+                    songs: root.songs;
+                    current-id: root.current-id;
+                    song-clicked(id) => { root.play-song(id); }
+                }
+                if (root.tab == 0 && root.songs.length == 0) : PlaceholderPage {
+                    icon: "💿";
+                    title: root.is-web ? Language.local-empty-title-web : Language.local-empty-title;
+                    desc: root.is-web ? Language.local-empty-desc-web : Language.local-empty-desc;
+                }
+
+                // 视频 tab
+                if (root.tab == 1 && root.videos.length > 0) : VerticalLayout {
+                    height: root.videos.length * 58px;
+                    spacing: 0;
+                    for v in root.videos : LocalVideoRow {
+                        video: v;
+                        play(id) => { root.play-video(id); }
+                    }
+                }
+                if (root.tab == 1 && root.videos.length == 0) : PlaceholderPage {
+                    icon: "🎬";
+                    title: Language.local-empty-video-title;
+                    desc: Language.local-empty-video-desc;
+                }
+            }
+        }
+    }
+    }
+}

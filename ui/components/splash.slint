@@ -1,0 +1,214 @@
+// ============================================================================
+//  启动页 —— 内容用绝对定位水平/垂直居中，避免布局偏移
+//  main.rs 驱动：t / loader / fade-out；已接入主题（背景/文字/加载条）
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+export component SplashScreen inherits Rectangle {
+    width: 100%;
+    height: 100%;
+
+    in-out property <float> t: 0.0;
+    in-out property <float> loader: 0.0;
+    in property <bool> fade-out: false;
+    callback done();
+
+    background: Theme.palette.window-bg;
+
+    opacity: fade-out ? 0.0 : 1.0;
+    animate opacity {
+        duration: 850ms;
+        easing: ease-in;
+    }
+
+    // ========== 背景 ==========
+    Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        clip: true;
+
+        Rectangle {
+            width: parent.width * 1.4; height: parent.height * 1.4;
+            x: -parent.width * 0.2 + 14px * sin(360deg * root.t / 12.0);
+            y: -parent.height * 0.2 + 10px * cos(360deg * root.t / 12.0);
+            background: @radial-gradient(circle, rgba(99, 102, 241, 0.14) 0%, transparent 52%);
+        }
+        Rectangle {
+            width: parent.width * 1.25; height: parent.height * 1.25;
+            x: parent.width * 0.08 + 16px * sin(360deg * root.t / 10.0 + 90deg);
+            y: parent.height * 0.28 + 12px * cos(360deg * root.t / 11.0);
+            background: @radial-gradient(circle, rgba(139, 92, 246, 0.11) 0%, transparent 55%);
+        }
+        Rectangle {
+            width: parent.width; height: parent.height;
+            x: parent.width * 0.04 + 10px * sin(360deg * root.t / 14.0 + 180deg);
+            y: parent.height * 0.18 + 8px * cos(360deg * root.t / 13.0);
+            background: @radial-gradient(circle, rgba(236, 72, 153, 0.09) 0%, transparent 58%);
+        }
+
+        Rectangle {
+            width: 260px; height: 260px; border-radius: 130px;
+            background: #818cf8; opacity: 0.30;
+            x: 36px + 26px * sin(360deg * root.t / 9.0);
+            y: 48px - 22px * abs(sin(360deg * root.t / 9.0));
+        }
+        Rectangle {
+            width: 190px; height: 190px; border-radius: 95px;
+            background: #a78bfa; opacity: 0.26;
+            x: parent.width - 230px - 30px * sin(360deg * root.t / 11.0 + 60deg);
+            y: parent.height - 240px + 20px * cos(360deg * root.t / 11.0);
+        }
+        Rectangle {
+            width: 150px; height: 150px; border-radius: 75px;
+            background: #f472b6; opacity: 0.22;
+            x: parent.width * 0.64 + 18px * sin(360deg * root.t / 8.0 + 120deg);
+            y: parent.height * 0.52 - 24px * abs(sin(360deg * root.t / 8.0));
+        }
+    }
+
+    // ========== 内容：全部绝对定位，相对窗口中心 ==========
+    // 以窗口中心为原点，Logo 在中心偏上，文字/进度条依次往下
+
+    // ----- Logo + 光环（220×220，水平居中）-----
+    Rectangle {
+        width: 220px; height: 220px;
+        x: (root.width - 220px) / 2;
+        y: root.height / 2 - 200px;
+        opacity: root.t < 0.04 ? 0.0 : 1.0;
+
+        Rectangle {
+            width: 200px; height: 200px; border-radius: 100px;
+            x: 10px; y: 10px;
+            border-width: 1.5px;
+            border-color: rgba(124, 58, 237, 0.32);
+            transform-scale-x: 100% * (1.0 + 0.055 * sin(360deg * root.t / 3.2));
+            transform-scale-y: 100% * (1.0 + 0.055 * sin(360deg * root.t / 3.2));
+            opacity: 0.40 + 0.55 * abs(sin(360deg * root.t / 3.2));
+        }
+        Rectangle {
+            width: 162px; height: 162px; border-radius: 81px;
+            x: 29px; y: 29px;
+            border-width: 1.5px;
+            border-color: rgba(99, 102, 241, 0.34);
+            transform-scale-x: 100% * (1.0 + 0.055 * sin(360deg * (root.t / 3.2 + 0.42)));
+            transform-scale-y: 100% * (1.0 + 0.055 * sin(360deg * (root.t / 3.2 + 0.42)));
+            opacity: 0.40 + 0.55 * abs(sin(360deg * (root.t / 3.2 + 0.42)));
+        }
+        Rectangle {
+            width: 128px; height: 128px; border-radius: 64px;
+            x: 46px; y: 46px;
+            border-width: 1.5px;
+            border-color: rgba(219, 39, 119, 0.30);
+            transform-scale-x: 100% * (1.0 + 0.055 * sin(360deg * (root.t / 3.2 + 0.84)));
+            transform-scale-y: 100% * (1.0 + 0.055 * sin(360deg * (root.t / 3.2 + 0.84)));
+            opacity: 0.40 + 0.55 * abs(sin(360deg * (root.t / 3.2 + 0.84)));
+        }
+        Image {
+            source: @image-url("../assets/splash.png");
+            width: 90px; height: 90px;
+            x: 65px; y: 65px;
+            image-fit: contain;
+            transform-scale-x: 100% * (1.0 + 0.075 * abs(sin(360deg * root.t / 2.8)));
+            transform-scale-y: 100% * (1.0 + 0.075 * abs(sin(360deg * root.t / 2.8)));
+        }
+        Rectangle {
+            width: 80px; height: 80px; border-radius: 40px;
+            x: 70px; y: 70px;
+            background: rgba(109, 40, 217, 0.40);
+            opacity: 0.28 + 0.32 * abs(sin(360deg * root.t / 2.8));
+        }
+    }
+
+    // ----- 标题 ZPlayer（约 200px 宽，水平居中）-----
+    HorizontalLayout {
+        width: 200px;
+        height: 50px;
+        x: (root.width - 200px) / 2;
+        y: root.height / 2 + 30px;
+        spacing: 1px;
+        alignment: center;
+        opacity: root.t < 0.04 ? 0.0 : 1.0;
+
+        for ch in [
+            { t: "Z", d: 0.30 },
+            { t: "P", d: 0.38 },
+            { t: "l", d: 0.46 },
+            { t: "a", d: 0.54 },
+            { t: "y", d: 0.62 },
+            { t: "e", d: 0.70 },
+            { t: "r", d: 0.78 },
+        ]: Rectangle {
+            width: ch.t == "l" ? 16px : 26px;
+            height: 50px;
+            property <float> p: max(0.0, min(1.0, (root.t - ch.d) / 0.55));
+            Text {
+                text: ch.t;
+                color: Theme.palette.primary;
+                font-weight: 700;
+                font-size: 34px + 8px * p;
+                opacity: p;
+                horizontal-alignment: center;
+                x: (parent.width - self.width) / 2;
+                y: 14px * (1.0 - p);
+            }
+        }
+    }
+
+    // ----- 副标题 -----
+    HorizontalLayout {
+        width: 180px;
+        height: 24px;
+        x: (root.width - 180px) / 2;
+        y: root.height / 2 + 82px;
+        spacing: 2px;
+        alignment: center;
+        opacity: root.t < 0.04 ? 0.0 : 1.0;
+
+        for ch in [
+            { t: "F", d: 0.90 },
+            { t: "E", d: 0.96 },
+            { t: "E", d: 1.02 },
+            { t: "L", d: 1.08 },
+            { t: " ", d: 1.14 },
+            { t: "T", d: 1.20 },
+            { t: "H", d: 1.26 },
+            { t: "E", d: 1.32 },
+            { t: " ", d: 1.38 },
+            { t: "S", d: 1.44 },
+            { t: "O", d: 1.50 },
+            { t: "U", d: 1.56 },
+            { t: "N", d: 1.62 },
+            { t: "D", d: 1.68 },
+        ]: Rectangle {
+            width: ch.t == " " ? 7px : 11px;
+            height: 24px;
+            property <float> p: max(0.0, min(1.0, (root.t - ch.d) / 0.50));
+            Text {
+                text: ch.t;
+                color: Theme.palette.secondary;
+                font-size: 13px;
+                opacity: p;
+                horizontal-alignment: center;
+                x: (parent.width - self.width) / 2;
+                y: 8px * (1.0 - p);
+            }
+        }
+    }
+
+    // ----- 加载条 -----
+    Rectangle {
+        width: 140px;
+        height: 2px;
+        x: (root.width - 140px) / 2;
+        y: root.height / 2 + 118px;
+        border-radius: 2px;
+        background: Theme.palette.scroll-track;
+        opacity: root.t > 1.60 ? 1.0 : 0.0;
+
+        Rectangle {
+            width: parent.width * min(1.0, max(0.0, root.loader));
+            height: parent.height;
+            border-radius: 2px;
+            background: @linear-gradient(90deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+        }
+    }
+}

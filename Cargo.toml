@@ -1,0 +1,137 @@
+[package]
+name = "zplayer-music"
+version = "0.2.1"
+edition = "2024"
+description = "ZPlayer Music 播放器的 Slint demo（紫色主题，对齐现有前端；无边框自定义标题栏 + 启动动画 + 真实数据对接）"
+# 进程名显示说明：任务管理器名称列 = exe 文件名。cargo 的 bin 名会同时用作 crate 名
+# （禁止空格，"ZPlayer Music" 编译报 invalid character），因此 bin 保持默认 zplayer-music，
+# 由 build.ps1 在构建后把产物复制为 "ZPlayer Music.exe"（文件带 .exe，任务管理器即显示该名）。
+[package.metadata.winres]
+FileDescription = "ZPlayer Music"
+ProductName = "ZPlayer Music"
+[features]
+default = ["desktop"]
+desktop = ["dep:rodio", "dep:cpal", "dep:tinyfiledialogs", "dep:winapi", "dep:simplelog", "dep:rquickjs", "dep:unm_engine", "dep:unm_types", "dep:unm_engine_kuwo", "dep:unm_api_utils", "dep:unm_engine_migu", "dep:unm_engine_kugou", "dep:ffmpeg-next", "dep:thiserror"]
+web = []
+mobile = []
+
+[dependencies]
+# slint 恢复原始全局配置（desktop 稳定基线，skia 渲染器已有缓存；feature 传递改法会触发 skia-bindings
+# 重新下载 skia 预编译二进制，当前网络不通 → 回滚）。web 无反应并非 skia：slint 在 wasm32 端本就 cfg 排除
+# skia、用 femtovg 软件渲染，真问题是 web 渲染尺寸与中文字体，另行修复。
+slint = { version = "1.18.1", features = ["unstable-winit-030"] }
+raw-window-handle = "0.6"
+
+# ---- 后端（从 src-tauri 迁移的纯 Rust 核心）----
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP：reqwest / tokio 按 target 拆分（desktop/mobile 用 native + tokio；
+# web(wasm32) 用 web-sys fetch，无 tokio）——见下方两个 target 段。
+
+# 网易云 weapi 加密
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+num-bigint = { version = "0.4", features = ["rand"] }
+num-traits = "0.2"
+
+# 音频元数据（本地音乐标签解析）
+lofty = "0.21"
+
+# 图片解码（封面 URL → 像素缓冲 → slint::Image）
+image = "0.25"
+
+# 音频播放（真实出声；桌面能力集；仅非 wasm，见下方 target 段）
+# 音频输出设备枚举与切换（cpal 与 rodio 0.19 同源；桌面能力集；仅非 wasm，见下方 target 段）
+
+# 日志（无 logger 时是 no-op）
+log = "0.4"
+# 日志文件输出（大小轮转；桌面能力集）
+simplelog = { version = "0.12", optional = true }
+# 取本地日期做日结式日志日期分隔（复用已在依赖树中的 time）
+time = { version = "0.3", features = ["local-offset"] }
+# 配置/缓存目录（跨平台：Win/macOS/Linux；web 用 IndexedDB，不拉 dirs）见下方 target 段
+# TOML 配置读写
+toml = "0.8"
+# 原生文件夹选择对话框（设置页缓存目录选择；桌面能力集；仅非 wasm，见下方 target 段）
+
+# 内嵌 QuickJS + UNM：仅非 wasm（desktop/mobile）启用；web（wasm32）不拉这些依赖，由主源兜底。
+# wasm32 精确等于 web，移动是原生 arm 不归 wasm。
+# 原生 Windows API（自启动注册；桌面能力集）
+# shellapi: DragAcceptFiles/DragQueryFile/DragFinish（文件拖拽）
+# commctrl: SetWindowSubclass/DefSubclassProc/RemoveWindowSubclass（窗口子类化）
+# winuser: WM_DROPFILES 等消息常量
+winapi = { version = "0.3.9", features = ["winbase", "shellapi", "commctrl", "winuser", "windef"], optional = true }
+# 内嵌 QuickJS + UNM（desktop feature 专属；web 不解析，避免其 reqwest ^0.11
+# 触发 web-sys/ReadableStream 与 web 端 Cargo.lock 冲突）
+rquickjs = { version = "0.13", optional = true }
+unm_engine = { version = "0.4", optional = true }
+unm_types = { version = "0.4", optional = true }
+unm_engine_kuwo = { version = "0.4", optional = true }
+unm_api_utils = { version = "0.4", optional = true }
+unm_engine_migu = { version = "0.4", optional = true }
+unm_engine_kugou = { version = "0.4", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# 桌面/mobile 共享的网络与异步运行时（web 不拉）
+reqwest = { version = "0.12", features = ["json", "cookies", "rustls-tls", "socks", "blocking"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+# 配置/缓存目录（web 用 IndexedDB，不拉 dirs）
+dirs = "5"
+# 音频播放 + 输出设备（仅非 wasm）
+# rodio/cpal：无 bindgen/clang（miniaudio 依赖 ep-miniaudio-sys→bindgen→clang-sys，
+# 与 slint skia 渲染器的 clang-sys 在 links=clang 冲突，且本机无 clang，故弃 miniaudio）。
+# cpal 依赖 web-sys 仅在其 wasm 后端；desktop 编译不拉 web-sys。
+rodio = { version = "0.19", optional = true }
+cpal = { version = "0.15", optional = true }
+# MV 播放器（内嵌自 rs-wgpu-video-player/player-core，本地 cpal 0.15 版）
+# ffmpeg-next 默认动态链接，需系统有 ffmpeg 7.x+ DLL（avcodec/avformat/swscale/avutil 等）。
+# 打包时将 DLL 复制到 exe 同目录即可分发。
+ffmpeg-next = { version = "9.0", optional = true }
+thiserror = { version = "2", optional = true }
+# 原生文件夹/文件选择对话框（仅非 wasm；web 无此能力）
+# 用 tinyfiledialogs（C 绑定、无 web-sys/js-sys）——rfd 无条件依赖 web-sys，
+# 其 UserActivation feature 与 wasm 端 web-sys 在 Cargo.lock 层冲突，故弃用。
+tinyfiledialogs = { version = "3.9", optional = true }
+
+# ---- web(wasm32) 平台依赖：无 reqwest（用 web-sys fetch 直调 gdmusic，
+#      绕开 reqwest 的 web-sys/ReadableStream 冲突）；无 tokio；
+#      入口用 wasm-bindgen（阶段 1 web 入口）+ wasm-bindgen-futures（浏览器 executor）----
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+# wasm panic 消息打印到 console（无 hook 时 panic 只留 unreachable trap，无法定位）
+console_error_panic_hook = "0.1"
+# getrandom 在 wasm32-unknown-unknown 需 "js" 后端（rand 的传递依赖）
+getrandom = { version = "0.2", features = ["js"] }
+# 浏览器 API（audio/web.rs 播放、storage/web.rs 存储、console logger、gdmusic fetch）
+# 版本钉死 0.3.106：reqwest 0.11(unm_engine_kugou 传递) 需要 web-sys/ReadableStream，
+# 该 feature 在 0.3.106 存在；避免 Cargo 协商到无 ReadableStream 的版本而解析冲突。
+js-sys = "0.3"
+web-sys = { version = "=0.3.106", features = ["HtmlAudioElement","AudioContext","Blob","Url","Window","Document","Element","HtmlElement","HtmlInputElement","Event","Storage","console","Request","RequestInit","Response","ResponseInit","Headers"] }
+console_log = "1.0"
+
+# ---- 系统托盘 + WinRT Toast 通知（Windows 专属）----
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.26"
+tauri-winrt-notification = "0.8"
+
+[build-dependencies]
+slint-build = "1.18.1"
+# Windows 资源（app.ico 图标 + 版本信息）嵌入 exe 二进制
+winres = "0.1"
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# 开发构建（cargo run）保留基本优化：默认 opt-level=0 时 Slint 首帧布局/渲染与
+# image 封面解码慢 10 倍以上，窗口会白屏"未响应"二三十秒；1/2 级优化后启动可感知
+# 正常，同时仍保留调试符号与增量编译。
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,163 @@
+// ============================================================================
+//  media.slint — 通用媒体展示组件（已接入主题）
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+// ---- 方形封面卡片（热歌 / 专辑 / MV 共用：封面 + 角标 + 悬停播放）----
+export component MediaCard inherits Rectangle {
+    in property <string> title;
+    in property <string> sub;
+    in property <string> badge;
+    in property <image> cover;
+    in property <color> from;
+    in property <color> to;
+    callback clicked;
+
+    VerticalLayout {
+        spacing: 6px;
+        Rectangle {
+            // 固定高度保证同行卡片整齐；宽度由网格 stretch 均分自适应列数
+            // （勿用 height: self.width*x —— 高度依赖宽度的自引用会让布局求解器
+            //   给出参差的宽度分配，同行卡片宽窄不一错位）
+            height: 130px;
+            border-radius: 12px;
+            clip: true;
+            background: @linear-gradient(135deg, from 0%, to 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            Image {
+                source: @image-url("../assets/icons/play-white.svg");
+                width: 26px; height: 26px;
+                opacity: card-ta.has-hover ? 0.0 : 0.30;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            // 角标（top-right，bg-black/40）
+            Rectangle {
+                x: parent.width - self.width - 6px; y: 6px;
+                height: 18px;
+                border-radius: 9px;
+                background: rgba(0,0,0,0.40);
+                HorizontalLayout { spacing: 3px; padding-left: 7px; padding-right: 7px;
+                    Text { text: badge; color: white; font-size: 10px; vertical-alignment: center; }
+                }
+            }
+            // 悬停播放遮罩
+            Rectangle {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+                background: card-ta.has-hover ? rgba(0,0,0,0.25) : transparent;
+                Rectangle {
+                    width: 38px; height: 38px; border-radius: 19px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.palette.primary;
+                    opacity: card-ta.has-hover ? 1.0 : 0.0;
+                    Image {
+                        source: @image-url("../assets/icons/play-white.svg");
+                        width: 16px; height: 16px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: Theme.palette.icon-white;
+                    }
+                }
+            }
+        }
+        Text { text: title; color: Theme.palette.text; font-size: 12.5px; font-weight: 500; overflow: elide; }
+        Text { text: sub; color: Theme.palette.text-faint; font-size: 11px; overflow: elide; }
+    }
+
+    // 整卡点击/悬停热区（声明在内容之后 = z 序最高，标题区也可点）
+    card-ta := TouchArea {
+        width: 100%; height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---- 歌手圆形头像 ----
+export component ArtistAvatar inherits Rectangle {
+    in property <string> name;
+    in property <string> initial;
+    in property <image> cover;
+    in property <color> from;
+    in property <color> to;
+    callback clicked;
+
+    VerticalLayout {
+        spacing: 8px;
+        Rectangle { vertical-stretch: 1; }
+        Rectangle {
+            width: 84px; height: 84px; border-radius: 42px;
+            clip: true;
+            border-width: 2px; border-color: Theme.palette.divider;
+            background: @linear-gradient(135deg, from 0%, to 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            if (cover.width == 0) : Text {
+                text: initial;
+                color: Theme.palette.icon-white; font-size: 26px; font-weight: 700;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        Text { text: name; color: Theme.palette.text; font-size: 13px; overflow: elide; horizontal-alignment: center; }
+        Rectangle { vertical-stretch: 1; }
+    }
+    // 整卡点击区（头像+名字）：打开歌手详情页
+    av-ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+}
+
+// ---- 横向歌曲条目（新歌速递 / 搜索结果等小卡片）----
+export component NewSongRow inherits Rectangle {
+    in property <string> name;
+    in property <string> artist;
+    in property <image> cover;
+    callback clicked;
+
+    height: 72px;
+    border-radius: 12px;
+    background: hover-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding: 8px;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 56px; height: 56px;
+            border-radius: 12px;
+            clip: true;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            Image {
+                source: @image-url("../assets/icons/play-white.svg");
+                width: 22px; height: 22px;
+                opacity: hover-ta.has-hover ? 0.0 : 0.35;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            Rectangle {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+                background: hover-ta.has-hover ? rgba(0,0,0,0.35) : transparent;
+                Image {
+                    source: @image-url("../assets/icons/play-white.svg");
+                    width: 20px; height: 20px;
+                    opacity: hover-ta.has-hover ? 1.0 : 0.0;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+        }
+        VerticalLayout {
+            Rectangle { vertical-stretch: 1; }
+            Text { text: name; color: Theme.palette.text; font-size: 13px; font-weight: 500; overflow: elide; }
+            Text { text: artist; color: Theme.palette.text-faint; font-size: 11px; overflow: elide; }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+    hover-ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+}

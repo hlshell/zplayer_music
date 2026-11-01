@@ -1,0 +1,1162 @@
+// ============================================================================
+//  ZPlayer Music — Slint Demo（对齐现有前端 HTML 的紫色主题布局）
+//  模块化：页面独立成 ui/pages/*.slint，通用组件在 ui/components/*.slint。
+//  自定义标题栏（无原生边框）/ 左侧导航 / 内容区（按导航切换页面）/ 底部播放条 / 启动动画 / Toast
+// ============================================================================
+import { TitleBar } from "components/titlebar.slint";
+import { Sidebar } from "components/nav.slint";
+import { PlayBar } from "components/playbar.slint";
+import { SplashScreen } from "components/splash.slint";
+import { LyricsPanel, LyricLine } from "components/lyrics.slint";
+import { PlaylistPanel } from "components/playlist.slint";
+import { Toast } from "components/toast.slint";
+import { SearchSuggestPanel } from "components/suggest.slint";
+import { LoadingView } from "components/loading.slint";
+import { MiniPlayer } from "components/mini-player.slint";
+import { CloseDialog } from "components/close-dialog.slint";
+import { ScrollView } from "std-widgets.slint";
+import { CustomScrollBar } from "components/scroll.slint";
+import { Theme } from "theme.slint";
+import { Language } from "language.slint";
+// 语言 global：需在编译根显式 re-export，Rust 侧才能 global::<crate::Language>()
+export { Language } from "language.slint";
+// 跑马灯全局状态：Rust 侧（main.rs）通过 global::<MarqueeState>() 驱动时钟，需在编译根显式导出
+export { MarqueeState } from "components/marquee.slint";
+import { HotSong, Playlist, Artist, Album, NewSong, HeroSong, Song, SuggestItem, Radio, MvItem, LikedRes, MvQueueEntry, HotItem } from "components/models.slint";
+
+// ---- 页面模块 ----
+import { HomePage } from "pages/home/home.slint";
+import { SearchPage } from "pages/search/search.slint";
+import { PlaylistsPage } from "pages/playlists/playlists.slint";
+import { AlbumsPage } from "pages/albums/albums.slint";
+import { ToplistPage } from "pages/toplist/toplist.slint";
+import { MvPage } from "pages/mv/mv.slint";
+import { RadioPage } from "pages/radio/radio.slint";
+import { LikedPage } from "pages/liked/liked.slint";
+import { RecentPage } from "pages/recent/recent.slint";
+import { LocalPage } from "pages/local/local.slint";
+import { SettingsPage } from "pages/settings/settings.slint";
+import { DetailPage } from "pages/detail.slint";
+import { MvPlayer } from "pages/mv_player.slint";
+
+// ============================================================================
+//  主窗口
+// ============================================================================
+export component AppWindow inherits Window {
+    title: "ZPlayer Music";
+    // 运行时窗口图标由 main.rs 的 set_window_icon 直接解码 PNG 注入（exe 内嵌 ico 兜底）。
+    // 注意：不要用 Window.icon 属性 —— Slint 后端从 GPU 纹理回读转 HICON 会产生
+    // 花屏噪点图标（任务管理器窗口条目实测），且首帧后应用会覆盖手动注入的正常图标。
+    // 用 preferred-* 作为初始大小（固定尺寸会生成 min==max 约束导致不可缩放）
+    preferred-width: 1120px;
+    preferred-height: 740px;
+    // 最小尺寸：正常模式允许缩小到 900x560（适配小屏幕）；
+    // 迷你模式窗口为独立固定尺寸（395x76 = 72 内容 + 4 进度条），Slint 最小约束须随之放低，否则窗口会被撑回大尺寸；
+    // MV 画中画模式最小 480x270（16:9），可放大不可再小
+    min-width: root.mv-compact ? 480px : root.mini-mode ? 395px : 900px;
+    min-height: root.mv-compact ? 270px : root.mini-mode ? 76px : 560px;
+    // 启动阶段与启动页同色，避免露白
+    background: Theme.palette.window-bg;
+    // 默认字体：desktop 走系统 Segoe UI；web(wasm) 无系统字体，编译期嵌入 SimHei
+    // （appwindow-web.slint wrapper）并在 web_main 运行时 set_font_family("SimHei")。
+    // 同一套 UI 骨架，不拆第二套；绑定属性便于按平台切换。
+    in-out property <string> font-family: "Segoe UI";
+    default-font-family: root.font-family;
+    no-frame: true;
+    resize-border-width: 10px;
+
+    // 全局状态
+    in-out property <bool> playing: false;
+    // 播放模式：0=循环播放 1=单曲循环 2=随机播放
+    in-out property <int> play-mode: 0;
+    in-out property <float> progress: 0.0;
+    in-out property <int> current-nav: 0;
+    in-out property <string> search-text: "";
+    // 搜索类型：0=单曲 1=专辑 2=歌单 3=MV 4=电台
+    in-out property <int> search-type: 0;
+    // 搜索框动态占位（热搜第一歌曲名；Rust 启动时填充）
+    in-out property <string> search-placeholder: "";
+    // 搜索类型菜单开关（弹层在窗口末尾渲染，z 序最高）
+    in-out property <bool> search-type-menu-open: false;
+    // 搜索页热门词（随搜索类型切换，Rust 拉取该类型最热资源名）
+    in-out property <[string]> hot-words: [];
+    // 搜索页状态：false=搜索主页（热搜+历史），true=搜索结果页（Rust 搜索发起时置 true）
+    in-out property <bool> search-searched: false;
+    // 搜索结果加载中：true 时结果页显示骨架屏（新搜索/切类型时 Rust 置 true，数据到达置 false）
+    in-out property <bool> search-loading: false;
+    // 搜索主页热搜榜（/search/hot/detail 前 20，带 爆/↑ 角标）
+    in-out property <[HotItem]> search-hot-list: [];
+    // 搜索历史（Rust 持久化，最新在前）
+    in-out property <[string]> search-history: [];
+    // 搜索历史：单条删除 / 清空
+    callback search-history-remove(string);
+    callback search-history-clear();
+    // 搜索建议（下拉联想）：面板数据 / 开关 / 键盘选中索引
+    in-out property <[SuggestItem]> suggest-items;
+    in-out property <bool> suggest-open: false;
+    in-out property <int> suggest-index: -1;
+    callback search-text-changed(string);
+    // 缓存设置（设置页）
+    in-out property <int> cache-limit-mb: 0;
+    in-out property <int> cache-usage-mb: 0;
+    in-out property <string> cover-dir: "";
+    in-out property <string> song-dir: "";
+    callback cache-limit-clicked();
+    callback cover-dir-clicked();
+    callback song-dir-clicked();
+    callback cache-refresh();
+    // 设置页（多 Tab）扩展状态与回调
+    in-out property <int> settings-tab: 0;
+    in-out property <bool> auto-launch: false;
+    in-out property <int> language-index: 0;
+    in-out property <string> language-code: "zh";
+    in-out property <[string]> language-options: [];
+    in-out property <[string]> language-codes: [];
+    in-out property <int> font-index: 0;
+    in-out property <int> quality-index: 0;
+    in-out property <int> source-index: 0;
+    in-out property <bool> auto-play: false;
+    in-out property <int> output-index: 0;
+    in-out property <[string]> output-devices: [];
+    // 洛雪音源脚本
+    in-out property <bool> lx-fallback-enabled: false;
+    in-out property <bool> lx-auto-update: false;
+    in-out property <[string]> lx-scripts: [];
+    in-out property <int> close-behavior-index: 0;
+    // 关闭确认卡片：开关 + 「记住我的选择」勾选状态（Rust 写回 close-behavior-index）
+    in-out property <bool> close-dialog-open: false;
+    in-out property <bool> close-remember: false;
+    callback close-dialog-cancel();
+    callback close-dialog-exit();
+    callback close-dialog-tray();
+    // 托盘菜单「退出」：无条件退出（保存状态 + 干净退出），不走关闭行为分支
+    callback force-quit();
+    in-out property <int> threads-index: 0;
+    in-out property <int> buffer-index: 0;
+    in-out property <bool> proxy-enabled: false;
+    in-out property <int> proxy-type: 0;
+    in-out property <string> proxy-host: "";
+    in-out property <int> proxy-port: 0;
+    in-out property <bool> realip-enabled: false;
+    in-out property <string> realip-addr: "";
+    in-out property <bool> cache-enabled: false;
+    in-out property <string> cache-dir: "";
+    in-out property <string> cache-limit-text: "4096";
+    in-out property <int> evict-index: 0;
+    in-out property <float> cache-percent: 0.0;
+    in-out property <int> music-count: 0;
+    in-out property <int> lyric-count: 0;
+    in-out property <int> cover-count: 0;
+    // 缓存清理进行中：true 时设置页清理/刷新按钮禁用（防重入）
+    in-out property <bool> sys-clearing: false;
+    // 版本号由 Rust 从 Cargo.toml 注入（CARGO_PKG_VERSION），不再在 UI 硬编码
+    in-out property <string> version: "";
+    callback settings-select-changed(int, int);
+    callback settings-toggle-changed(int, bool);
+    callback settings-input-changed(int, string);
+    callback settings-proxy-submit(int, string, string);
+    callback settings-clicked(int);
+    callback settings-clear-cache(int);
+    callback settings-check-update();
+    callback settings-donate-clicked();
+
+    // 深浅主题：整体维度（双向绑定全局 Theme.dark）
+    in-out property <bool> dark <=> Theme.dark;
+    // 主题色：绑定全局 Theme（设置页选择 + Rust 持久化 → 驱动 palette 强调色）
+    in-out property <int> theme-color-index <=> Theme.theme-color-index;
+
+    // 播放条增强状态
+    in-out property <float> volume: 0.8;
+    in-out property <bool> muted: false;
+    in-out property <bool> liked: false;
+    property <float> pre-volume: 0.8;   // 静音前音量，取消静音时恢复
+    in-out property <bool> lyrics-open: false;
+    in-out property <bool> lyrics-style: true;   // true=上封面/下歌词, false=左封面/右歌词
+    in-out property <bool> playlist-open: false;
+    // 播放列表抽屉定位：打开抽屉时 Rust 算出正在播放歌曲的行索引写入（-1 = 当前曲不在队列不定位）
+    in-out property <int> playlist-scroll-index: -1;
+    callback locate-playing();
+    // 打开抽屉瞬间触发定位（关闭→再开同索引也要重滚：Rust 侧先置 -1 再写索引强制 changed）
+    changed playlist-open => {
+        if (self.playlist-open) {
+            root.locate-playing();
+        }
+    }
+    // 页面切换动画：current-nav 变化时通知 Rust 做内容区淡出淡入
+    // （事件驱动，替代原 120ms 轮询检测）
+    callback nav-anim();
+    // 页面切入数据填充（7=我的最爱 8=最近播放），Rust 侧按需重建列表模型
+    callback page-fill(int);
+    changed current-nav => {
+        // 导航切换（点侧边栏 / 页面内 navigate / 更多）时：若详情覆盖层还开着，
+        // 先触发收起（Rust 淡出后置 detail-visible=false），让对应页面露出来，
+        // 避免"详情开着点侧边栏仍卡在详情页"
+        if root.detail-visible { root.detail-back(); }
+        root.nav-anim();
+        root.page-fill(current-nav);
+    }
+    // 音量弹窗：悬停音量按钮（PlayBar.vol-hover）或悬停弹窗自身时保持弹出
+    property <bool> vol-open: pb.vol-hover || vol-pop-ta.has-hover;
+    in-out property <[LyricLine]> lyrics;
+    in property <int> current-lyric: 0;
+    // 逐词歌词进度：Rust 播放进度轮询推送的当前播放毫秒
+    in property <int> current-time-ms: 0;
+    // 歌词面板布局模式：0=封面模式 1=分栏模式 2=沉浸模式（点击面板按钮循环）
+    in-out property <int> lyrics-mode: 0;
+
+    // 轻提示（Toast）
+    in-out property <string> toast-text: "";
+    in-out property <bool> toast-show: false;
+    in-out property <string> toast-kind: "info";
+    callback toast-hidden();
+
+    in-out property <bool> splash-visible: true;
+    in-out property <float> splash-t: 0.0;
+    in-out property <float> splash-loader: 0.0;
+    in-out property <bool> splash-fade: false;
+
+    // ===== 真实数据（Rust 侧填充）=====
+    in-out property <[HotSong]> hot-songs;
+    in-out property <[Playlist]> recommend-playlists;
+    // Hero 卡"每日推荐 N 首"真实数量 + 详情页数据（点击 Hero 区域打开统一详情页）
+    in-out property <int> hero-count: 0;
+    // Hero 卡/详情页头部的歌单封面背景（榜单 coverImgUrl，Rust 侧填充）
+    in-out property <image> hero-cover;
+    // 详情页封面背景（歌单/专辑/歌手资源各自封面；Hero 详情打开时由 Rust 复制 hero-cover）
+    in-out property <image> detail-cover;
+    in-out property <string> detail-title: "";
+    in-out property <string> detail-desc: "";
+    in-out property <[Song]> detail-songs;
+    // 详情全量歌曲（含封面，供详情内搜索过滤时读取；detail-songs 为过滤后展示）
+    in-out property <[Song]> detail-all-songs;
+    // 详情覆盖层显示控制（来源关联A：不切 current-nav，侧边栏保持来源高亮）
+    in-out property <bool> detail-visible: false;
+    // 详情覆盖层水平滑入淡出动画（进入：从左滑入+淡入，shift 由 -offset→0；
+    // 退出：向左滑出+淡出，shift 由 0→-offset）
+    // Rust 打开时先置 fade=false + shift=-offset，稍后回正触发动画
+    in-out property <bool> detail-fade: true;
+    in-out property <length> detail-shift: 0px;
+    in-out property <string> detail-type: Language.nav-playlists;   // 类型标签：歌单/专辑/MV/电台
+    in-out property <bool> detail-liked: false;     // 详情整体收藏态（本地）
+    in-out property <int> detail-list-style: 0;     // 0=缩略图 1=多列
+    in-out property <string> detail-search: "";     // 详情内搜索词（本地过滤）
+    // 详情资源标识（kind+id 收藏用；kind=-1 表示每日推荐，头部爱心隐藏）
+    in-out property <int> detail-res-kind: -1;
+    in-out property <int> detail-res-id: 0;
+    in-out property <string> detail-res-cover: "";  // 详情头图 URL（收藏快照）
+    in-out property <[Playlist]> playlists-all;      // 歌单页全部歌单
+    in-out property <[Artist]> artists;
+    in-out property <[Album]> albums;
+    in-out property <[Album]> album-list;   // 专辑页分页列表（独立，避免覆盖首页专辑）
+    in-out property <[NewSong]> new-songs;
+    in-out property <[HeroSong]> hero-songs;
+    in-out property <[Song]> queue;
+    in-out property <[Song]> search-results;         // 搜索页结果（单曲）
+    // 分类搜索结果（按 search-type 填充对应模型）
+    in-out property <[Album]> search-albums: [];
+    in-out property <[Playlist]> search-playlists: [];
+    in-out property <[MvItem]> search-mvs: [];
+    in-out property <[Radio]> search-radios: [];
+    in-out property <Song> current-song;
+
+    // ===== 我的最爱页（5 分类；Rust 填充）=====
+    in-out property <[Song]> liked-song-list: [];
+    in-out property <[LikedRes]> liked-playlists: [];
+    in-out property <[LikedRes]> liked-albums: [];
+    in-out property <[LikedRes]> liked-mvs: [];
+    in-out property <[LikedRes]> liked-radios: [];
+    in-out property <int> liked-tab: 0;
+
+    // ===== 最近播放页（Rust 填充）=====
+    in-out property <[Song]> recent-song-list: [];
+    in-out property <[Song]> recent-mv-list: [];
+    in-out property <int> recent-tab: 0;
+
+    // ===== 本地资源页（Rust 填充）=====
+    in-out property <[Song]> local-song-list: [];
+    in-out property <[Song]> local-video-list: [];
+    in-out property <int> local-tab: 0;
+    in-out property <string> local-search-text: "";
+    // 内容区加载中状态：Rust 侧数据请求期间置 true，填充完成后置 false
+    in-out property <bool> loading: false;
+    // 页面切换动画（方案A）：内容区整体淡入淡出 + 轻微位移，Rust 检测 current-nav 变化触发
+    in-out property <bool> page-fade: true;
+    in-out property <length> page-shift: 0px;
+    // 迷你窗口模式：true 时隐藏主界面，铺满迷你播放器 UI
+    in-out property <bool> mini-mode: false;
+    // 迷你窗口播放列表抽屉：true 时向下弹出（Rust 同步窗口高度）
+    in-out property <bool> mini-queue-open: false;
+    // 迷你窗口播放列表抽屉悬停状态（Rust 轮询，离开 2s 自动收起）
+    in-out property <bool> mini-queue-hover: false;
+    // 平台标识：web（wasm）下 true，由 Rust 端按 target_arch 注入。
+    // 用于运行时门控无窗口系统的 UI（标题栏窗口控制组 / 音源脚本区等），.slint 无法用 #[cfg]
+    in-out property <bool> is-web: false;
+    // 播放加载中：取音频/换源期间 true，驱动封面 loader-4 转动与进度条加载闪烁
+    in-out property <bool> playing-loading: false;
+    in-out property <float> playing-loader-angle: 0.0;   // 封面 loader 旋转角（deg，Rust 每 tick 递增）
+    in-out property <float> loading-pulse: 0.0;          // 进度条加载波纹往返 0..1（Rust 驱动）
+    // 歌单页：当前选中分类索引 + 分类标签列表（每日推荐=personalized，其余走 /top/playlist?cat）
+    in-out property <int> playlist-cat: 0;
+    // 歌单分类：Rust 启动时用 playlist_catalogue 真实接口填充（每日推荐 + sub 分类）
+    in-out property <[string]> playlist-categories: [];
+    // 歌单分页加载状态：触底请求 / 加载中 / 无更多（need-more 由歌单页滚轮触底驱动）
+    in-out property <bool> playlists-need-more: false;
+    in-out property <bool> playlists-loading-more: false;
+    in-out property <bool> playlists-no-more: false;
+
+    // ===== 专辑页：分类（全部/华语/欧美/韩国/日本 → area ALL/ZH/EA/KR/JP）+ 分页 =====
+    in-out property <int> album-cat: 0;
+    in-out property <[string]> album-categories: [];
+    in-out property <bool> albums-need-more: false;
+    in-out property <bool> albums-loading-more: false;
+    in-out property <bool> albums-no-more: false;
+
+    // ===== 电台页（真实数据：Rust 填充）=====
+    in-out property <int> radio-cat: 0;
+    in-out property <[string]> radio-categories: [];   // 电台分类名（dj_catelist）
+    in-out property <[Radio]> radios;                   // 电台列表（dj_recommend/type）
+    in-out property <bool> radios-need-more: false;
+    in-out property <bool> radios-loading-more: false;
+    in-out property <bool> radios-no-more: false;
+
+    // ===== MV 页（真实数据：Rust 填充）=====
+    in-out property <int> mv-cat: 0;                 // 全部MV=0 / 精选MV=1
+    in-out property <[string]> mv-categories: [];    // MV 分类名
+    in-out property <[MvItem]> mvs;                  // MV 列表（mv/all、mv/exclusive/rcmd）
+    in-out property <bool> mvs-need-more: false;
+    in-out property <bool> mvs-loading-more: false;
+    in-out property <bool> mvs-no-more: false;
+
+    // ===== MV 全屏播放器桥接属性（Rust handler 推送 → MvPlayer 组件绑定）=====
+    in-out property <bool> mv-player-visible: false;
+    in-out property <string> mv-title: "";
+    in-out property <string> mv-artist: "";
+    in-out property <image> mv-video-frame;
+    in-out property <int> mv-position: 0;       // 毫秒
+    in-out property <int> mv-duration: 0;       // 毫秒
+    in-out property <int> mv-buffered: 0;       // 已缓冲（预加载）到的时间点，毫秒
+    in-out property <bool> mv-playing: false;
+    in-out property <int> mv-quality: 0;         // 0=480p 1=720p 2=1080p（Rust 侧写回真实值）
+    in-out property <int> mv-volume: 100;        // MV 音量 0-100
+    in-out property <string> mv-hint: "";        // MV 播放器内轻提示（音量/清晰度反馈）
+    in-out property <string> mv-notice: "";      // MV 播放器内过渡提示（无法播放自动跳转等，停留更久）
+    in-out property <bool> mv-switching: false;  // 清晰度无缝切换中（顶部胶囊常显旋转环）
+    in-out property <bool> mv-buffering: false;  // 缓冲门控中（播放器中央显示"正在缓冲"加载指示）
+    in-out property <string> mv-switch-tip: "";  // 切换状态文案（如"正在切换到 720p"）
+    in-out property <bool> mv-compact: false;    // MV 画中画（迷你窗口）模式
+    in-out property <bool> mv-fullscreen: false; // MV 全屏态（Rust 写回，切换最大化/还原图标）
+    in-out property <[MvQueueEntry]> mv-queue;   // MV 播放队列（抽屉数据源，Rust 同步）
+    in-out property <int> mv-queue-current: -1;  // 当前播放索引（抽屉打开时自动滚动定位）
+
+    // ===== MV 抽屉内搜索 =====
+    in-out property <string> mv-search-text: "";       // 搜索关键词
+    in-out property <[MvQueueEntry]> mv-search-results; // 搜索结果（和队列条目共用结构）
+    in-out property <bool> mv-search-active: false;     // true=显示搜索结果，false=显示队列
+    in-out property <[string]> mv-search-suggestions;    // 搜索建议下拉
+    in-out property <bool> mv-search-loading: false;    // 搜索中
+    in-out property <bool> mv-show-search-box: false;   // 是否显示搜索框（mv-page/search 入口才显示）
+
+    // ===== 主界面：始终在树里，启动时被启动页盖住；迷你模式时隐藏 =====
+    VerticalLayout {
+        visible: !root.mini-mode;
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        // 未淡出前隐藏；一开始淡出就显示，与启动页交叉
+        opacity: !root.splash-visible ? 1.0
+               : root.splash-fade ? 1.0
+               : 0.0;
+        animate opacity {
+            duration: 500ms;
+            easing: ease-out;
+        }
+
+        tb := TitleBar {
+            is-web: root.is-web;
+            drag-start(x, y) => { root.drag-start(x, y); }
+            titlebar-clicked => { root.titlebar-clicked(); }
+            win-minimize => { root.win-minimize(); }
+            win-mini => { root.win-mini(); }
+            win-maximize => { root.win-maximize(); }
+            win-close => { root.win-close(); }
+            theme-toggle => {
+                root.dark = !root.dark;
+                root.theme-toggle();
+            }
+            settings-clicked => { root.current-nav = 99; }
+            search-text <=> root.search-text;
+            search-type <=> root.search-type;
+            search-placeholder: root.search-placeholder;
+            type-menu-open <=> root.search-type-menu-open;
+            // 输入变化：非空打开建议面板 → 转发 Rust 防抖拉取
+            search-text-changed(t) => {
+                root.suggest-open = root.search-text != "";
+                root.suggest-index = -1;
+                root.search-text-changed(t);
+            }
+            // 键盘 ↑/↓ 在建议项间移动
+            suggest-index: root.suggest-index;
+            suggest-count: root.suggest-items.length;
+            suggest-move(d) => {
+                if (root.suggest-items.length > 0) {
+                    root.suggest-index = d > 0
+                        ? min(root.suggest-index + 1, root.suggest-items.length - 1)
+                        : max(root.suggest-index - 1, 0);
+                }
+            }
+            // 键盘 Enter：有选中项则填词，再统一执行搜索
+            suggest-confirm => {
+                if (root.suggest-index >= 0 && root.suggest-index < root.suggest-items.length) {
+                    root.search-text = root.suggest-items[root.suggest-index].keyword;
+                }
+                root.suggest-open = false;
+                root.suggest-index = -1;
+                root.current-nav = 1;
+                root.search-clicked();
+            }
+            // 键盘 Esc：关闭面板
+            suggest-close => {
+                root.suggest-open = false;
+                root.suggest-index = -1;
+            }
+            search-clicked => {
+                root.suggest-open = false;
+                root.suggest-index = -1;
+                root.current-nav = 1;
+                root.search-clicked();
+            }
+        }
+        HorizontalLayout {
+            spacing: 0;
+            Sidebar {
+                current-nav <=> root.current-nav;
+                // 无条件激活（重复点当前项也收起详情覆盖层）
+                nav-activated(idx) => {
+                    if root.detail-visible { root.detail-back(); }
+                }
+            }
+            // 内容区：右侧单元格（包一层 Rectangle，供自定义滚动条叠加定位；隐藏内置滚动条）
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+                // 内容区不透明底色：页面切换淡入淡出时不露出底层/闪空（不随 fade 透明）
+                background: Theme.palette.window-bg;
+                // 页面切换动画容器（absolute fill，承载 opacity/x 位移动画，避免布局抢占 x）
+                Rectangle {
+                    width: 100%; height: 100%;
+                    opacity: root.page-fade ? 1.0 : 0.0;
+                    animate opacity { duration: 220ms; easing: ease-out; }
+                    x: root.page-shift;
+                    animate x { duration: 240ms; easing: ease-out; }
+                    // 数据加载中：先铺通用加载指示器（整内容区通用）
+                    if (root.loading) : LoadingView { tip: Language.loading-tip; width: 100%; height: 100%; }
+                // 非设置页（导航 0-9）：共享 ScrollView
+                if (!root.loading && root.current-nav != 99) : Rectangle {
+                    width: 100%; height: 100%;
+                    VerticalLayout {
+                        width: 100%; height: 100%;
+                        spacing: 0;
+                        sv := ScrollView {
+                            vertical-stretch: 1;
+                            vertical-scrollbar-policy: always-off;
+                            horizontal-scrollbar-policy: always-off;
+                            VerticalLayout {
+                                spacing: 0;
+                                // 各导航页：if 条件实例化，未激活页面不占布局空间
+                                if (root.current-nav == 0) : HomePage {
+                                    // 内容区宽度 = 窗口宽 - 侧边栏 208px（顶层传入，避免 ScrollView 内容协商循环）
+                                    page-w: root.width - 208px;
+                                    hot-songs <=> root.hot-songs;
+                                    recommend-playlists <=> root.recommend-playlists;
+                                    artists <=> root.artists;
+                                    albums <=> root.albums;
+                                    new-songs <=> root.new-songs;
+                                    hero-songs <=> root.hero-songs;
+                                    hero-count <=> root.hero-count;
+                                    hero-cover <=> root.hero-cover;
+                                    navigate(idx) => { root.current-nav = idx; }
+                                    play-song(id) => { root.play-song(id); }
+                                    hero-play-all() => { root.hero-play-all(); }
+                                    open-detail() => { root.open-daily-detail(); }
+                                    open-resource(k, id) => { root.open-resource-detail(k, id); }
+                                    // 点击歌手卡：填入搜索框 + 切搜索页 + 触发搜索
+                                    artist-clicked(name) => { root.search-text = name; root.current-nav = 1; root.search-clicked(); }
+                                }
+                                if (root.current-nav == 1) : SearchPage {
+                                    search-text <=> root.search-text;
+                                    search-type: root.search-type;
+                                    searched <=> root.search-searched;
+                                    loading: root.search-loading;
+                                    hot-list: root.search-hot-list;
+                                    history: root.search-history;
+                                    hot-words: root.hot-words;
+                                    results <=> root.search-results;
+                                    album-results: root.search-albums;
+                                    playlist-results: root.search-playlists;
+                                    mv-results: root.search-mvs;
+                                    radio-results: root.search-radios;
+                                    current-id: root.current-song.id;
+                                    search() => {
+                                        root.suggest-open = false;
+                                        root.suggest-index = -1;
+                                        root.search-clicked();
+                                    }
+                                    history-remove(w) => { root.search-history-remove(w); }
+                                    history-clear() => { root.search-history-clear(); }
+                                    load-more() => { root.search-load-more(); }
+                                    // 切换搜索类型：更新类型 → 拉该类型热门词 → 用当前关键词重搜
+                                    type-select(idx) => {
+                                        root.suggest-open = false;
+                                        root.search-type = idx;
+                                        root.search-type-changed(idx);
+                                        root.search-clicked();
+                                    }
+                                    play-song(id) => { root.play-song(id); }
+                                    play-all() => { root.search-play-all(); }
+                                    open-resource(k, id) => { root.open-resource-detail(k, id); }
+                                }
+                                if (root.current-nav == 2) : PlaylistsPage {
+                                    page-w: root.width - 208px;
+                                    playlists <=> root.playlists-all;
+                                    categories: root.playlist-categories;
+                                    playlist-cat <=> root.playlist-cat;
+                                    need-more <=> root.playlists-need-more;
+                                    loading-more <=> root.playlists-loading-more;
+                                    no-more <=> root.playlists-no-more;
+                                    category-clicked(idx) => { root.playlist-cat-clicked(idx); }
+                                    open-playlist(id) => { root.open-resource-detail(0, id); }
+                                    navigate(idx) => { root.current-nav = idx; }
+                                }
+                                if (root.current-nav == 3) : AlbumsPage {
+                                    is-web: root.is-web;
+                                    page-w: root.width - 208px;
+                                    albums: root.album-list;
+                                    categories: root.album-categories;
+                                    album-cat <=> root.album-cat;
+                                    need-more <=> root.albums-need-more;
+                                    loading-more <=> root.albums-loading-more;
+                                    no-more <=> root.albums-no-more;
+                                    category-clicked(idx) => { root.album-cat-clicked(idx); }
+                                    open-album(id) => { root.open-resource-detail(1, id); }
+                                    play-song(id) => { root.play-song(id); }
+                                }
+                                if (root.current-nav == 6) : ToplistPage {
+                                    is-web: root.is-web;
+                                    open-toplist(id) => { }
+                                    navigate(idx) => { root.current-nav = idx; }
+                                }
+                                if (root.current-nav == 4) : MvPage {
+                                    is-web: root.is-web;
+                                    page-w: root.width - 208px;
+                                    mv-cat <=> root.mv-cat;
+                                    categories: root.mv-categories;
+                                    mvs <=> root.mvs;
+                                    need-more <=> root.mvs-need-more;
+                                    loading-more <=> root.mvs-loading-more;
+                                    no-more <=> root.mvs-no-more;
+                                    category-clicked(idx) => { root.mv-cat-clicked(idx); }
+                                    open-mv(id) => { root.open-resource-detail(4, id); }
+                                    navigate(idx) => { root.current-nav = idx; }
+                                }
+                                if (root.current-nav == 5) : RadioPage {
+                                    is-web: root.is-web;
+                                    page-w: root.width - 208px;
+                                    radio-cat <=> root.radio-cat;
+                                    categories: root.radio-categories;
+                                    radios <=> root.radios;
+                                    need-more <=> root.radios-need-more;
+                                    loading-more <=> root.radios-loading-more;
+                                    no-more <=> root.radios-no-more;
+                                    category-clicked(idx) => { root.radio-cat-clicked(idx); }
+                                    open-radio(id) => { root.open-resource-detail(3, id); }
+                                    navigate(idx) => { root.current-nav = idx; }
+                                }
+                                if (root.current-nav == 7) : LikedPage {
+                                    songs <=> root.liked-song-list;
+                                    playlists <=> root.liked-playlists;
+                                    albums <=> root.liked-albums;
+                                    mvs <=> root.liked-mvs;
+                                    radios <=> root.liked-radios;
+                                    tab <=> root.liked-tab;
+                                    current-id: root.current-song.id;
+                                    play-song(id) => { root.play-song(id); }
+                                    open-resource(k, id) => { root.open-resource-detail(k, id); }
+                                    unlike-resource(k, id) => { root.liked-unlike(k, id); }
+                                }
+                                if (root.current-nav == 8) : RecentPage {
+                                    songs <=> root.recent-song-list;
+                                    mvs <=> root.recent-mv-list;
+                                    tab <=> root.recent-tab;
+                                    current-id: root.current-song.id;
+                                    play-song(id) => { root.play-song(id); }
+                                    play-mv(id) => { root.open-resource-detail(4, id); }
+                                    remove(id) => { root.recent-remove(id); }
+                                    clear() => { root.recent-clear(); }
+                                    tab-changed(idx) => { root.recent-tab-changed(idx); }
+                                }
+                                if (root.current-nav == 9) : LocalPage {
+                                    is-web: root.is-web;
+                                    songs <=> root.local-song-list;
+                                    videos <=> root.local-video-list;
+                                    tab <=> root.local-tab;
+                                    search-text <=> root.local-search-text;
+                                    current-id: root.current-song.id;
+                                    play-song(id) => { root.play-song(id); }
+                                    play-video(id) => { root.local-play-video(id); }
+                                    search-changed(t) => { root.local-search-changed(t); }
+                                    tab-changed(idx) => { root.local-tab-changed(idx); }
+                                }
+                            }
+                        }
+                    }
+                    // 自定义竖向滚动条叠加（内容区右缘，布局外定位，避免与 sv 形成循环）
+                    sb := Rectangle {
+                        x: sv.x + sv.width - 14px;
+                        y: sv.y + 8px;
+                        width: 10px;
+                        height: sv.height - 16px;
+                        CustomScrollBar {
+                            viewport-height: sv.visible-height;
+                            content-height: sv.content-height;
+                            // Slint 的 content-y 为负值域（顶部 0 → 底部 -max），取负转为正向偏移
+                            scroll-offset: -sv.content-y;
+                            scroll-to(o) => { sv.content-y = -o; }
+                        }
+                    }
+                }
+                // 设置页：从共享 ScrollView 单独拿出（Tab 固定 + 内容自由滚动）
+                if (!root.loading && root.current-nav == 99) : SettingsPage {
+                    is-web: root.is-web;
+                    width: 100%; height: 100%;
+                    tab-index <=> root.settings-tab;
+                    dark <=> root.dark;
+                    auto-launch <=> root.auto-launch;
+                    language-index <=> root.language-index;
+                    language-options <=> root.language-options;
+                    font-index <=> root.font-index;
+                    quality-index <=> root.quality-index;
+                    source-index <=> root.source-index;
+                    auto-play <=> root.auto-play;
+                    output-index <=> root.output-index;
+                    output-devices <=> root.output-devices;
+                    lx-fallback-enabled <=> root.lx-fallback-enabled;
+                    lx-auto-update <=> root.lx-auto-update;
+                    script-names <=> root.lx-scripts;
+                    theme-color-index <=> root.theme-color-index;
+                    lyrics-style <=> root.lyrics-style;
+                    close-behavior-index <=> root.close-behavior-index;
+                    threads-index <=> root.threads-index;
+                    buffer-index <=> root.buffer-index;
+                    proxy-enabled <=> root.proxy-enabled;
+                    proxy-type <=> root.proxy-type;
+                    proxy-host <=> root.proxy-host;
+                    proxy-port <=> root.proxy-port;
+                    realip-enabled <=> root.realip-enabled;
+                    realip-addr <=> root.realip-addr;
+                    cache-enabled <=> root.cache-enabled;
+                    cache-dir <=> root.cache-dir;
+                    cache-limit-text <=> root.cache-limit-text;
+                    cache-limit-mb <=> root.cache-limit-mb;
+                    evict-index <=> root.evict-index;
+                    cache-percent <=> root.cache-percent;
+                    music-count <=> root.music-count;
+                    lyric-count <=> root.lyric-count;
+                    cover-count <=> root.cover-count;
+                    sys-clearing <=> root.sys-clearing;
+                    version: root.version;
+                    select-changed(id, idx) => { root.settings-select-changed(id, idx); }
+                    toggle-changed(id, c) => { root.settings-toggle-changed(id, c); }
+                    input-changed(id, t) => { root.settings-input-changed(id, t); }
+                    proxy-submit(t, h, p) => { root.settings-proxy-submit(t, h, p); }
+                    clicked(id) => { root.settings-clicked(id); }
+                    cache-refresh() => { root.cache-refresh(); }
+                    clear-cache(k) => { root.settings-clear-cache(k); }
+                    check-update() => { root.settings-check-update(); }
+                    donate-clicked() => { root.settings-donate-clicked(); }
+                    navigate(idx) => { root.current-nav = idx; }
+                }
+                // 详情覆盖层（方案A：不占导航位；detail-visible 控制，来源侧边栏自然高亮）
+                // 始终在树（visible 切换而非 if 销毁重建 → 淡入淡出动画流畅不卡顿）
+                // 页面底色不透明（DetailPage 根为 window-bg），不透出底下内容区，无需遮罩
+                Rectangle {
+                    visible: root.detail-visible;
+                    width: 100%; height: 100%;
+                    clip: true;
+
+                    // 详情内容层：水平滑入淡出（进入从左滑入，退出向左滑出；仅切换 opacity/x，无重建）
+                    Rectangle {
+                        width: 100%; height: 100%;
+                        opacity: root.detail-fade ? 1.0 : 0.0;
+                        animate opacity { duration: 220ms; easing: ease-out; }
+                        x: root.detail-shift;
+                        animate x { duration: 280ms; easing: ease-out; }
+                        DetailPage {
+                            width: 100%; height: 100%;
+                            title: root.detail-title;
+                            desc: root.detail-desc;
+                            bg-cover: root.detail-cover;
+                            d-type: root.detail-type;
+                            liked <=> root.detail-liked;
+                            // 每日推荐（res-kind=-1）头部爱心隐藏；其余显示
+                            show-like: root.detail-res-kind >= 0;
+                            list-style <=> root.detail-list-style;
+                            search-text <=> root.detail-search;
+                            songs <=> root.detail-songs;
+                            current-song <=> root.current-song;
+                            play-song(id) => { root.play-song(id); }
+                            like-toggle-id(id) => { root.like-toggle-id(id); }
+                            play-all() => { root.detail-play-all(); }
+                            back() => { root.detail-back(); }
+                            search-changed(t) => { root.detail-search-changed(t); }
+                            like-toggle() => { root.detail-like-toggle(); }
+                        }
+                    }
+                }
+            }
+            }
+        }
+
+        // 底部播放栏：全宽（横跨侧边栏下方，对齐前端 fixed bottom-0 left-0 right-0）
+        pb := PlayBar {
+            playing <=> root.playing;
+            progress <=> root.progress;
+            current-song <=> root.current-song;
+            volume <=> root.volume;
+            muted <=> root.muted;
+            liked <=> root.liked;
+            lyrics-open: root.lyrics-open;
+            play-mode <=> root.play-mode;
+            loading: root.playing-loading;
+            loader-angle: root.playing-loader-angle;
+            pulse: root.loading-pulse;
+            play-mode-changed => { root.play-mode-changed(); }
+            play-toggle => { root.play-toggle(); }
+            prev-clicked => { root.prev-song(); }
+            next-clicked => { root.next-song(); }
+            seek-fraction(f) => { root.seek(f); }
+            like-toggle => { root.like-toggle(); }
+            cover-clicked => {
+                 root.lyrics-open = !root.lyrics-open;
+                 root.playlist-open = false;
+             }
+             queue-clicked => {
+                 root.playlist-open = !root.playlist-open;
+                 root.lyrics-open = false;
+             }
+            volume-changed(v) => { root.volume-changed(v); }
+            mute-toggle => {
+                root.muted = !root.muted;
+                if root.muted {
+                    root.pre-volume = root.volume;
+                    root.volume = 0.0;
+                    root.volume-changed(0.0);
+                } else {
+                    root.volume = root.pre-volume;
+                    root.volume-changed(root.pre-volume);
+                }
+            }
+        }
+    }
+
+    // ===== 覆盖层容器：裁剪到窗口内；抽屉 / 音量弹窗 / Toast 置于其上 =====
+    Rectangle {
+        clip: true;
+        width: 100%;
+        height: 100%;
+
+        // 点击非抽屉区域自动关闭（遮罩；仅在任一抽屉/建议面板打开时拦截点击，平时完全不参与）。
+        // 抽屉为半模态：遮罩不覆盖底部播放栏（播放器按钮在抽屉打开时仍可正常操作）；
+        // 搜索建议为轻量浮层，单独打开时保持全屏遮罩（含播放栏）。
+        TouchArea {
+            // 建议面板同理：仅面板真正可见时拦截（否则会挡住标题栏拖拽与列表滚动）
+            visible: root.playlist-open || root.lyrics-open
+                || (root.suggest-open && root.suggest-items.length > 0);
+            height: (root.suggest-open && !root.playlist-open && !root.lyrics-open)
+                ? root.height : root.height - 76px;
+            clicked => {
+                root.playlist-open = false;
+                root.lyrics-open = false;
+                root.suggest-open = false;
+                root.suggest-index = -1;
+            }
+        }
+
+        // 封面/歌词抽屉：标题栏下 → 播放条上（常驻树中，y/height 动画控制展开/收起）
+        LyricsPanel {
+            win-width: root.width;
+            win-height: root.height;
+            open <=> root.lyrics-open;
+            mode <=> root.lyrics-mode;
+            current-song <=> root.current-song;
+            lyrics <=> root.lyrics;
+            current-lyric: root.current-lyric;
+            current-time-ms: root.current-time-ms;
+            mode-cycle => { root.lyrics-mode = Math.mod(root.lyrics-mode + 1, 3); }
+            close-clicked => { root.lyrics-open = false; }
+        }
+
+        // 播放列表面板：右侧抽屉（常驻树中，x 动画控制滑出/滑入，由父级 clip 裁剪）
+        PlaylistPanel {
+            win-width: root.width;
+            win-height: root.height;
+            open <=> root.playlist-open;
+            scroll-to-index <=> root.playlist-scroll-index;
+            queue <=> root.queue;
+            current-song <=> root.current-song;
+            play-song(id) => { root.play-song(id); }
+            clear-queue => { root.clear-queue(); }
+            remove-song(id) => { root.remove-song(id); }
+            like-toggle-id(id) => { root.like-toggle-id(id); }
+            close-clicked => { root.playlist-open = false; }
+        }
+
+        // 轻提示（Toast）：右下角；声明在音量弹窗之前 = 音量弹窗层级更高
+        Toast {
+            show: root.toast-show;
+            text: root.toast-text;
+            kind: root.toast-kind;
+            win-width: root.width;
+            win-height: root.height;
+        }
+
+        // 音量弹窗：悬停音量按钮弹出，置于播放列表抽屉之上（后绘制 = 更高层级）。
+        // 位置动态绑定音量按钮的 absolute-position（窗口绝对坐标）——后续在播放栏
+        // 新增/调整按钮无需改动此定位。底边与按钮顶部重叠 2px，保证鼠标从按钮滑入
+        // 弹窗全程热区连续（vol-open 依赖两侧 has-hover，留缝会导致滑入即关闭）。
+        Rectangle {
+            visible: root.vol-open;
+            width: 40px; height: 156px;
+            x: pb.vol-btn-x + 18px - self.width / 2;
+            y: pb.vol-btn-y - self.height + 2px;
+            border-radius: 12px;
+            background: Theme.palette.surface-solid;
+            drop-shadow-blur: 22px; drop-shadow-color: rgba(0, 0, 0, 0.22); drop-shadow-offset-y: 6px;
+            border-width: 1px; border-color: Theme.palette.divider;
+
+            // 滑块轨道参数（百分比下方到底部留白之间，集中定义避免三处硬编码漂移；
+            // track-y 需与顶部百分比文字留出间距——100% 时圆钮最高点 = track-y - 8px，
+            // 不能压到文字）
+            property <length> track-y: 32px;
+            property <length> track-h: 112px;
+
+            // 音量百分比
+            Text {
+                x: 0; y: 3px; width: parent.width;
+                text: Math.round(root.volume * 100) + "%";
+                color: Theme.palette.primary; font-size: 10px;
+                horizontal-alignment: center;
+            }
+            // 滑块轨道（从下往上填充）
+            Rectangle {
+                x: parent.width / 2 - 3px;
+                y: track-y;
+                width: 6px; height: track-h;
+                border-radius: 3px;
+                background: Theme.palette.scroll-track;
+                Rectangle {
+                    width: 100%;
+                    y: track-h * (1.0 - root.volume);
+                    height: track-h * root.volume;
+                    border-radius: 3px;
+                    background: @linear-gradient(180deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                }
+            }
+            // 滑块圆钮
+            Rectangle {
+                x: parent.width / 2 - 8px;
+                y: track-y + track-h * (1.0 - root.volume) - 8px;
+                width: 16px; height: 16px;
+                border-radius: 8px;
+                background: Theme.palette.surface-solid;
+                border-width: 2px; border-color: Theme.palette.primary;
+                drop-shadow-blur: 4px; drop-shadow-color: rgba(0, 0, 0, 0.18);
+            }
+            // 交互：滚轮调节 + 拖拽；弹窗自身悬停时保持弹出
+            vol-pop-ta := TouchArea {
+                scroll-event(e) => {
+                    root.volume = min(1.0, max(0.0, root.volume + (e.delta-y / 1px) * 0.002));
+                    root.muted = root.volume <= 0.0;
+                    root.volume-changed(root.volume);
+                    accept
+                }
+                clicked => {
+                    root.volume = min(1.0, max(0.0, 1.0 - (self.mouse-y / self.height)));
+                    root.muted = root.volume <= 0.0;
+                    root.volume-changed(root.volume);
+                }
+                moved => {
+                    root.volume = min(1.0, max(0.0, 1.0 - (self.mouse-y / self.height)));
+                    root.muted = root.volume <= 0.0;
+                    root.volume-changed(root.volume);
+                }
+                mouse-cursor: pointer;
+            }
+        }
+    }
+
+    // ===== 搜索建议弹出面板：贴在标题栏胶囊下方（覆盖层内定位，声明在遮罩之后以接收点击）=====
+    if (root.suggest-open && root.suggest-items.length > 0) : SearchSuggestPanel {
+        items: root.suggest-items;
+        selected-index: root.suggest-index;
+        panel-x: tb.search-box-x;
+        panel-y: tb.search-box-y + tb.search-box-height + 8px;
+        panel-width: tb.search-box-width;
+        picked(i) => {
+            if (i >= 0 && i < root.suggest-items.length) {
+                root.search-text = root.suggest-items[i].keyword;
+            }
+            root.suggest-index = -1;
+            root.suggest-open = false;
+            root.current-nav = 1;
+            root.search-clicked();
+        }
+    }
+
+    // ===== 搜索类型弹出菜单：贴胶囊右端下方（窗口级渲染，z 序高于内容区；点外收起）=====
+    if (root.search-type-menu-open) : TouchArea {
+        x: 0; y: 0; width: 100%; height: 100%;
+        clicked => { root.search-type-menu-open = false; }
+    }
+    if (root.search-type-menu-open) : Rectangle {
+        x: tb.x + tb.search-box-x + tb.search-box-width - 74px;
+        y: tb.y + tb.search-box-y + tb.search-box-height + 6px;
+        width: 74px;
+        height: 5 * 30px + 10px;
+        border-radius: 8px;
+        background: Theme.palette.surface-solid;
+        border-width: 1px;
+        border-color: Theme.palette.divider;
+        // 吞掉菜单内点击，防穿透到外层收起层
+        TouchArea { x: 0; y: 0; width: 100%; height: 100%; clicked => { } }
+
+        VerticalLayout {
+            padding: 5px;
+            spacing: 0;
+            for name[idx] in ["单曲", "专辑", "歌单", "MV", "电台"] : Rectangle {
+                height: 30px;
+                border-radius: 6px;
+                background: idx == root.search-type
+                    ? Theme.palette.hover
+                    : (mi-ta.has-hover ? Theme.palette.divider : transparent);
+                Text {
+                    text: name;
+                    color: idx == root.search-type ? Theme.palette.primary : Theme.palette.text;
+                    font-size: 12px;
+                    font-weight: idx == root.search-type ? 600 : 400;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                mi-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.search-type = idx;
+                        root.search-type-menu-open = false;
+                        root.search-type-changed(idx);
+                        // 与页面内 Tab 一致：切换类型后用当前关键词重新搜索并加载结果。
+                        // 之前只改类型不重搜，结果区仍显示旧类型数据（看起来"没载入结果"）。
+                        root.search-clicked();
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== 启动页：盖在最上层 =====
+    if (root.splash-visible) : SplashScreen {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        t <=> root.splash-t;
+        loader <=> root.splash-loader;
+        fade-out: root.splash-fade;
+    }
+
+    // ===== MV 全屏播放器覆盖层：在 SplashScreen 之上但 splash-visible 期间隐藏 =====
+    mvp := MvPlayer {
+        visible: root.mv-player-visible && !root.splash-visible;
+        x: 0; y: 0; width: 100%; height: 100%;
+        // 绑定桥接属性
+        video-frame <=> root.mv-video-frame;
+        title <=> root.mv-title;
+        artist <=> root.mv-artist;
+        position-ms <=> root.mv-position;
+        duration-ms <=> root.mv-duration;
+        buffered-ms <=> root.mv-buffered;
+        is-playing <=> root.mv-playing;
+        quality-index <=> root.mv-quality;
+        volume <=> root.mv-volume;
+        hint <=> root.mv-hint;
+        notice <=> root.mv-notice;
+        switching <=> root.mv-switching;
+        buffering <=> root.mv-buffering;
+        switch-tip <=> root.mv-switch-tip;
+        compact <=> root.mv-compact;
+        is-fullscreen <=> root.mv-fullscreen;
+        queue <=> root.mv-queue;
+        queue-current <=> root.mv-queue-current;
+        need-more <=> root.mvs-need-more;   // 抽屉触底 → 复用 MV 页面分页加载
+        // 抽屉内搜索桥接
+        search-text <=> root.mv-search-text;
+        search-results <=> root.mv-search-results;
+        search-active <=> root.mv-search-active;
+        search-suggestions <=> root.mv-search-suggestions;
+        search-loading <=> root.mv-search-loading;
+        show-search-box <=> root.mv-show-search-box;
+        search(kw) => { root.mv_search(kw); }
+        search-suggest(kw) => { root.mv_search_suggest(kw); }
+        search-more() => { root.mv_search_more(); }
+        search-result-click(id) => { root.mv_search_result_click(id); }
+        // 路由 callback 到 AppWindow 的 MV callback（Rust 侧注册）
+        back() => { root.mv-player-visible = false; root.mv_back(); }
+        play-pause() => { root.mv_play_pause(); }
+        seek(ms) => { root.mv_seek(ms); }
+        prev() => { root.mv_prev(); }
+        next() => { root.mv_next(); }
+        quality-changed(idx) => { root.mv-quality = idx; root.mv_quality_changed(idx); }
+        set-volume(v) => { root.mv_set_volume(v); }
+        mute-toggle() => { root.mv_mute_toggle(); }
+        toggle-fullscreen() => { root.mv_toggle_fullscreen(); }
+        compact-toggle() => { root.mv_compact_toggle(); }
+        playlist-play(i) => { root.mv_playlist_play(i); }
+        drag-start(x, y) => { root.drag-start(x, y); }
+    }
+
+    // MV 覆盖层显示后稍延迟一帧抢占键盘焦点（Esc 退出依赖 FocusScope 持有焦点；
+    // 立即调用时元素尚未完成可见性更新，focus() 可能落空）
+    mv-focus-timer := Timer {
+        interval: 60ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if (root.mv-player-visible) { mvp.focus-keys(); }
+        }
+    }
+    changed mv-player-visible => {
+        if (root.mv-player-visible) {
+            mv-focus-timer.running = true;
+        } else {
+            mvp.clear-keys();
+        }
+    }
+
+    // ===== 迷你窗口模式：铺满小窗，盖在主界面上层（不可拖拽时被拖拽层接管）=====
+    if (root.mini-mode) : MiniPlayer {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        song: root.current-song;
+        playing: root.playing;
+        progress: root.progress;
+        liked: root.liked;
+        play-mode: root.play-mode;
+        queue: root.queue;
+        loading: root.playing-loading;
+        loader-angle: root.playing-loader-angle;
+        pulse: root.loading-pulse;
+        queue-open <=> root.mini-queue-open;
+        queue-hover <=> root.mini-queue-hover;
+        play-toggle => { root.play-toggle(); }
+        prev-song => { root.prev-song(); }
+        next-song => { root.next-song(); }
+        like-clicked => { root.like-toggle(); }
+        play-mode-changed => { root.play-mode-changed(); }
+        queue-toggle => { root.mini-queue-toggle(); }
+        close-mini => { root.win-mini(); }
+        drag-start(x, y) => { root.drag-start(x, y); }
+        play-song(id) => { root.play-song(id); }
+        remove-song(id) => { root.remove-song(id); }
+        like-toggle-id(id) => { root.like-toggle-id(id); }
+    }
+
+    // ===== 关闭确认卡片：最顶层，盖住主界面 / 迷你窗 / MV 播放器 =====
+    if (root.close-dialog-open) : CloseDialog {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        remember <=> root.close-remember;
+        cancel => { root.close-dialog-cancel(); }
+        exit-app => { root.close-dialog-exit(); }
+        minimize-to-tray => { root.close-dialog-tray(); }
+    }
+
+    // 与 Rust 交互的全局回调
+    callback drag-start(length, length);
+    callback titlebar-clicked();
+    callback win-minimize();
+    callback win-mini();
+    callback win-maximize();
+    callback win-close();
+    callback theme-toggle();
+    callback search-clicked();
+    // 搜索结果触底加载更多（所有类型共用，Rust 侧分页状态守卫）
+    callback search-load-more();
+    // 搜索类型切换：Rust 拉取该类型最热资源名填入占位
+    callback search-type-changed(int);
+    callback play-song(int);
+    // 搜索页播放全部：搜索结果去重追加到播放列表并播放第一首
+    callback search-play-all();
+    // 首页 Hero 播放全部：把 hero 歌曲列表加入播放列表并播放第一首
+    callback hero-play-all();
+    // 点击 Hero 区域（非播放按钮）：打开每日精选统一详情页
+    callback open-daily-detail();
+    // 播放列表抽屉：清空队列 / 移除单曲 / 行内收藏切换（id 为队列中的歌曲 ID）
+    callback clear-queue();
+    callback remove-song(int);
+    callback like-toggle-id(int);
+    // 打开歌单/专辑/歌手统一详情页（kind: 0=歌单 1=专辑 2=歌手；Rust 拉取资源详情填充）
+    callback open-resource-detail(int, int);
+    // 详情页"播放全部"：把详情页歌曲列表加入播放列表并播放第一首
+    callback detail-play-all();
+    // 详情页内搜索：仅对当前 detail-songs 本地过滤（Rust 维护全量 + 过滤后重设）
+    callback detail-search-changed(string);
+    // 详情页头部资源收藏切换（kind/id/名称/副标题/封面 URL 由 Rust 从属性读取）
+    callback detail-like-toggle();
+    // 收藏当前歌曲（真实数据：本地持久化 + 网易云 API），Rust 按当前歌曲同步 liked
+    callback like-toggle();
+    callback play-toggle();
+    callback prev-song();
+    callback next-song();
+    callback play-mode-changed();
+    callback volume-changed(float);
+    // 进度条点击跳转（0..1）：Rust 端以重播方式实现真实 seek
+    callback seek(float);
+    callback request-lyrics(int);
+    callback mini-queue-toggle();
+    callback playlist-cat-clicked(int);
+    callback album-cat-clicked(int);
+    callback radio-cat-clicked(int);
+    callback mv-cat-clicked(int);
+    // 我的最爱页：取消某资源收藏（kind,id）
+    callback liked-unlike(int, int);
+    // 最近播放页：删除单条 / 清空
+    callback recent-remove(int);
+    callback recent-clear();
+    callback recent-tab-changed(int);
+    // 本地资源页：播放本地视频 / 搜索 / 分类切换
+    callback local-play-video(int);
+    callback local-search-changed(string);
+    callback local-tab-changed(int);
+    // 详情返回：Rust 侧执行淡出后置 detail-visible=false（避免直接卸载造成生硬/卡顿）
+    callback detail-back();
+    // ===== MV 全屏播放器 callback（由 handlers::mv::setup 注册）=====
+    callback mv_back();
+    callback mv_play_pause();
+    callback mv_seek(int);
+    callback mv_prev();
+    callback mv_next();
+    callback mv_quality_changed(int);
+    callback mv_set_volume(int);
+    callback mv_mute_toggle();
+    callback mv_toggle_fullscreen();
+    callback mv_compact_toggle();
+    callback mv_playlist_play(int);
+    // ===== MV 抽屉内搜索 callback =====
+    callback mv_search(string);          // 执行搜索
+    callback mv_search_suggest(string);  // 获取搜索建议
+    callback mv_search_more();           // 搜索结果加载更多
+    callback mv_search_result_click(int); // 点击搜索结果（id）
+}

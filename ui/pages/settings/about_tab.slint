@@ -1,0 +1,53 @@
+// ============================================================================
+//  pages/settings/about_tab.slint — 关于
+//  版本信息（含检查更新按钮） / 作者信息
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { Button } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component AboutTab inherits VerticalLayout {
+    in property <string> version: "v0.1.0";
+    callback check-update();
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-about; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            Rectangle {
+                height: 52px;
+                HorizontalLayout { spacing: 12px; padding-left: 14px; padding-right: 14px; cross-axis-alignment: center;
+                    Image { source: @image-url("../../assets/icons/versions.svg"); width: 18px; height: 18px; colorize: Theme.palette.icon; }
+                    Text { text: Language.common-current-version; color: Theme.palette.text; font-size: 13.5px; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: root.version; color: Theme.palette.text-faint; font-size: 12px; }
+                    Button { text: Language.common-check-update; clicked => { root.check-update(); } }
+                }
+            }
+            Rectangle {
+                height: 52px;
+                HorizontalLayout { spacing: 12px; padding-left: 14px; padding-right: 14px; cross-axis-alignment: center;
+                    Image { source: @image-url("../../assets/icons/pencil-code.svg"); width: 18px; height: 18px; colorize: Theme.palette.icon; }
+                    Text { text: Language.common-author-info; color: Theme.palette.text; font-size: 13.5px; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: Language.about-author-value; color: Theme.palette.text-faint; font-size: 12px; }
+                }
+            }
+        }
+    }
+
+    Text {
+        text: Language.about-tagline;
+        color: Theme.palette.text-faint;
+        font-size: 12px;
+        horizontal-alignment: center;
+    }
+}

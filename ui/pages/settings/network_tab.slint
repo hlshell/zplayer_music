@@ -1,0 +1,187 @@
+// ============================================================================
+//  pages/settings/network_tab.slint — 网络设置
+//  下载线程数 / 网络缓冲时长 / 代理设置(开关+左侧配置按钮→弹窗) / realip(开关+左侧输入框)
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { SettingSelectRow } from "setting-select-row.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { ScrollableTextInput } from "../../components/scrollable-text-input.slint";
+
+export component NetworkTab inherits VerticalLayout {
+    in-out property <int> threads-index;
+    in-out property <int> buffer-index;
+    in-out property <bool> proxy-enabled;
+    in-out property <string> proxy-host;
+    in-out property <int> proxy-port;
+    in-out property <bool> realip-enabled;
+    in-out property <string> realip-addr;
+    // 平台标识：web（wasm）下隐藏桌面专属行（线程/缓冲/代理/realip）
+    in property <bool> is-web: false;
+    callback open-select(int, string, [string], int);
+    callback toggle-changed(int, bool);
+    callback input-changed(int, string);
+    callback clicked(int);
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-network; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            th := SettingSelectRow {
+                visible: !root.is-web;
+                label: Language.net-threads;
+                desc: Language.net-threads-desc;
+                icon: @image-url("../../assets/icons/arrow-big-down-lines.svg");
+                options: ["1", "2", "4", "8", "16"];
+                current-index <=> root.threads-index;
+                open-requested() => {
+                    root.open-select(9, Language.net-threads, ["1", "2", "4", "8", "16"], root.threads-index);
+                }
+            }
+            // 网络缓冲时长：当前为"整曲下载后播放"架构，无渐进缓冲池，暂不适用——
+            // 隐藏原选择行，原位标注说明（buffer-index 仍持久化保留，待未来接入）
+            HorizontalLayout {
+                padding-left: 14px; padding-right: 14px;
+                Text {
+                    text: Language.net-buffer-note;
+                    color: Theme.palette.text-faint;
+                    font-size: 11.5px;
+                }
+            }
+
+            // ---- 代理：左侧配置按钮（始终显示）+ 右侧开关（web 下整体隐藏）----
+            Rectangle {
+                visible: !root.is-web;
+                height: 58px;
+                border-radius: 10px;
+                background: px-ta.has-hover ? Theme.palette.hover : transparent;
+                // 整行热区必须声明在布局之前（z 序最低）：后声明元素在上，若放在布局之后
+                // 会盖住配置按钮/开关/输入区，点击全落在本行触发开关（realip 同理）
+                px-ta := TouchArea { clicked => { root.proxy-enabled = !root.proxy-enabled; root.toggle-changed(25, root.proxy-enabled); } mouse-cursor: pointer; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-left: 14px; padding-right: 14px;
+                    cross-axis-alignment: center;
+                    Image {
+                        source: @image-url("../../assets/icons/cloud-network.svg");
+                        width: 18px; height: 18px;
+                        colorize: Theme.palette.icon;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: Language.net-proxy; color: Theme.palette.text; font-size: 13.5px; }
+                        Text { text: Language.net-proxy-desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+                    }
+                    // 配置按钮
+                    cfg-btn := Rectangle {
+                        height: 30px; width: 64px;
+                        border-radius: 8px;
+                        background: cfg-ta.has-hover ? Theme.palette.hover : Theme.palette.surface;
+                        border-width: 1px; border-color: Theme.palette.divider;
+                        Text {
+                            text: Language.net-configure;
+                            color: Theme.palette.text;
+                            font-size: 12.5px;
+                            horizontal-alignment: center; vertical-alignment: center;
+                        }
+                        cfg-ta := TouchArea { clicked => { root.clicked(43); } mouse-cursor: pointer; }
+                    }
+                    // 开关
+                    Rectangle {
+                        width: 40px; height: 22px;
+                        border-radius: 11px;
+                        background: root.proxy-enabled ? Theme.palette.primary : Theme.palette.divider-strong;
+                        Rectangle {
+                            width: 18px; height: 18px;
+                            border-radius: 9px;
+                            x: root.proxy-enabled ? parent.width - 18px - 2px : 2px;
+                            y: 2px;
+                            background: Theme.palette.icon-white;
+                            animate x { duration: 140ms; easing: ease-out; }
+                        }
+                        sw-ta := TouchArea {
+                            clicked => { root.proxy-enabled = !root.proxy-enabled; root.toggle-changed(25, root.proxy-enabled); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+            }
+
+            // ---- realip：开关开启后在左侧显示地址输入框 + 右侧开关（web 下整体隐藏）----
+            Rectangle {
+                visible: !root.is-web;
+                height: 58px;
+                border-radius: 10px;
+                background: ri-ta.has-hover ? Theme.palette.hover : transparent;
+                // 整行热区声明在布局之前（z 序最低）：否则盖住 TextInput，输入框无法点击
+                // 且点击输入区域会误触开关
+                ri-ta := TouchArea { clicked => { root.realip-enabled = !root.realip-enabled; root.toggle-changed(24, root.realip-enabled); } mouse-cursor: pointer; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-left: 14px; padding-right: 14px;
+                    cross-axis-alignment: center;
+                    Image {
+                        source: @image-url("../../assets/icons/building-broadcast-tower.svg");
+                        width: 18px; height: 18px;
+                        colorize: Theme.palette.icon;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: Language.net-realip; color: Theme.palette.text; font-size: 13.5px; }
+                        Text { text: Language.net-realip-desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+                    }
+                    // realip 地址输入框（仅开启时显示，位于开关左侧）
+                    if (root.realip-enabled) : Rectangle {
+                        width: 150px; height: 32px;
+                        border-radius: 8px;
+                        background: Theme.palette.surface-solid;
+                        border-width: 1px; border-color: Theme.palette.divider;
+                        // 原生 TextInput 无 placeholder-text 属性，用条件 Text 实现占位符
+                        if (root.realip-addr == "") : Text {
+                            x: 10px;
+                            y: (parent.height - self.height) / 2;
+                            text: Language.net-realip-placeholder;
+                            color: Theme.palette.text-faint;
+                            font-size: 12.5px;
+                        }
+                        ti := ScrollableTextInput {
+                            width: parent.width;
+                            height: parent.height;
+                            padding-x: 10px;
+                            text <=> root.realip-addr;
+                            font-size: 12.5px;
+                            edited => { root.input-changed(51, self.text); }
+                        }
+                    }
+                    // 开关
+                    Rectangle {
+                        width: 40px; height: 22px;
+                        border-radius: 11px;
+                        background: root.realip-enabled ? Theme.palette.primary : Theme.palette.divider-strong;
+                        Rectangle {
+                            width: 18px; height: 18px;
+                            border-radius: 9px;
+                            x: root.realip-enabled ? parent.width - 18px - 2px : 2px;
+                            y: 2px;
+                            background: Theme.palette.icon-white;
+                            animate x { duration: 140ms; easing: ease-out; }
+                        }
+                        sw-ta2 := TouchArea {
+                            clicked => { root.realip-enabled = !root.realip-enabled; root.toggle-changed(24, root.realip-enabled); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

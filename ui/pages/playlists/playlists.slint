@@ -1,0 +1,164 @@
+// ============================================================================
+//  pages/playlists/playlists.slint — 歌单页（每日推荐歌单广场）
+//  顶部固定：标题（随选中分类自动变更）+ 副标题 + 分类 Tab（复用通用 TabBar，悬浮吸顶）
+//  下方 ScrollView 滚动歌单网格（首页式响应式列数 3~5 自适应）；
+//  滚动到接近底部时置 need-more=true，Rust 每 ~200ms 轮询追加下一页。
+//  说明：滚动交给 ScrollView 原生处理（滚轮/拖动/惯性）；卡片点击走自身 clicked；
+//  触底检测监听 content-y（Slint 中为负值域：顶部=0，向下为负）。
+// ============================================================================
+import { PlaylistCard } from "../../components/cards.slint";
+import { Playlist } from "../../components/models.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { TabBar } from "../../components/tab-bar.slint";
+import { CustomScrollBar } from "../../components/scroll.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component PlaylistsPage inherits Rectangle {
+    in property <[Playlist]> playlists;
+    in property <[string]> categories: [];
+    in-out property <int> playlist-cat: 0;
+    in-out property <bool> need-more: false;
+    in-out property <bool> loading-more: false;
+    in-out property <bool> no-more: false;
+    // 上一 tick 的滚动偏移（用于判断"用户是否刚滚动过"，Timer 内比较）
+    property <length> last-scroll-y: 0px;
+    callback category-clicked(int);
+    callback open-playlist(int);
+    callback navigate(int);
+
+    // 内容区宽度（AppWindow 传入：窗口宽 - 侧边栏 208px），与首页网格同口径
+    in property <length> page-w: 900px;
+    // 响应式列数 3~6（与首页一致：每列约 172px 起放得下，行不受限制）
+    property <int> grid-columns: Math.max(3, Math.min(6, Math.floor((page-w - 52px) / 172px)));
+    property <length> grid-card-w: (page-w - 52px - 16px * (grid-columns - 1)) / grid-columns;
+
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-top: 8px;
+
+        // ---- 标题区（固定，随选中分类自动变更）----
+        VerticalLayout {
+            spacing: 3px;
+            padding-left: 26px;
+            padding-right: 26px;
+
+            Text {
+                text: root.categories.length > 0 && root.playlist-cat < root.categories.length
+                    ? root.categories[root.playlist-cat] : Language.page-all-playlists;
+                color: Theme.palette.text;
+                font-size: 22px;
+                font-weight: 700;
+            }
+            Text {
+                text: Language.page-sub-playlists;
+                color: Theme.palette.text-faint;
+                font-size: 13px;
+            }
+        }
+
+        // ---- 分类 Tab（固定悬浮吸顶，复用通用 TabBar）----
+        HorizontalLayout {
+            padding-left: 26px;
+            padding-right: 26px;
+            height: 36px;
+
+            TabBar {
+                width: 100%;
+                items: root.categories;
+                current <=> root.playlist-cat;
+                selected(idx) => { root.category-clicked(idx); }
+            }
+        }
+
+        // ---- 歌单网格滚动区（首页式响应式列数，触底分页加载）----
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            clip: true;
+
+            sv := ScrollView {
+                width: 100%;
+                height: 100%;
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    spacing: 16px;
+                    padding-left: 26px;
+                    padding-right: 26px;
+                    padding-bottom: 20px;
+
+                    Rectangle {
+                        height: Math.max(0px, Math.ceil(root.playlists.length * 1.0 / root.grid-columns) * 192px - 16px);
+                        for p[i] in root.playlists: PlaylistCard {
+                            x: Math.mod(i, root.grid-columns) * (root.grid-card-w + 16px);
+                            y: Math.floor(i / root.grid-columns) * 192px;
+                            width: root.grid-card-w;
+                            height: 176px;
+                            title: p.name;
+                            plays: p.plays;
+                            from: p.from;
+                            to: p.to;
+                            cover: p.cover;
+                            clicked => { root.open-playlist(p.id); }
+                        }
+                    }
+
+                    // 底部提示：加载中 / 没有更多 / 空
+                    Text {
+                        height: 34px;
+                        text: root.loading-more
+                            ? Language.loading-tip
+                            : root.no-more
+                                ? Language.page-no-more
+                                : root.playlists.length > 0 ? "" : "";
+                        color: Theme.palette.text-faint;
+                        font-size: 12.5px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // 自定义竖向滚动条（布局外绝对定位，避免与 sv 形成布局循环）
+            Rectangle {
+                x: sv.x + sv.width - 14px;
+                y: sv.y + 8px;
+                width: 10px;
+                height: sv.height - 16px;
+                CustomScrollBar {
+                    viewport-height: sv.visible-height;
+                    content-height: sv.content-height;
+                    scroll-offset: -sv.content-y;
+                    scroll-to(o) => { sv.content-y = -o; }
+                }
+            }
+
+            // 触底检测（content-y 为负值域，滚动量 = -content-y）+ 内容不足一屏时自动追加
+            Timer {
+                interval: 150ms;
+                triggered => {
+                    // 偏移相对上一 tick 变化 = 用户刚滚动过（滚轮/拖动/惯性/滚动条）
+                    let moved = -sv.content-y != root.last-scroll-y;
+                    root.last-scroll-y = -sv.content-y;
+                    if (!root.no-more && !root.loading-more) {
+                        if (sv.content-height <= sv.visible-height && root.playlists.length < 60) {
+                            // 内容不足一屏且条数未达上限（约 2 页）才自动补页；
+                            // 上限兜底：避免内容撑不满视口时每 150ms 无限串行拉页（过度请求）
+                            root.need-more = true;
+                        } else if (moved && (-sv.content-y) >= sv.content-height - sv.visible-height - 80px) {
+                            // 触底只在滚动后判定一次：否则停在底部会每 150ms 重置
+                            // need-more，Rust 轮询无限串行拉页（界面卡死）
+                            root.need-more = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,333 @@
+// ============================================================================
+//  自定义标题栏 —— 单层全高 HorizontalLayout，保证垂直居中
+//  已接入主题 Token（Theme.palette），并新增「深浅切换」按钮
+// ============================================================================
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+import { ScrollableTextInput } from "./scrollable-text-input.slint";
+
+export component TitleBar inherits Rectangle {
+    callback drag-start(length, length);
+    callback titlebar-clicked();
+    callback win-minimize();
+    callback win-mini();
+    callback win-maximize();
+    callback win-close();
+    callback theme-toggle();
+    callback settings-clicked();
+    callback search-clicked();
+    callback search-text-changed(string);
+    in-out property <string> search-text: "";
+    // 搜索类型：0=单曲 1=专辑 2=歌单 3=MV 4=电台
+    in-out property <int> search-type: 0;
+    // 动态占位（Rust 启动时填热搜第一的歌曲名；空串回落到静态文案）
+    in property <string> search-placeholder: "";
+    // 搜索建议：键盘导航回调 + 面板状态
+    callback suggest-move(int);
+    callback suggest-confirm();
+    callback suggest-close();
+    in property <int> suggest-index: -1;
+    in property <int> suggest-count: 0;
+    // web（wasm）下无窗口系统：运行时隐藏窗口控制组（迷你/最小化/关闭），剩余按钮顺位补位
+    in property <bool> is-web: false;
+    // 搜索胶囊几何（相对 TitleBar，供建议弹出面板定位）
+    in-out property <length> search-box-x: sb.x;
+    in-out property <length> search-box-y: sb.y;
+    in-out property <length> search-box-width: sb.width;
+    in-out property <length> search-box-height: sb.height;
+
+    height: 48px;
+    background: Theme.palette.surface-overlay;
+
+    // 类型菜单开关（in-out：弹层在 AppWindow 层渲染，开关状态与 AppWindow 双向同步；
+    // 定位复用上方 search-box-x/y/width/height）
+    in-out property <bool> type-menu-open: false;
+
+    // 拖拽阈值状态：记录按下位置，位移超阈值才交给系统拖拽
+    property <length> press-x: 0;
+    property <length> press-y: 0;
+    property <bool> drag-fired: false;
+
+    // 全区域背景交互层（必须在按钮层之前声明，按钮在上层可正常点击）：
+    // 空白处按住拖拽移动窗口；单击触发 titlebar-clicked（双击最大化由 Rust 侧判断）。
+    // moved 无阈值曾导致双击的第二击微小位移即触发 drag_window（系统模态循环
+    // 抢占鼠标），打断双击判定 → 最大化“闪跳”，故加 4px 阈值且每次按下只触发一次。
+    TouchArea {
+        x: 0; y: 0;
+        width: 100%;
+        height: 100%;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.press-x = self.mouse-x;
+                root.press-y = self.mouse-y;
+                root.drag-fired = false;
+            }
+        }
+        moved => {
+            if (!root.drag-fired
+                && Math.abs(self.mouse-x - root.press-x) + Math.abs(self.mouse-y - root.press-y) > 4px) {
+                root.drag-fired = true;
+                root.drag-start(self.mouse-x, self.mouse-y);
+            }
+        }
+        clicked => {
+            // 已进入系统拖拽的释放不算单击
+            if (!root.drag-fired) { root.titlebar-clicked(); }
+        }
+    }
+
+    // 底部分割线（不占布局，避免把内容顶上去）
+    Rectangle {
+        y: parent.height - 1px;
+        width: 100%;
+        height: 1px;
+        background: Theme.palette.divider;
+    }
+
+    // 主内容：铺满 48px，交叉轴居中
+    HorizontalLayout {
+        x: 0; y: 0;
+        width: 100%;
+        height: 100%;
+        spacing: 10px;
+        padding-left: 16px;
+        padding-right: 10px;
+        cross-axis-alignment: center;
+
+        // 拖拽区（logo + 标题：纯视觉，交互由背景层统一处理）
+        Rectangle {
+            height: 34px;
+            HorizontalLayout {
+                spacing: 10px;
+                height: 100%;
+                cross-axis-alignment: center;
+
+                Rectangle {
+                    width: 26px; height: 26px;
+                    border-radius: 8px;
+                    clip: true;
+                    Image {
+                        source: @image-url("../assets/logo.png");
+                        width: 26px; height: 26px;
+                    }
+                }
+                Text {
+                    text: "ZPlayer Music";
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: Theme.palette.primary;
+                    letter-spacing: 0.2px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // 搜索胶囊（宽度随窗口自适应 240~480px；纯胶囊式：图标 + 输入区 + 渐变按钮）
+        sb := Rectangle {
+            width: max(240px, min(480px, parent.width * 0.32));
+            height: 32px;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: se-edit.has-focus ? Theme.palette.primary : Theme.palette.divider;
+            background: se-edit.has-focus ? Theme.palette.hover : Theme.palette.hover;
+
+            HorizontalLayout {
+                spacing: 6px;
+                padding-left: 11px;
+                padding-right: 4px;
+                height: 100%;
+                cross-axis-alignment: center;
+
+                // 胶囊内搜索图标（点击 = 触发搜索，替代原渐变按钮）
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: 11px;
+                    background: sic-ta.has-hover ? Theme.palette.divider : transparent;
+                    Image {
+                        source: @image-url("../assets/icons/search-faint.svg");
+                        width: 14px; height: 14px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: se-edit.has-focus ? Theme.palette.primary : Theme.palette.icon-faint;
+                    }
+                    sic-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.search-clicked(); }
+                    }
+                }
+
+                // 输入区：低层 TextInput（无内置边框），占位提示由上层 Text 叠加
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 100%;
+                    se-edit := ScrollableTextInput {
+                        width: 100%; height: 100%;
+                        text <=> root.search-text;
+                        font-size: 13px;
+                        // 注意：组件继承 Rectangle，写 color: 会变成背景填充（黑块根因）；
+                        // 文字色用 text-color（组件默认已是 Theme.palette.text）
+                        edited => { root.search-text-changed(root.search-text); }
+                        key-pressed(e) => {
+                            if (e.text == Key.DownArrow) {
+                                if (root.suggest-count > 0) { root.suggest-move(1); }
+                            } else if (e.text == Key.UpArrow) {
+                                root.suggest-move(-1);
+                            } else if (e.text == Key.Return) {
+                                root.suggest-confirm();
+                            } else if (e.text == Key.Escape) {
+                                root.suggest-close();
+                            }
+                        }
+                    }
+                    // 占位提示（未输入时显示；优先热搜第一歌曲名，Text 不拦截指针，点击穿透聚焦输入）
+                    if (root.search-text == "") : Text {
+                        x: 0; y: 0;
+                        width: 100%; height: 100%;
+                        text: root.search-placeholder == ""
+                            ? Language.titlebar-search-placeholder
+                            : root.search-placeholder;
+                        color: Theme.palette.text-faint;
+                        font-size: 13px;
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                // 类型选择器（替代原渐变"搜索"按钮）：当前类型 + ▾，点击弹出菜单
+                Rectangle {
+                    width: 64px; height: 24px;
+                    border-radius: 12px;
+                    background: type-ta.has-hover ? Theme.palette.divider : Theme.palette.hover;
+                    border-width: 1px;
+                    border-color: Theme.palette.divider;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        // 交叉轴居中：否则 Text/Image 被拉伸到整高，图标变形且偏移
+                        cross-axis-alignment: center;
+                        Text {
+                            text: root.search-type == 1 ? "专辑"
+                                : root.search-type == 2 ? "歌单"
+                                : root.search-type == 3 ? "MV"
+                                : root.search-type == 4 ? "电台"
+                                : "单曲";
+                            color: Theme.palette.text;
+                            font-size: 11.5px;
+                            vertical-alignment: center;
+                        }
+                        Image {
+                            source: @image-url("../assets/icons/caret-down-gray.svg");
+                            width: 9px; height: 5.4px;
+                            colorize: Theme.palette.text-faint;
+                        }
+                    }
+                    type-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.type-menu-open = !root.type-menu-open; }
+                    }
+                }
+            }
+        }
+
+        // 设置
+        Rectangle {
+            width: 30px; height: 30px;
+            border-radius: 15px;
+            background: settings-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../assets/icons/settings-gray.svg");
+                width: 16px; height: 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                colorize: Theme.palette.icon;
+            }
+            settings-ta := TouchArea {
+                clicked => { root.settings-clicked(); }
+                mouse-cursor: pointer;
+            }
+        }
+
+        // 深浅切换（当前为主题则显示 moon，浅色显示 sun；点击切换）
+        Rectangle {
+            width: 30px; height: 30px;
+            border-radius: 15px;
+            background: th-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: Theme.dark
+                    ? @image-url("../assets/icons/moon.svg")
+                    : @image-url("../assets/icons/sun.svg");
+                width: 15px; height: 15px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                colorize: Theme.palette.icon;
+            }
+            th-ta := TouchArea {
+                clicked => { root.theme-toggle(); }
+                mouse-cursor: pointer;
+            }
+        }
+
+        // 迷你窗口模式（picture-in-picture 图标）
+        Rectangle {
+            visible: !root.is-web;
+            width: 40px; height: 32px;
+            border-radius: 8px;
+            background: mini-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../assets/icons/win-min-gray.svg");
+                width: 15px; height: 15px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                colorize: Theme.palette.icon;
+            }
+            mini-ta := TouchArea {
+                clicked => { root.win-mini(); }
+                mouse-cursor: pointer;
+            }
+        }
+
+        // 最小化（window-minimize 图标）
+        Rectangle {
+            visible: !root.is-web;
+            width: 40px; height: 32px;
+            border-radius: 8px;
+            background: min-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../assets/icons/win-minimize-gray.svg");
+                width: 15px; height: 15px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                colorize: Theme.palette.icon;
+            }
+            min-ta := TouchArea {
+                clicked => { root.win-minimize(); }
+                mouse-cursor: pointer;
+            }
+        }
+
+        // 关闭
+        Rectangle {
+            visible: !root.is-web;
+            width: 40px; height: 32px;
+            border-radius: 8px;
+            background: close-touch.has-hover ? #e81123 : transparent;
+            Image {
+                source: close-touch.has-hover
+                    ? @image-url("../assets/icons/win-close-white.svg")
+                    : @image-url("../assets/icons/win-close-gray.svg");
+                width: 14px; height: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                colorize: close-touch.has-hover ? Theme.palette.icon-white : Theme.palette.icon;
+            }
+            close-touch := TouchArea {
+                clicked => { root.win-close(); }
+                mouse-cursor: pointer;
+            }
+        }
+    }
+
+}

@@ -1,0 +1,278 @@
+// ============================================================================
+//  pages/recent.slint — 最近播放页
+//  固定头部（蓝色主题 + 统计 + 清空按钮） + 分类 Tab（歌曲/MV） + 滚动列表
+// ============================================================================
+import { Song } from "../../components/models.slint";
+import { PlaceholderPage } from "../placeholder/placeholder.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// ---- 最近播放歌曲行（含单条删除） ----
+component RecentRow inherits Rectangle {
+    in property <Song> song;
+    in property <int> current-id: 0;
+    callback play(int);
+    callback remove(int);
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 10px; padding-right: 10px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 42px; height: 42px; border-radius: 7px;
+            background: Theme.palette.divider;
+            clip: true;
+            Image { source: song.cover; width: 100%; height: 100%; image-fit: cover; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: song.name;
+                color: song.id == root.current-id ? Theme.palette.primary : Theme.palette.text;
+                font-size: 13px; overflow: elide;
+            }
+            Text {
+                text: song.artist;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+        }
+        Text {
+            text: song.duration;
+            color: Theme.palette.text-faint; font-size: 11px;
+        }
+        // 单条删除
+        Rectangle {
+            width: 28px; height: 28px; border-radius: 14px;
+            background: rm-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../../assets/icons/trash-gray.svg");
+                width: 14px; height: 14px;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon-faint;
+            }
+            rm-ta := TouchArea { mouse-cursor: pointer; clicked => { root.remove(song.id); } }
+        }
+    }
+    row-ta := TouchArea { clicked => { root.play(song.id); } mouse-cursor: pointer; }
+}
+
+// ---- 最近播放 MV 行（封面 + 名称 + 歌手 + MV 徽标 + 单条删除） ----
+component RecentMvRow inherits Rectangle {
+    in property <Song> mv;
+    callback play(int);
+    callback remove(int);
+
+    height: 58px;
+    border-radius: 10px;
+    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 10px; padding-right: 10px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 42px; height: 42px; border-radius: 7px;
+            background: Theme.palette.divider;
+            clip: true;
+            Image { source: mv.cover; width: 100%; height: 100%; image-fit: cover; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: mv.name;
+                color: Theme.palette.text;
+                font-size: 13px; overflow: elide;
+            }
+            Text {
+                text: mv.artist;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+        }
+        Rectangle {
+            height: 18px; border-radius: 9px;
+            background: Theme.palette.active;
+            width: t.preferred-width + 14px;
+            t := Text {
+                text: Language.nav-mv;
+                color: Theme.palette.primary; font-size: 10px; font-weight: 600;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            width: 28px; height: 28px; border-radius: 14px;
+            background: rm-ta.has-hover ? Theme.palette.divider : transparent;
+            Image {
+                source: @image-url("../../assets/icons/trash-gray.svg");
+                width: 14px; height: 14px;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon-faint;
+            }
+            rm-ta := TouchArea { mouse-cursor: pointer; clicked => { root.remove(mv.id); } }
+        }
+    }
+    row-ta := TouchArea { clicked => { root.play(mv.id); } mouse-cursor: pointer; }
+}
+
+// ---- Tab 切换条（与 liked.slint 同款） ----
+component TabBar inherits HorizontalLayout {
+    in-out property <int> active: 0;
+    in property <[string]> labels;
+    callback changed(int);
+
+    spacing: 6px;
+    height: 30px;
+
+    for label[idx] in labels : Rectangle {
+        width: 56px;
+        border-radius: 15px;
+        background: root.active == idx ? Theme.palette.active : transparent;
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.active = idx; root.changed(idx); }
+        }
+        Text {
+            text: label;
+            color: root.active == idx ? Theme.palette.primary : Theme.palette.text-faint;
+            font-size: 12.5px;
+            font-weight: root.active == idx ? 600 : 400;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+// 根组件必须是 Rectangle（同 playlists/albums/mv/radio 验证过的模式）：
+// 继承 VerticalLayout 时页面在外层共享 sv 里被按内容全高展开，内层 sv 被撑满
+// 不滚动且吞掉滚轮事件，外层 sv 收不到 → 整页无法滚动
+export component RecentPage inherits Rectangle {
+    in property <[Song]> songs;
+    in property <[Song]> mvs;
+    in-out property <int> tab: 0;
+    in property <int> current-id: 0;
+    callback play-song(int);
+    callback play-mv(int);
+    callback remove(int);
+    callback clear();
+    callback tab-changed(int);
+
+    VerticalLayout {
+        width: 100%; height: 100%;
+        spacing: 14px;
+        padding-top: 8px;
+        padding-bottom: 0;
+        padding-left: 26px;
+        padding-right: 26px;
+
+    // ---- 固定头部（不随列表滚动） ----
+    Rectangle {
+        height: 100px;
+        border-radius: 14px;
+        clip: true;
+        background: @linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+        HorizontalLayout {
+            spacing: 16px;
+            padding: 18px;
+            cross-axis-alignment: center;
+            Rectangle {
+                width: 64px; height: 64px;
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 0.20);
+                Image {
+                    source: @image-url("../../assets/icons/recent-gray.svg");
+                    width: 30px; height: 30px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: Language.nav-recent; color: white; font-size: 20px; font-weight: 700; }
+                Text { text: Language.recent-count-prefix + (root.songs.length + root.mvs.length) + Language.recent-count-unit; color: rgba(255,255,255,0.85); font-size: 12.5px; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            // 清空记录（与播放列表清空一致：无确认直接执行）
+            if (root.songs.length + root.mvs.length > 0) : Rectangle {
+                width: clear-t.preferred-width + 22px;
+                height: 30px; border-radius: 15px;
+                background: clear-ta.has-hover ? rgba(255,255,255,0.28) : rgba(255,255,255,0.18);
+                clear-t := Text {
+                    text: Language.recent-clear;
+                    color: white; font-size: 12px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                clear-ta := TouchArea { mouse-cursor: pointer; clicked => { root.clear(); } }
+            }
+        }
+        Rectangle {
+            width: 130px; height: 130px; border-radius: 65px;
+            x: parent.width - 30px; y: -30px;
+            background: rgba(255, 255, 255, 0.12);
+        }
+    }
+
+    // ---- 分类 Tab（固定，不滚动） ----
+    TabBar {
+        active: root.tab;
+        labels: [Language.suggest-kind-song, Language.nav-mv];
+        changed(idx) => { root.tab = idx; root.tab-changed(idx); }
+    }
+
+    // ---- 滚动内容区 ----
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+        sv := ScrollView {
+            width: 100%; height: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+            VerticalLayout {
+                spacing: 0;
+                padding-bottom: 20px;
+                // 直接将行放入 ScrollView 内容布局（不套无显式高度的 wrapper），
+                // 否则 wrapper 的 preferred-height 无法被 ScrollView 正确协商 → 不可滚动。
+                // 与 search.slint 中 SongList 直接置于 ScrollView 内的模式一致。
+
+                // 歌曲 tab
+                if (root.tab == 0 && root.songs.length > 0) : VerticalLayout {
+                    height: root.songs.length * 58px;
+                    spacing: 0;
+                    for s in root.songs : RecentRow {
+                        song: s;
+                        current-id: root.current-id;
+                        play(id) => { root.play-song(id); }
+                        remove(id) => { root.remove(id); }
+                    }
+                }
+                if (root.tab == 0 && root.songs.length == 0) : PlaceholderPage {
+                    icon: "⏱";
+                    title: Language.recent-empty-title;
+                    desc: Language.recent-empty-desc;
+                }
+
+                // MV tab
+                if (root.tab == 1 && root.mvs.length > 0) : VerticalLayout {
+                    height: root.mvs.length * 58px;
+                    spacing: 0;
+                    for m in root.mvs : RecentMvRow {
+                        mv: m;
+                        play(id) => { root.play-mv(id); }
+                        remove(id) => { root.remove(id); }
+                    }
+                }
+                if (root.tab == 1 && root.mvs.length == 0) : PlaceholderPage {
+                    icon: "🎬";
+                    title: Language.recent-empty-mv-title;
+                    desc: Language.recent-empty-mv-desc;
+                }
+            }
+        }
+    }
+    }
+}

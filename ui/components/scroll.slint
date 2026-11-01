@@ -1,0 +1,53 @@
+// ============================================================================
+//  scroll.slint — 自定义竖向滚动条（叠加到隐藏了内置滚动条的 ScrollView 上）
+//  已接入主题 Token（Theme.palette.scroll-*）
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+export component CustomScrollBar inherits Rectangle {
+    in property <length> viewport-height: 0px;   // 视口高度（ScrollView.visible-height）
+    in property <length> content-height: 0px;    // 内容高度（ScrollView.content-height）
+    in property <length> scroll-offset: 0px;     // 当前滚动偏移（0=顶部，正值向下；ScrollView 的 content-y 为负值域，调用侧传 -content-y）
+    callback scroll-to(length);                  // 写回滚动位置
+
+    // 是否有内容溢出（决定滚动条是否显示）
+    property <bool> overflow: root.content-height > root.viewport-height;
+    // 最大可滚动量
+    property <length> max-scroll: max(0px, root.content-height - root.viewport-height);
+    // 滑块高度：视口占比，保底 18px 便于抓取
+    property <length> thumb-h: max(18px, root.height * min(1.0, root.viewport-height / max(1px, root.content-height)));
+
+    // 轨道（仅溢出时显示）
+    Rectangle {
+        visible: root.overflow;
+        width: 6px;
+        height: 100%;
+        x: (parent.width - 6px) / 2;
+        border-radius: 3px;
+        background: Theme.palette.scroll-track;
+
+        th := Rectangle {
+            width: parent.width;
+            height: root.thumb-h;
+            y: (parent.height - root.thumb-h) * min(1.0, root.scroll-offset / max(1px, root.max-scroll));
+            border-radius: 3px;
+            background: ta.has-hover ? Theme.palette.scroll-thumb-hover : Theme.palette.scroll-thumb;
+        }
+
+        ta := TouchArea {
+            visible: root.overflow;
+            moved => {
+                root.scroll-to(
+                    min(root.max-scroll, max(0px,
+                        (self.mouse-y - root.thumb-h / 2) * (root.max-scroll / max(1px, parent.height - root.thumb-h))
+                    ))
+                );
+            }
+            scroll-event(e) => {
+                root.scroll-to(min(root.max-scroll, max(0px, root.scroll-offset + (e.delta-y / 1px) * 30px)));
+                accept
+            }
+            mouse-cursor: pointer;
+        }
+    }
+}

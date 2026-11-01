@@ -1,0 +1,83 @@
+// ============================================================================
+//  theme.slint — 主题/配色 Token 与明暗两套预设
+//  全局 Theme（global）：任何组件直接读 Theme.palette.xxx，无需逐层传参。
+//  - 深浅是"整体"维度：dark 翻转即全窗切换（底色/文字/分割线/图标/滚动条）。
+//  - 皮肤主色 + 壁纸是"正交"维度：skin-primary 覆盖主色、skin-image 铺壁纸，
+//    暂只预埋接口（见底部），本版不渲染壁纸，深浅与皮肤互不锁定。
+// ============================================================================
+
+export struct Palette {
+    primary: color,
+    primary-strong: color,      // 渐变亮端（hover 用）
+    secondary: color,
+    window-bg: color,           // 窗口/内容底色
+    surface: color,             // 播放条/卡片/半透明面板
+    surface-overlay: color,     // 侧边栏半透明
+    surface-solid: color,       // 抽屉/列表/弹窗近不透明底
+    text: color,
+    text-secondary: color,
+    text-faint: color,
+    divider: color,
+    divider-strong: color,
+    hover: color,               // 悬停遮罩
+    active: color,              // 激活项底色
+    icon: color,
+    icon-faint: color,
+    icon-white: color,
+    icon-danger: color,         // 红爱心等语义色（两套主题保持一致）
+    scroll-track: color,
+    scroll-thumb: color,
+    scroll-thumb-hover: color,
+}
+
+export global Theme {
+    // 明暗切换：整体维度。切换只需翻转 dark，palette 自动重算，全窗联动。
+    in-out property <bool> dark: false;
+    // 主题色（0=紫青 1=青绿 2=橙红 3=蓝紫）：驱动 primary/secondary/滚动条等强调色。
+    // 由 appwindow 的 theme-color-index 双向绑定（设置页选择 + Rust 持久化）。
+    in-out property <int> theme-color-index: 0;
+    in-out property <Palette> palette: {
+        primary: self.theme-color-index == 0 ? (self.dark ? #8b7cf2 : #6c5ce7)
+               : self.theme-color-index == 1 ? (self.dark ? #34d399 : #0ea371)
+               : self.theme-color-index == 2 ? (self.dark ? #fb923c : #ea580c)
+               : (self.dark ? #93c5fd : #3b82f6),
+        primary-strong: self.theme-color-index == 0 ? (self.dark ? #9a8df5 : #7a5cf0)
+               : self.theme-color-index == 1 ? (self.dark ? #4ade80 : #12b981)
+               : self.theme-color-index == 2 ? (self.dark ? #fdba74 : #f97316)
+               : (self.dark ? #bfdbfe : #60a5fa),
+        secondary: self.theme-color-index == 0 ? (self.dark ? #29c7e8 : #0fb9d4)
+               : self.theme-color-index == 1 ? (self.dark ? #5eead4 : #2dd4bf)
+               : self.theme-color-index == 2 ? (self.dark ? #ff8787 : #e03131)
+               : (self.dark ? #a78bfa : #7c3aed),
+        window-bg: self.dark ? #17151f : #f4f2ff,
+        surface: self.dark ? rgba(31, 28, 42, 0.9) : rgba(255, 255, 255, 0.85),
+        surface-overlay: self.dark ? rgba(31, 28, 42, 0.62) : rgba(255, 255, 255, 0.55),
+        surface-solid: self.dark ? rgba(26, 23, 36, 0.98) : rgba(250, 250, 252, 0.98),
+        text: self.dark ? #f0eff5 : #1a1d23,
+        text-secondary: self.dark ? #c2c0cd : #5a6472,
+        text-faint: self.dark ? #8b8898 : #9aa3b0,
+        divider: self.dark ? rgba(255, 255, 255, 0.10) : rgba(0, 0, 0, 0.08),
+        divider-strong: self.dark ? rgba(255, 255, 255, 0.16) : rgba(0, 0, 0, 0.14),
+        hover: self.dark ? rgba(255, 255, 255, 0.08) : rgba(0, 0, 0, 0.05),
+        active: self.dark ? #3a3550 : #e6e9f0,
+        icon: self.dark ? #c2c0cd : #5a6472,
+        icon-faint: self.dark ? #8b8898 : #9aa3b0,
+        icon-white: #ffffff,
+        icon-danger: #e03131,
+        scroll-track: self.dark ? rgba(255, 255, 255, 0.08) : rgba(0, 0, 0, 0.06),
+        scroll-thumb: self.theme-color-index == 0 ? (self.dark ? rgba(139, 124, 242, 0.45) : rgba(108, 92, 231, 0.32))
+               : self.theme-color-index == 1 ? (self.dark ? rgba(52, 211, 153, 0.45) : rgba(14, 163, 113, 0.32))
+               : self.theme-color-index == 2 ? (self.dark ? rgba(251, 146, 60, 0.45) : rgba(234, 88, 12, 0.32))
+               : (self.dark ? rgba(147, 197, 253, 0.45) : rgba(59, 130, 246, 0.32)),
+        scroll-thumb-hover: self.theme-color-index == 0 ? (self.dark ? #8b7cf2 : #6c5ce7)
+               : self.theme-color-index == 1 ? (self.dark ? #34d399 : #0ea371)
+               : self.theme-color-index == 2 ? (self.dark ? #fb923c : #ea580c)
+               : (self.dark ? #93c5fd : #3b82f6),
+    };
+
+    // ===== 未来静态壁纸皮肤预埋（本版暂不渲染）=====
+    // 皮肤主色：非 transparent 时覆盖 palette.primary/secondary（由 Rust 写入）
+    in-out property <color> skin-primary: transparent;
+    // 壁纸图：空 image 用纯色 window-bg；非空时由 Rust 设置并作为窗口背景渲染
+    in-out property <image> skin-image;
+}

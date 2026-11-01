@@ -1,0 +1,77 @@
+// ============================================================================
+//  loading.slint — 通用加载中（各内容页共用）
+//  用法：if (root.loading) : LoadingView { tip: "加载中…"; }
+// ============================================================================
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+export component LoadingView inherits Rectangle {
+    in property <string> tip: Language.loading-tip;
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 200px;
+    background: transparent;
+
+    // 0~1 循环，用于旋转
+    property <float> spin: mod(animation-tick() / 0.9s, 1.0);
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        alignment: center;
+        spacing: 16px;
+
+        // 转圈指示器
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            background: transparent;
+
+            // 底圈（轨道）
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                border-width: 3px;
+                border-color: Theme.palette.scroll-track;
+            }
+
+            // 旋转高亮点（沿圆周运动）
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                background: Theme.palette.primary;
+                x: 15px + 14px * cos(360deg * root.spin - 90deg);
+                y: 15px + 14px * sin(360deg * root.spin - 90deg);
+            }
+            // 拖尾（半透明）
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.palette.primary;
+                opacity: 0.45;
+                x: 16px + 14px * cos(360deg * root.spin - 90deg - 40deg);
+                y: 16px + 14px * sin(360deg * root.spin - 90deg - 40deg);
+            }
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.palette.primary;
+                opacity: 0.25;
+                x: 17px + 14px * cos(360deg * root.spin - 90deg - 80deg);
+                y: 17px + 14px * sin(360deg * root.spin - 90deg - 80deg);
+            }
+        }
+
+        Text {
+            text: root.tip;
+            color: Theme.palette.text-faint;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}

@@ -1,0 +1,224 @@
+// ============================================================================
+//  close-dialog.slint — 应用内关闭确认卡片（覆盖在主窗口上，不再弹原生对话框）
+//  遮罩空白 / Esc / 右上角 × = 取消；退出应用 / 最小化到托盘 = 执行
+//  「记住我的选择」勾选后由 Rust 写回 close-behavior-index（与设置页一致）
+// ============================================================================
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+export component CloseDialog inherits Rectangle {
+    in-out property <bool> remember: false;
+    property <string> title: Language.close-title;
+    property <string> subtitle: Language.close-subtitle;
+    callback cancel();
+    callback exit-app();
+    callback minimize-to-tray();
+
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.38);
+
+    // 遮罩空白处点击 = 取消
+    TouchArea {
+        clicked => { root.cancel(); }
+    }
+
+    // Esc = 取消（对话框打开时抢键盘焦点）
+    FocusScope {
+        width: 0;
+        height: 0;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == "\u{1b}") {
+                root.cancel();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    card := Rectangle {
+        width: min(380px, parent.width - 48px);
+        height: 188px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 14px;
+        background: Theme.palette.surface-solid;
+        drop-shadow-blur: 32px;
+        drop-shadow-color: rgba(0, 0, 0, 0.30);
+        drop-shadow-offset-y: 10px;
+
+        // 卡片区域拦截点击（点卡片空白不关对话框）
+        TouchArea { }
+
+        // ---- 标题 ----
+        Text {
+            x: 24px;
+            y: 20px;
+            width: parent.width - 48px;
+            height: 24px;
+            text: root.title;
+            color: Theme.palette.text;
+            font-size: 17px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+
+        // ---- 右上角关闭（×）----
+        close-hit := Rectangle {
+            x: parent.width - 24px - 24px;
+            y: 18px;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: close-touch.has-hover ? Theme.palette.hover : transparent;
+
+            Path {
+                x: 6px;
+                y: 6px;
+                width: 12px;
+                height: 12px;
+                commands: "M 0 0 L 12 12 M 12 0 L 0 12";
+                stroke: Theme.palette.icon-faint;
+                stroke-width: 1.6px;
+            }
+
+            close-touch := TouchArea {
+                clicked => { root.cancel(); }
+            }
+        }
+
+        // ---- 副标题 ----
+        Text {
+            x: 24px;
+            y: 46px;
+            width: parent.width - 48px;
+            height: 18px;
+            text: root.subtitle;
+            color: Theme.palette.text-secondary;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        // ---- 记住我的选择（圆形复选框 + 文案，水平排布）----
+        remember-row := Rectangle {
+            x: 24px;
+            y: 88px;
+            width: parent.width - 48px;
+            height: 28px;
+            background: transparent;
+
+            HorizontalLayout {
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                spacing: 8px;
+                alignment: start;
+                cross-axis-alignment: center;
+
+                box := Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    border-width: 1.5px;
+                    border-color: root.remember ? Theme.palette.primary : Theme.palette.divider-strong;
+                    background: root.remember ? Theme.palette.primary : transparent;
+
+                    if (root.remember) : Path {
+                        x: 4px;
+                        y: 4px;
+                        width: 10px;
+                        height: 10px;
+                        commands: "M 0 4 L 3.5 9 L 10 0";
+                        stroke: #ffffff;
+                        stroke-width: 1.8px;
+                    }
+                }
+
+                Text {
+                    text: Language.close-remember;
+                    color: Theme.palette.text-secondary;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+            }
+
+            TouchArea {
+                clicked => { root.remember = !root.remember; }
+            }
+        }
+
+        // ---- 底部按钮行（右对齐：取消 / 退出应用 / 最小化到托盘）----
+        HorizontalLayout {
+            x: 24px;
+            y: parent.height - 20px - 36px;
+            width: parent.width - 48px;
+            height: 36px;
+            spacing: 6px;
+            alignment: end;
+
+            // 取消（文字按钮）
+            Rectangle {
+                width: cancel-label.preferred-width + 28px;
+                height: 36px;
+                border-radius: 18px;
+                background: cancel-ta.has-hover ? Theme.palette.hover : transparent;
+
+                cancel-label := Text {
+                    text: Language.common-cancel;
+                    color: Theme.palette.text-secondary;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                cancel-ta := TouchArea {
+                    clicked => { root.cancel(); }
+                }
+            }
+
+            // 退出应用（文字按钮）
+            Rectangle {
+                width: exit-label.preferred-width + 28px;
+                height: 36px;
+                border-radius: 18px;
+                background: exit-ta.has-hover ? Theme.palette.hover : transparent;
+
+                exit-label := Text {
+                    text: Language.close-exit-app;
+                    color: Theme.palette.text;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                exit-ta := TouchArea {
+                    clicked => { root.exit-app(); }
+                }
+            }
+
+            // 最小化到托盘（主色实心按钮，跟随主题色）
+            Rectangle {
+                width: tray-label.preferred-width + 32px;
+                height: 36px;
+                border-radius: 18px;
+                background: tray-ta.has-hover ? Theme.palette.primary-strong : Theme.palette.primary;
+
+                tray-label := Text {
+                    text: Language.app-close-tray;
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                tray-ta := TouchArea {
+                    clicked => { root.minimize-to-tray(); }
+                }
+            }
+        }
+    }
+}

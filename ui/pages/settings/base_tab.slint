@@ -1,0 +1,73 @@
+// ============================================================================
+//  pages/settings/base_tab.slint — 基础设置
+//  主题模式 / 开机自启 / 语言设置 / 字体设置
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { SettingSelectRow } from "setting-select-row.slint";
+import { SettingToggleRow } from "setting-toggle-row.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component BaseTab inherits VerticalLayout {
+    in-out property <bool> dark;
+    in-out property <bool> auto-launch;
+    in-out property <int> language-index;
+    in-out property <[string]> language-options;
+    in-out property <int> font-index;
+    // 平台标识：web（wasm）下隐藏桌面专属行（开机自启）
+    in property <bool> is-web: false;
+    callback open-select(int, string, [string], int);
+    callback toggle-changed(int, bool);
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-basic; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            tm := SettingSelectRow {
+                label: Language.base-theme-mode;
+                desc: Language.base-theme-mode-desc;
+                icon: @image-url("../../assets/icons/sun.svg");
+                options: [Language.base-light, Language.base-dark];
+                current-index: root.dark ? 1 : 0;
+                open-requested() => {
+                    root.open-select(1, Language.base-theme-mode, [Language.base-light, Language.base-dark], root.dark ? 1 : 0);
+                }
+            }
+            la := SettingToggleRow {
+                visible: !root.is-web;
+                label: Language.base-auto-launch;
+                desc: Language.base-auto-launch-desc;
+                icon: @image-url("../../assets/icons/power.svg");
+                checked <=> root.auto-launch;
+                toggled(c) => { root.toggle-changed(21, c); }
+            }
+            lg := SettingSelectRow {
+                label: Language.base-language;
+                desc: Language.base-language-desc;
+                icon: @image-url("../../assets/icons/language.svg");
+                options: root.language-options;
+                current-index <=> root.language-index;
+                open-requested() => {
+                    root.open-select(2, Language.base-language, root.language-options, root.language-index);
+                }
+            }
+            ft := SettingSelectRow {
+                label: Language.base-font;
+                desc: Language.base-font-desc;
+                icon: @image-url("../../assets/icons/typography.svg");
+                options: [Language.base-font-default, Language.base-font-yahei, Language.base-font-sourcehan];
+                current-index <=> root.font-index;
+                open-requested() => {
+                    root.open-select(3, Language.base-font, [Language.base-font-default, Language.base-font-yahei, Language.base-font-sourcehan], root.font-index);
+                }
+            }
+        }
+    }
+}

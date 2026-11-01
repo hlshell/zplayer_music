@@ -1,0 +1,319 @@
+// ============================================================================
+//  pages/settings/settings.slint — 设置页外壳
+//  顶部固定 TabBar（不随内容滚动）+ 下方内容区自由滚动（内层 ScrollView）。
+//  集中管理 7 个 tab 的全部状态与对外 callback；选择/代理弹窗渲染在非裁剪覆盖层。
+//  对接 appwindow：所有 in-out property / callback 由 appwindow 双向绑定到 Rust。
+// ============================================================================
+import { TabBar } from "../../components/tab-bar.slint";
+import { CustomScrollBar } from "../../components/scroll.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { BaseTab } from "base_tab.slint";
+import { PlayTab } from "play_tab.slint";
+import { AppTab } from "app_tab.slint";
+import { NetworkTab } from "network_tab.slint";
+import { SystemTab } from "system_tab.slint";
+import { AboutTab } from "about_tab.slint";
+import { DonateTab } from "donate_tab.slint";
+import { SelectPopup } from "select-popup.slint";
+import { ProxyPopup } from "proxy-popup.slint";
+import { SourcesPopup, SourceEntry } from "sources-popup.slint";
+
+export component SettingsPage inherits Rectangle {
+
+    // ---- 对外状态（appwindow/Rust 双向绑定）----
+    in-out property <int> tab-index: 0;
+    // web 下隐藏"网络设置/系统管理"两个整 tab（其下全部为桌面专属项）：
+    // tab-map 把可见索引映射回桌面索引（可见序 → 真实序），TabBar items 同步过滤。
+    property <[int]> tab-map: root.is-web ? [0, 1, 2, 5, 6] : [0, 1, 2, 3, 4, 5, 6];
+    property <int> real-tab: root.tab-map[root.tab-index];
+    // 基础
+    in-out property <bool> dark;
+    in-out property <bool> auto-launch;
+    in-out property <int> language-index;
+    in-out property <[string]> language-options;
+    in-out property <int> font-index;
+    // 播放
+    in-out property <int> quality-index;
+    in-out property <int> source-index;
+    in-out property <bool> auto-play;
+    in property <[string]> output-devices: [];
+    in-out property <int> output-index;
+    // 洛雪音源脚本
+    in-out property <bool> lx-fallback-enabled;
+    in-out property <bool> lx-auto-update;
+    in property <[string]> script-names: [];
+    in property <bool> is-web: false;
+    // 应用
+    in-out property <int> theme-color-index;
+    in-out property <bool> lyrics-style;
+    in-out property <int> close-behavior-index;
+    // 网络
+    in-out property <int> threads-index;
+    in-out property <int> buffer-index;
+    in-out property <bool> proxy-enabled;
+    in-out property <int> proxy-type;
+    in-out property <string> proxy-host;
+    in-out property <int> proxy-port;
+    in-out property <bool> realip-enabled;
+    in-out property <string> realip-addr;
+    // 系统
+    in-out property <bool> cache-enabled;
+    in-out property <string> cache-dir;
+    in-out property <string> cache-limit-text;
+    in-out property <int> cache-limit-mb;
+    in-out property <int> evict-index;
+    in-out property <float> cache-percent;
+    in-out property <int> music-count;
+    in-out property <int> lyric-count;
+    in-out property <int> cover-count;
+    // 缓存清理进行中（禁用清理/刷新按钮）
+    in-out property <bool> sys-clearing: false;
+    // 关于
+    in property <string> version: "v0.1.0";
+
+    // ---- 对外回调（appwindow → Rust）----
+    callback select-changed(int, int);
+    callback toggle-changed(int, bool);
+    callback input-changed(int, string);
+    callback clicked(int);
+    callback proxy-submit(int, string, string);
+    callback cache-refresh();
+    callback clear-cache(int);
+    callback check-update();
+    callback donate-clicked();
+    callback navigate(int);
+
+    // ---- 选择弹窗内部状态（居中，不锚定）----
+    in-out property <int> active-select: -1;
+    in-out property <string> active-title: "";
+    in-out property <[string]> active-options: [];
+    in-out property <int> active-index: 0;
+    callback open-select(int, string, [string], int);
+    callback select-picked(int, int);
+
+    // ---- 代理弹窗内部状态 ----
+    in-out property <bool> active-proxy: false;
+    // ---- 音源查看弹窗内部状态 ----
+    in-out property <bool> active-sources: false;
+    property <[SourceEntry]> source-entries: [
+        { name: Language.sources-netease, state: Language.sources-connected, ok: true },
+        { name: Language.sources-soundcloud, state: Language.sources-connected, ok: true },
+        { name: Language.sources-qq, state: Language.sources-pending, ok: false },
+        { name: Language.sources-kugou, state: Language.sources-pending, ok: false },
+        { name: Language.sources-kuwo, state: Language.sources-pending, ok: false },
+        { name: Language.sources-migu, state: Language.sources-pending, ok: false },
+        { name: Language.sources-youtube, state: Language.sources-pending, ok: false },
+    ];
+
+    // ---- 选择弹窗：记录请求并展示（id 路由到属性 + 对外通知）----
+    open-select(id, title, opts, idx) => {
+        root.active-select = id;
+        root.active-title = title;
+        root.active-options = opts;
+        root.active-index = idx;
+    }
+    select-picked(id, idx) => {
+        if (id == 1) { root.dark = idx == 1; }
+        else if (id == 2) { root.language-index = idx; }
+        else if (id == 3) { root.font-index = idx; }
+        else if (id == 4) { root.quality-index = idx; }
+        else if (id == 5) { root.source-index = idx; }
+        else if (id == 6) { root.output-index = idx; }
+        else if (id == 7) { root.theme-color-index = idx; }
+        else if (id == 8) { root.close-behavior-index = idx; }
+        else if (id == 9) { root.threads-index = idx; }
+        else if (id == 10) { root.buffer-index = idx; }
+        else if (id == 13) { root.evict-index = idx; }
+        else if (id == 14) { root.lyrics-style = idx == 0; }
+        root.select-changed(id, idx);
+    }
+
+    VerticalLayout {
+        spacing: 0;
+
+        // ---- 顶部固定 Tab 栏（不随内容滚动）----
+        Rectangle {
+            height: 54px;
+            background: Theme.palette.surface;
+            Rectangle {
+                y: parent.height - 1px;
+                x: 0;
+                width: 100%; height: 1px;
+                background: Theme.palette.divider;
+            }
+            HorizontalLayout { padding-left: 20px; padding-right: 20px; cross-axis-alignment: center;
+                TabBar {
+                    // web：过滤掉全桌面专属的网络设置/系统管理（索引经 tab-map 重映射）
+                    items: root.is-web
+                        ? [Language.tab-basic, Language.tab-play, Language.tab-app, Language.tab-about, Language.tab-donate]
+                        : [Language.tab-basic, Language.tab-play, Language.tab-app, Language.tab-network, Language.tab-system, Language.tab-about, Language.tab-donate];
+                    current <=> root.tab-index;
+                    bar-height: 34px;
+                }
+            }
+        }
+
+        // ---- 内容区：内层 ScrollView（Tab 固定，下方内容自由滚动）----
+        Rectangle {
+            vertical-stretch: 1;
+            width: 100%;
+            clip: true;
+            VerticalLayout {
+                width: 100%; height: 100%; spacing: 0;
+                sv := ScrollView {
+                    vertical-stretch: 1;
+                    vertical-scrollbar-policy: always-off;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalLayout { spacing: 0;
+                        if (root.real-tab == 0) : base := BaseTab {
+                            is-web: root.is-web;
+                            dark <=> root.dark;
+                            auto-launch <=> root.auto-launch;
+                            language-index <=> root.language-index;
+                            language-options <=> root.language-options;
+                            font-index <=> root.font-index;
+                            open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            toggle-changed(id, c) => { root.toggle-changed(id, c); }
+                        }
+                        if (root.real-tab == 1) : play := PlayTab {
+                            is-web: root.is-web;
+                            quality-index <=> root.quality-index;
+                            source-index <=> root.source-index;
+                            auto-play <=> root.auto-play;
+                            output-devices: root.output-devices;
+                            output-index <=> root.output-index;
+                            lx-fallback-enabled <=> root.lx-fallback-enabled;
+                            lx-auto-update <=> root.lx-auto-update;
+                            script-names: root.script-names;
+                            open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            toggle-changed(id, c) => { root.toggle-changed(id, c); }
+                            clicked(id) => { root.clicked(id); }
+                            show-sources() => { root.active-sources = true; }
+                        }
+                        if (root.real-tab == 2) : app := AppTab {
+                            is-web: root.is-web;
+                            theme-color-index <=> root.theme-color-index;
+                            lyrics-style <=> root.lyrics-style;
+                            close-behavior-index <=> root.close-behavior-index;
+                            open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            clicked(id) => { root.clicked(id); }
+                        }
+                        if (root.real-tab == 3) : net := NetworkTab {
+                            is-web: root.is-web;
+                            threads-index <=> root.threads-index;
+                            buffer-index <=> root.buffer-index;
+                            proxy-enabled <=> root.proxy-enabled;
+                            proxy-host <=> root.proxy-host;
+                            proxy-port <=> root.proxy-port;
+                            realip-enabled <=> root.realip-enabled;
+                            realip-addr <=> root.realip-addr;                            open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            toggle-changed(id, c) => { root.toggle-changed(id, c); }
+                            input-changed(id, t) => { root.input-changed(id, t); }
+                            clicked(id) => {
+                                if (id == 43) { root.active-proxy = true; }
+                                else { root.clicked(id); }
+                            }
+                        }
+                        if (root.real-tab == 4) : sys := SystemTab {
+                            is-web: root.is-web;
+                            cache-enabled <=> root.cache-enabled;
+                            cache-dir <=> root.cache-dir;
+                            cache-limit-text <=> root.cache-limit-text;
+                            cache-limit-mb <=> root.cache-limit-mb;
+                            evict-index <=> root.evict-index;
+                            cache-percent <=> root.cache-percent;
+                            music-count <=> root.music-count;
+                            lyric-count <=> root.lyric-count;
+                            cover-count <=> root.cover-count;
+                            clearing <=> root.sys-clearing;
+                            open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            toggle-changed(id, c) => { root.toggle-changed(id, c); }
+                            input-changed(id, t) => { root.input-changed(id, t); }
+                            clicked(id) => { root.clicked(id); }
+                            cache-refresh() => { root.cache-refresh(); }
+                            clear-cache(k) => { root.clear-cache(k); }
+                        }
+                        if (root.real-tab == 5) : AboutTab {
+                            version: root.version;
+                            check-update() => { root.check-update(); }
+                        }
+                        if (root.real-tab == 6) : DonateTab {
+                            donate-clicked() => { root.donate-clicked(); }
+                        }
+                    }
+                }
+            }
+            // 自定义竖向滚动条（布局外，用 x/y 定位，避免与 sv 形成布局循环）
+            sb := Rectangle {
+                x: sv.x + sv.width - 14px;
+                y: sv.y + 8px;
+                width: 10px;
+                height: sv.height - 16px;
+                CustomScrollBar {
+                    viewport-height: sv.visible-height;
+                    content-height: sv.content-height;
+                    scroll-offset: -sv.content-y;
+                    scroll-to(o) => { sv.content-y = -o; }
+                }
+            }
+        }
+    }
+
+    // ---- 选择弹窗覆盖层（居中，非裁剪，放在内容区之上）----
+    // 覆盖层加半透明遮罩：内容区变暗突出弹窗，弹窗保持清晰
+    if (root.active-select >= 0) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.35);
+        // 点击遮罩关闭
+        mask-ta := TouchArea { clicked => { root.active-select = -1; } }
+        SelectPopup {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            title: root.active-title;
+            options: root.active-options;
+            current-index: root.active-index;
+            picked(idx) => {
+                root.select-picked(root.active-select, idx);
+                root.active-select = -1;
+            }
+        }
+    }
+
+    // ---- 代理配置弹窗覆盖层（居中）----
+    if (root.active-proxy) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.35);
+        mask-ta2 := TouchArea { clicked => { root.active-proxy = false; } }
+        ProxyPopup {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            title: Language.proxy-title;
+            type-index: root.proxy-type;
+            host: root.proxy-host;
+            port: root.proxy-port != 0 ? root.proxy-port + "" : "";
+            submit(t, h, p) => {
+                root.proxy-type = t;
+                root.proxy-host = h;
+                root.proxy-port = p.to-float() >= 0 ? Math.round(p.to-float()) : 0;
+                root.active-proxy = false;
+                root.proxy-submit(t, h, p);
+            }
+            closed() => { root.active-proxy = false; }
+        }
+    }
+
+    // ---- 音源查看弹窗覆盖层（居中，只读）----
+    if (root.active-sources) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.35);
+        mask-ta3 := TouchArea { clicked => { root.active-sources = false; } }
+        SourcesPopup {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            items: root.source-entries;
+            closed() => { root.active-sources = false; }
+        }
+    }
+}

@@ -1,0 +1,269 @@
+name: Release
+
+# 触发方式：
+#  1) 推送 v* 标签（推荐）：git tag v0.2.1 && git push origin v0.2.1
+#  2) Actions 页面手动触发并输入版本号
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本号（如 v0.2.1）'
+        required: true
+        default: 'v0.2.1'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ==================== Windows x64 ====================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # vcpkg 编译 FFmpeg 耗时较长，缓存 installed 与二进制包档案
+      - name: 缓存 vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-ffmpeg-x64-windows-v1
+          restore-keys: vcpkg-ffmpeg-x64-windows-
+
+      - name: 安装 FFmpeg（vcpkg，MSVC 动态库）
+        run: vcpkg install ffmpeg:x64-windows
+
+      - name: 配置编译环境（pkg-config / libclang / bindgen 头文件）
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=C:\vcpkg" | Out-File -Append $env:GITHUB_ENV
+          "PKG_CONFIG=C:\vcpkg\installed\x64-windows\tools\pkgconf\pkgconf.exe" | Out-File -Append $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" | Out-File -Append $env:GITHUB_ENV
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -Append $env:GITHUB_ENV
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $msvc = (Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+          $sdk = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -Directory | Where-Object Name -match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).Name
+          "BINDGEN_EXTRA_CLANG_ARGS=-I`"$vs\VC\Tools\MSVC\$msvc\include`" -I`"${env:ProgramFiles(x86)}\Windows Kits\10\Include\$sdk\ucrt`"" | Out-File -Append $env:GITHUB_ENV
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: 打包（exe + FFmpeg 运行库 DLL）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist -Force | Out-Null
+          Copy-Item target\release\zplayer-music.exe dist\
+          Copy-Item "C:\vcpkg\installed\x64-windows\bin\av*.dll"  dist\ -ErrorAction SilentlyContinue
+          Copy-Item "C:\vcpkg\installed\x64-windows\bin\sw*.dll"  dist\ -ErrorAction SilentlyContinue
+          Copy-Item "C:\vcpkg\installed\x64-windows\bin\postproc*.dll" dist\ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist\* -DestinationPath zplayer-music-windows-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: zplayer-music-windows-x64.zip
+          retention-days: 1
+
+  # ==================== Linux x64 ====================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装系统依赖（Slint/ALSA/FFmpeg/bindgen）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config clang libclang-dev patchelf \
+            libasound2-dev libfontconfig1-dev libdbus-1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev \
+            libavcodec-dev libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev libavfilter-dev
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: 收集 FFmpeg 动态库并打包（rpath=$ORIGIN/lib）
+        run: |
+          set -euo pipefail
+          mkdir -p dist/lib
+          cp target/release/zplayer-music dist/
+          # ldd 递归列出全部依赖，仅收集 FFmpeg（libav*/libsw*）相关 .so
+          ldd target/release/zplayer-music \
+            | awk '/libav|libsw/ { for (i=1; i<=NF; i++) if ($i ~ /^\//) print $i }' \
+            | while read -r so; do cp -L "$so" dist/lib/; done
+          # 主二进制与每个 .so 都设为相对 rpath，保证 .so 之间也能互相找到
+          patchelf --set-rpath '$ORIGIN/lib' dist/zplayer-music
+          for f in dist/lib/*.so*; do patchelf --set-rpath '$ORIGIN' "$f" || true; done
+          tar -C dist -czf zplayer-music-linux-x64.tar.gz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: zplayer-music-linux-x64.tar.gz
+          retention-days: 1
+
+  # ==================== macOS arm64 / x64 ====================
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # Apple Silicon
+            name: arm64
+          - os: macos-13       # Intel
+            name: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装 FFmpeg（brew）
+        run: brew install ffmpeg pkg-config
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: 收集 FFmpeg dylib、重写 rpath 并打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/lib
+          cp target/release/zplayer-music dist/
+          # 收集所有 homebrew 前缀（/opt/homebrew 或 /usr/local）的依赖 dylib（BFS 递归）
+          collect_deps() {
+            otool -L "$1" | awk 'NR>1 && ($1 ~ /^\/opt\/homebrew\// || $1 ~ /^\/usr\/local\//) { print $1 }'
+          }
+          queue=("dist/zplayer-music")
+          while [ ${#queue[@]} -gt 0 ]; do
+            f="${queue[0]}"
+            queue=("${queue[@]:1}")
+            while IFS= read -r dep; do
+              [ -z "$dep" ] && continue
+              base="$(basename "$dep")"
+              if [ ! -f "dist/lib/$base" ]; then
+                cp "$dep" "dist/lib/$base"
+                chmod u+w "dist/lib/$base"
+                queue+=("dist/lib/$base")
+              fi
+            done < <(collect_deps "$f")
+          done
+          # 重写：所有 homebrew 引用统一指向 @executable_path/lib
+          for f in dist/zplayer-music dist/lib/*.dylib; do
+            while IFS= read -r dep; do
+              [ -z "$dep" ] && continue
+              install_name_tool -change "$dep" "@executable_path/lib/$(basename "$dep")" "$f" || true
+            done < <(collect_deps "$f")
+            case "$f" in
+              dist/lib/*) install_name_tool -id "@executable_path/lib/$(basename "$f")" "$f" ;;
+            esac
+          done
+          # 修改后重新 ad-hoc 签名（Apple Silicon 必需）
+          codesign --force --sign - dist/lib/*.dylib dist/zplayer-music 2>/dev/null || true
+          tar -C dist -czf "zplayer-music-macos-${{ matrix.name }}.tar.gz" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.name }}
+          path: zplayer-music-macos-${{ matrix.name }}.tar.gz
+          retention-days: 1
+
+  # ==================== Web（wasm32） ====================
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 读取 Cargo.lock 中 wasm-bindgen 版本
+        id: wbg
+        run: echo "v=$(grep -A1 '^name = \"wasm-bindgen\"$' Cargo.lock | grep -oP 'version = \"\K[^\"]+')" >> "$GITHUB_OUTPUT"
+
+      - name: 安装 wasm-bindgen-cli（与 lockfile 同版本，预编译二进制）
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.wbg.outputs.v }}
+
+      - name: 构建 wasm（web feature，无桌面依赖）
+        run: cargo build --release --target wasm32-unknown-unknown --no-default-features --features web
+
+      - name: 生成 JS 绑定并打包
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          wasm-bindgen --target web --no-typescript \
+            --out-dir dist target/wasm32-unknown-unknown/release/zplayer-music.wasm
+          cp web/index.html dist/
+          cd dist && zip -r ../zplayer-music-web.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-web
+          path: zplayer-music-web.zip
+          retention-days: 1
+
+  # ==================== 汇总发布 ====================
+  release:
+    needs: [build-windows, build-linux, build-macos, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 列出产物
+        run: ls -la artifacts/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/zplayer-music-windows-x64.zip
+            artifacts/zplayer-music-linux-x64.tar.gz
+            artifacts/zplayer-music-macos-arm64.tar.gz
+            artifacts/zplayer-music-macos-x64.tar.gz
+            artifacts/zplayer-music-web.zip
+          body: |
+            ## 平台说明
+
+            | 文件 | 平台 | 说明 |
+            | --- | --- | --- |
+            | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用（已附带 FFmpeg 运行库） |
+            | `zplayer-music-linux-x64.tar.gz` | Linux x64 | 已内嵌 FFmpeg 动态库（`lib/`，rpath 自动定位） |
+            | `zplayer-music-macos-arm64.tar.gz` | macOS Apple Silicon | 已内嵌 FFmpeg 动态库并重写 rpath |
+            | `zplayer-music-macos-x64.tar.gz` | macOS Intel | 同上 |
+            | `zplayer-music-web.zip` | Web | 任意静态 HTTP 服务器托管即可 |
+
+            ## 待开发平台
+
+            - **Android**：仅考虑 `arm64-v8a`（不发布 armeabi-v7a / x86）
+            - **iOS**：最低要求 **iOS 18**
+            - **HarmonyOS**：适配计划中

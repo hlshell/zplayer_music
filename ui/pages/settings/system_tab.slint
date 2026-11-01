@@ -1,0 +1,172 @@
+// ============================================================================
+//  pages/settings/system_tab.slint — 系统管理
+//  磁盘缓存(开关) / 缓存目录(统一根目录：歌曲/封面/歌词) / 缓存上限(可调数字) /
+//  清理策略(LRU/FIFO) / 缓存状态(进度条+百分比+刷新+计数) / 缓存管理(清理按钮)
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { SettingRow } from "setting-row.slint";
+import { SettingToggleRow } from "setting-toggle-row.slint";
+import { SettingInputRow } from "setting-input-row.slint";
+import { SettingSelectRow } from "setting-select-row.slint";
+import { Button } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component SystemTab inherits VerticalLayout {
+    in-out property <bool> cache-enabled;
+    in-out property <string> cache-dir;
+    in-out property <string> cache-limit-text;
+    in-out property <int> cache-limit-mb;
+    in-out property <int> evict-index;
+    in-out property <float> cache-percent;
+    in-out property <int> music-count;
+    in-out property <int> lyric-count;
+    in-out property <int> cover-count;
+    // 缓存清理进行中：true 时禁用清理/刷新按钮（防重入）
+    in property <bool> clearing: false;
+    // 平台标识：web（wasm）下隐藏全部缓存区（web 无本地文件缓存）
+    in property <bool> is-web: false;
+    callback open-select(int, string, [string], int);
+    callback toggle-changed(int, bool);
+    callback input-changed(int, string);
+    callback clicked(int);
+    callback cache-refresh();
+    callback clear-cache(int);
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-system; }
+
+    // ---- 磁盘缓存 / 缓存目录 / 缓存上限 / 清理策略（web 无本地文件缓存，整体隐藏）----
+    Rectangle {
+        visible: !root.is-web;
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            ce := SettingToggleRow {
+                label: Language.sys-cache;
+                desc: Language.sys-cache-desc;
+                icon: @image-url("../../assets/icons/database-cog.svg");
+                checked <=> root.cache-enabled;
+                toggled(c) => { root.toggle-changed(23, c); }
+            }
+            SettingRow {
+                label: Language.sys-cache-dir;
+                desc: Language.sys-cache-dir-desc;
+                value: root.cache-dir;
+                icon: @image-url("../../assets/icons/folder.svg");
+                clicked => { root.clicked(41); }
+            }
+            SettingInputRow {
+                label: Language.sys-cache-limit;
+                desc: Language.sys-cache-limit-desc;
+                icon: @image-url("../../assets/icons/database-import.svg");
+                value <=> root.cache-limit-text;
+                suffix: Language.sys-mb;
+                changed(t) => { root.input-changed(31, t); }
+            }
+            ev := SettingSelectRow {
+                label: Language.sys-evict;
+                desc: Language.sys-evict-desc;
+                icon: @image-url("../../assets/icons/database-x.svg");
+                options: [Language.sys-evict-lru, Language.sys-evict-fifo];
+                current-index <=> root.evict-index;
+                open-requested() => {
+                    root.open-select(13, Language.sys-evict, [Language.sys-evict-lru, Language.sys-evict-fifo], root.evict-index);
+                }
+            }
+        }
+    }
+
+    SectionHeader { title: Language.sys-status-title; visible: !root.is-web; }
+
+    // ---- 缓存状态：进度条 + 百分比 + 刷新 + 计数（web 隐藏）----
+    Rectangle {
+        visible: !root.is-web;
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 14px; padding: 16px;
+            HorizontalLayout { spacing: 12px; cross-axis-alignment: center;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: Theme.palette.scroll-track;
+                    Rectangle {
+                        // 显式 x:0 —— Slint 中非布局子元素默认相对父元素居中，
+                        // 缺省时填充会以中心为原点向两侧生长（对齐播放器进度条写法）
+                        x: 0;
+                        width: parent.width * min(1.0, max(0.0, root.cache-percent));
+                        height: parent.height;
+                        border-radius: 4px;
+                        background: @linear-gradient(90deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                    }
+                }
+                Text {
+                    text: Math.round(min(1.0, max(0.0, root.cache-percent)) * 100) + "%";
+                    color: Theme.palette.text-faint;
+                    font-size: 12px;
+                    width: 44px;
+                    horizontal-alignment: right;
+                }
+                // 刷新按钮
+                Rectangle {
+                    width: 28px; height: 28px;
+                    border-radius: 14px;
+                    background: !root.clearing && rf-ta.has-hover ? Theme.palette.hover : transparent;
+                    opacity: root.clearing ? 0.5 : 1.0;
+                    Image {
+                        source: @image-url("../../assets/icons/refresh-dot.svg");
+                        width: 15px; height: 15px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: Theme.palette.icon;
+                    }
+                    rf-ta := TouchArea { enabled: !root.clearing; clicked => { root.cache-refresh(); } mouse-cursor: pointer; }
+                }
+            }
+            Text {
+                text: Language.sys-music-count + root.music-count + Language.sys-unit-song
+                    + " · " + Language.sys-lyric-count + root.lyric-count + Language.sys-unit-song
+                    + " · " + Language.sys-cover-count + root.cover-count + Language.sys-unit-cover;
+                color: Theme.palette.text-secondary;
+                font-size: 12.5px;
+            }
+        }
+    }
+
+    SectionHeader { title: Language.sys-manage-title; visible: !root.is-web; }
+
+    // ---- 缓存管理：文字清理按钮（web 隐藏）----
+    Rectangle {
+        visible: !root.is-web;
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        HorizontalLayout { spacing: 10px; padding: 16px;
+            btn := Button {
+                text: Language.sys-clear-music;
+                enabled: !root.clearing;
+                clicked => { root.clear-cache(0); }
+            }
+            Button {
+                text: Language.sys-clear-lyrics;
+                enabled: !root.clearing;
+                clicked => { root.clear-cache(1); }
+            }
+            Button {
+                text: Language.sys-clear-covers;
+                enabled: !root.clearing;
+                clicked => { root.clear-cache(2); }
+            }
+            Button {
+                text: Language.sys-clear-all;
+                enabled: !root.clearing;
+                clicked => { root.clear-cache(3); }
+            }
+        }
+    }
+}

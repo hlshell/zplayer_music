@@ -1,0 +1,67 @@
+// ============================================================================
+//  pages/settings/select-popup.slint — 居中弹窗（标题 + 独立按钮式选项）
+//  由 settings.slint 外壳在非裁剪覆盖层居中渲染；选项以独立按钮呈现（带间隔），
+//  选中项用 Tabler check 图标标示；点击某项即选中并关闭。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { MarqueeText } from "../../components/marquee.slint";
+
+export component SelectPopup inherits Rectangle {
+    in property <string> title: "";
+    in property <[string]> options: [];
+    in-out property <int> current-index: 0;
+    callback picked(int);
+
+    property <length> row-h: 42px;
+    width: 280px;
+    height: min(16px + 24px + 8px + root.options.length * root.row-h + (root.options.length > 0 ? (root.options.length - 1) * 8px : 0px) + 16px, 380px);
+    border-radius: 14px;
+    background: Theme.palette.surface-solid;
+    drop-shadow-blur: 10px; drop-shadow-color: rgba(0, 0, 0, 0.30); drop-shadow-offset-y: 4px;
+    border-width: 1px; border-color: Theme.palette.divider;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 8px;
+        padding-left: 16px; padding-right: 16px; padding-top: 16px; padding-bottom: 16px;
+        // 标题
+        Text {
+            text: root.title;
+            color: Theme.palette.text;
+            font-size: 14.5px;
+            font-weight: 600;
+            height: 24px;
+        }
+        // 选项（独立按钮，彼此间隔 8px）
+        for opt[idx] in root.options : Rectangle {
+            height: root.row-h;
+            border-radius: 10px;
+            background: idx == root.current-index
+                ? Theme.palette.primary
+                : (opt-ta.has-hover ? Theme.palette.hover : Theme.palette.surface);
+            border-width: 1px;
+            border-color: idx == root.current-index ? Theme.palette.primary : Theme.palette.divider;
+            HorizontalLayout { spacing: 8px; padding-left: 14px; padding-right: 14px; cross-axis-alignment: center;
+                // 超长文本：截断显示，悬停整行时左右往返滑动（跑马灯）
+                // stretch 必须在实例化处显式设置（组件内部设置不传播到外部布局）
+                MarqueeText {
+                    text: opt;
+                    text-color: idx == root.current-index ? Theme.palette.icon-white : Theme.palette.text;
+                    font-size: 13px;
+                    hover: opt-ta.has-hover;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 0;
+                }
+                if (idx == root.current-index) : Image {
+                    source: @image-url("../../assets/icons/check.svg");
+                    width: 16px; height: 16px;
+                    colorize: Theme.palette.icon-white;
+                }
+            }
+            opt-ta := TouchArea {
+                clicked => { root.picked(idx); }
+                mouse-cursor: pointer;
+            }
+        }
+    }
+}

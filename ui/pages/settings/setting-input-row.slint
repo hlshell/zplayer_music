@@ -1,0 +1,58 @@
+// ============================================================================
+//  pages/settings/setting-input-row.slint — 输入行（图标 + 标签/描述 + 可编辑文本 + 单位后缀）
+//  用于缓存上限等可自由调节的数字项（MB 后缀由 suffix 固定展示，无需手动填写）
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+export component SettingInputRow inherits Rectangle {
+    in property <string> label;
+    in property <string> desc: "";
+    in property <image> icon;
+    in-out property <string> value;
+    in property <string> suffix: "";
+    callback changed(string);
+
+    height: 58px;
+    border-radius: 10px;
+    background: Theme.palette.hover;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 14px; padding-right: 14px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 18px; height: 18px;
+            vertical-alignment: center;
+            colorize: Theme.palette.icon;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.label; color: Theme.palette.text; font-size: 13.5px; overflow: elide; }
+            if (root.desc != "") : Text { text: root.desc; color: Theme.palette.text-faint; font-size: 11.5px; overflow: elide; }
+        }
+
+        // 输入框 + 后缀
+        Rectangle {
+            width: 120px; height: 32px;
+            border-radius: 8px;
+            background: Theme.palette.surface-solid;
+            border-width: 1px; border-color: Theme.palette.divider;
+            HorizontalLayout { spacing: 4px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                TextInput {
+                    text: root.value;
+                    color: Theme.palette.text;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    edited => { root.value = self.text; root.changed(self.text); }
+                }
+                if (root.suffix != "") : Text {
+                    text: root.suffix;
+                    color: Theme.palette.text-faint; font-size: 12px;
+                }
+            }
+        }
+    }
+}

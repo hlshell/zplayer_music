@@ -1,0 +1,10 @@
+// ============================================================================
+//  web(wasm32) 编译入口 wrapper：与 desktop 共用同一套 ui/appwindow.slint 骨架，
+//  仅额外编译期嵌入 SimHei 中文字体（wasm 无系统字体；desktop 用系统 Segoe UI 不嵌入
+//  9.7MB 字体，避免 exe 膨胀）。
+//  build.rs 在 target_arch=wasm32 时编译本文件；其余目标编译 appwindow.slint。
+//  运行时：web_main 设 font-family="SimHei"（appwindow.slint 的 default-font-family
+//  已绑定到该属性，同骨架不拆第二套 UI）。
+// ============================================================================
+import "../src/fonts/simhei.ttf"; // 编译期嵌入中文字体，运行时注册到 fontique（femtovg 可用）
+export { AppWindow } from "appwindow.slint";
