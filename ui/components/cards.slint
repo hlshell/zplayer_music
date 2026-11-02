@@ -1,0 +1,212 @@
+﻿// ============================================================================
+//  首页卡片（PlaylistCard / SectionHeader / HeroCard）——已接入主题
+//  HeroCard 为品牌渐变（深浅通用），暂保持；PlaylistCard/SectionHeader 走 Token
+// ============================================================================
+import { HeroSong } from "models.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+// ---- 歌单卡片（对齐 loadPersonalized 卡片）----
+export component PlaylistCard inherits Rectangle {
+    in property <string> title;
+    in property <string> plays;
+    in property <image> cover;
+    in property <color> from;
+    in property <color> to;
+    callback clicked;
+
+    VerticalLayout {
+        spacing: 6px;
+
+        // 封面（固定高度保证同行卡片整齐；宽度由网格 stretch 均分自适应列数）
+        Rectangle {
+            height: 130px;
+            border-radius: 12px;
+            clip: true;
+            background: @linear-gradient(135deg, from 0%, to 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            Image {
+                source: @image-url("../assets/icons/play-white.svg");
+                width: 26px; height: 26px;
+                opacity: card-ta.has-hover ? 0.0 : 0.30;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            // 播放数角标（top-left，bg-black/40）
+            Rectangle {
+                x: 6px; y: 6px;
+                height: 18px;
+                border-radius: 9px;
+                background: rgba(0,0,0,0.40);
+                HorizontalLayout { spacing: 3px; padding-left: 7px; padding-right: 7px;
+                    Image { source: @image-url("../assets/icons/play-white.svg"); width: 9px; height: 9px; vertical-alignment: center; }
+                    Text { text: plays; color: white; font-size: 10px; vertical-alignment: center; }
+                }
+            }
+            // 悬停播放遮罩（group-hover:bg-black/25 + 圆形播放按钮）
+            Rectangle {
+                x: 0px; y: 0px; width: 100%; height: 100%;
+                background: card-ta.has-hover ? rgba(0,0,0,0.25) : transparent;
+                Rectangle {
+                    width: 38px; height: 38px; border-radius: 19px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.palette.primary;
+                    opacity: card-ta.has-hover ? 1.0 : 0.0;
+                    Image {
+                        source: @image-url("../assets/icons/play-white.svg");
+                        width: 16px; height: 16px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: Theme.palette.icon-white;
+                    }
+                }
+            }
+        }
+        Text { text: title; color: Theme.palette.text; font-size: 13px; font-weight: 500; overflow: elide; }
+        Text { text: Language.sources-netease; color: Theme.palette.text-faint; font-size: 12px; overflow: elide; }
+    }
+
+    // 整卡点击/悬停热区（声明在内容之后 = z 序最高，标题区也可点）
+    card-ta := TouchArea {
+        width: 100%; height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---- 区块标题 ----
+export component SectionHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> show-more: false;
+    callback more-clicked;
+
+    height: 34px;
+    HorizontalLayout {
+        alignment: space-between;
+        Text { text: title; font-size: 15px; font-weight: 700; color: Theme.palette.text; vertical-alignment: center; }
+        if (show-more) : HorizontalLayout {
+            spacing: 2px;
+            cross-axis-alignment: center;
+            Text {
+                text: Language.cards-more;
+                color: more-ta.has-hover ? Theme.palette.primary : Theme.palette.text-faint;
+                font-size: 13px; vertical-alignment: center;
+            }
+            Image {
+                source: @image-url("../assets/icons/arrow-more-faint.svg");
+                width: 16px; height: 16px; vertical-alignment: center;
+                colorize: Theme.palette.text-faint;
+            }
+            more-ta := TouchArea { clicked => { root.more-clicked(); } mouse-cursor: pointer; }
+        }
+    }
+}
+
+// ---- 首页“每日为你精选”Hero 卡（对齐 home.html heroCard）----
+export component HeroCard inherits Rectangle {
+    in property <[HeroSong]> songs: [];
+    // 每日推荐歌曲总数（Rust 侧真实填充，替代写死的"30首"）
+    in property <int> count: 0;
+    callback song-clicked(int);
+    // 播放全部：把 hero 歌曲列表加入播放列表并播放第一首（纯入口图标，与播放器播放态无关）
+    callback play-all();
+    // 点击卡面空白区域（歌曲行/播放按钮之外）：打开每日精选统一详情页
+    callback open-detail();
+    // 歌单封面背景（Rust 侧填充；空图回落到渐变色兜底）
+    in property <image> bg-cover;
+
+    height: 100%;
+    border-radius: 14px;
+    clip: true;
+    background: @linear-gradient(135deg, #4a3fae 0%, #6c5ce7 45%, #26c6da 100%);
+
+    // 整卡点击区（z 序最低：声明在装饰圆/内容之前，歌曲行与播放按钮的 TouchArea 在其后声明自然拦截）
+    TouchArea {
+        clicked => { root.open-detail(); }
+        mouse-cursor: pointer;
+    }
+
+    // 歌单封面背景（有封面时垫底铺满 + 暗化遮罩保证文字可读；无封面只显示底部渐变）
+    if (root.bg-cover.width > 0) : Image {
+        width: 100%; height: 100%;
+        source: root.bg-cover;
+        image-fit: cover;
+    }
+    if (root.bg-cover.width > 0) : Rectangle {
+        width: 100%; height: 100%;
+        background: @linear-gradient(135deg, rgba(22, 18, 48, 0.80) 0%, rgba(22, 18, 48, 0.62) 45%, rgba(22, 18, 48, 0.52) 100%);
+    }
+
+    // 装饰光晕圆（对齐 HTML：白/12 模糊圆）
+    Rectangle {
+        width: 180px; height: 180px; border-radius: 90px;
+        x: parent.width - 90px; y: -30px;
+        background: rgba(255,255,255,0.12);
+    }
+    Rectangle {
+        width: 140px; height: 140px; border-radius: 70px;
+        x: -40px; y: parent.height - 80px;
+        background: rgba(255,255,255,0.10);
+    }
+
+    HorizontalLayout { spacing: 0;
+        VerticalLayout {
+            horizontal-stretch: 3;
+            spacing: 10px;
+            padding: 20px;
+            HorizontalLayout { spacing: 8px;
+                Rectangle {
+                    height: 20px; border-radius: 8px;
+                    Text { text: Language.cards-daily-title; color: white; font-size: 20px; font-weight: 700; }
+                
+                }
+                }
+            
+            HorizontalLayout { spacing: 8px;
+                
+                Rectangle {
+                    height: 20px; border-radius: 8px;
+                    background: rgba(255,255,255,0.22);
+                    Text { text: root.count + Language.cards-count-songs; color: white; font-size: 11px; font-weight: 600;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            
+            VerticalLayout { spacing: 7px;
+                for s in root.songs: HorizontalLayout { spacing: 10px;
+                    Text { text: s.rank; color: rgba(255,255,255,0.55); font-size: 12px; width: 16px; }
+                    Text { text: s.name; color: rgba(255,255,255,0.92); font-size: 13px; overflow: elide; }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: s.artist; color: rgba(255,255,255,0.55); font-size: 11px; overflow: elide; }
+                    Rectangle { width: 20px; height: 20px; border-radius: 10px;
+                        background: s-ta.has-hover ? rgba(0,0,0,0.25) : transparent;
+                        Image { source: @image-url("../assets/icons/play-white.svg"); width: 10px; height: 10px;
+                                horizontal-alignment: center; vertical-alignment: center; }
+                        s-ta := TouchArea { clicked => { root.song-clicked(s.id); } mouse-cursor: pointer; }
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 2;
+            padding: 18px;
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout { alignment: end; spacing: 10px;
+                // 播放全部入口：固定播放图标（不随播放器播放/暂停切换），点击入列并播第一首
+                Rectangle {
+                    width: 38px; height: 38px; border-radius: 19px;
+                    background: hero-play-ta.has-hover ? rgba(0,0,0,0.45) : rgba(0,0,0,0.30);
+                    Image {
+                        source: @image-url("../assets/icons/play-white.svg");
+                        width: 16px; height: 16px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    hero-play-ta := TouchArea { clicked => { root.play-all(); } mouse-cursor: pointer; }
+                }
+            }
+        }
+    }
+}

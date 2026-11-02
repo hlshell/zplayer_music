@@ -1,0 +1,469 @@
+// ============================================================================
+//  LyricsPanel —— 三模式布局
+//  0  封面模式（Cover Top）   ：上封面 + 歌名/歌手，下大歌词区
+//  1  分栏模式（Cover Left）   ：左封面垂直居中，右歌词
+//  2  沉浸模式（Lyrics Focus） ：几乎全屏歌词，封面仅作极弱背景/小浮标
+// ============================================================================
+import { Song } from "models.slint";
+import { ScrollView } from "std-widgets.slint";
+import { CustomScrollBar } from "scroll.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+// ---------- 数据模型 ----------
+export struct LyricWord {
+    text: string,
+    start-ms: int,
+    end-ms: int,
+}
+
+export struct LyricLine {
+    words: [LyricWord],
+    start-ms: int,
+    end-ms: int,
+}
+
+// ---------- 单行（三阶段效果） ----------
+component LyricLineView inherits Rectangle {
+    in property <LyricLine> line;
+    in property <int> current-time-ms: 0;
+    in property <bool> is-current: false;
+    in property <bool> is-past: false;
+    in property <bool> immersive: false;   // 沉浸模式时字号更大
+
+    private property <float> breath: 1.0;
+
+    changed is-current => {
+        if (root.is-current) {
+            root.breath = 1.045;
+        } else {
+            root.breath = 1.0;
+        }
+    }
+
+    horizontal-stretch: 1;
+    height: root.is-current
+        ? (root.immersive ? 44px : 36px)
+        : (root.immersive ? 32px : 28px);
+    animate height { duration: 240ms; easing: ease-out; }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 0px;
+
+        for word[i] in root.line.words : Rectangle {
+            private property <float> progress: {
+                if (root.current-time-ms < word.start-ms) { 0.0 }
+                else if (root.current-time-ms >= word.end-ms) { 1.0 }
+                else {
+                    (root.current-time-ms - word.start-ms) * 1.0
+                    / max(1, word.end-ms - word.start-ms)
+                }
+            };
+
+            // 底层文字
+            Text {
+                text: word.text;
+                color: Theme.palette.text-secondary;
+                opacity: root.is-current ? 0.42 : (root.is-past ? 0.30 : 0.26);
+                font-size: root.is-current
+                    ? (root.immersive ? 22px : 18px)
+                    : (root.immersive ? 15px : 13px);
+                font-weight: root.is-current ? 600 : 400;
+                horizontal-alignment: center;
+                animate font-size { duration: 220ms; easing: ease-out; }
+                animate opacity { duration: 220ms; easing: ease-out; }
+            }
+
+            // Progressive Fill
+            if (root.is-current && progress > 0.0) : Rectangle {
+                x: 0; y: 0;
+                width: parent.width * progress;
+                height: 100%;
+                clip: true;
+                Text {
+                    text: word.text;
+                    color: Theme.palette.primary;
+                    font-size: root.immersive ? 22px : 18px;
+                    font-weight: 700;
+                    horizontal-alignment: left;
+                }
+            }
+
+            // 扫光（位置随逐词进度从词左外扫到词右外，无需定时器）
+            if (root.is-current && progress > 0.0 && progress < 1.0) : Rectangle {
+                x: -70px + (parent.width + 140px) * progress;
+                width: 70px;
+                height: 100%;
+                background: @linear-gradient(90deg,
+                    transparent 0%,
+                    Theme.palette.primary.with-alpha(0.28) 40%,
+                    Theme.palette.primary.with-alpha(0.55) 50%,
+                    Theme.palette.primary.with-alpha(0.28) 60%,
+                    transparent 100%);
+            }
+        }
+    }
+
+    transform-scale: root.is-current ? root.breath : 1.0;
+    animate transform-scale { duration: 900ms; easing: ease-in-out; }
+}
+
+// ---------- 滚动歌词区 ----------
+component LyricsScroll inherits Rectangle {
+    in property <[LyricLine]> lyrics;
+    in property <int> current-lyric: 0;
+    in property <int> current-time-ms: 0;
+    in property <bool> immersive: false;
+
+    private property <length> line-base: root.immersive ? 32px : 28px;
+    private property <length> line-cur: root.immersive ? 44px : 36px;
+    private property <length> spacing: root.immersive ? 14px : 10px;
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    Rectangle {
+        width: 100%; height: 100%;
+
+        sv := ScrollView {
+            width: 100%; height: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+            animate content-y { duration: 340ms; easing: ease-out; }
+
+            VerticalLayout {
+                alignment: start;
+                spacing: root.spacing;
+                padding-top: max(0px, (sv.visible-height - root.line-cur) / 2);
+                padding-bottom: max(0px, (sv.visible-height - root.line-cur) / 2);
+
+                for line[i] in root.lyrics : LyricLineView {
+                    line: line;
+                    current-time-ms: root.current-time-ms;
+                    is-current: i == root.current-lyric;
+                    is-past: i < root.current-lyric;
+                    immersive: root.immersive;
+                    width: 100%;
+                }
+            }
+        }
+
+        sb := Rectangle {
+            x: sv.x + sv.width - 14px;
+            y: sv.y + 8px;
+            width: 10px;
+            height: sv.height - 16px;
+            visible: sv.content-height > sv.visible-height + 2px;
+            CustomScrollBar {
+                viewport-height: sv.visible-height;
+                content-height: sv.content-height;
+                scroll-offset: -sv.content-y;
+                scroll-to(o) => { sv.content-y = -o; }
+            }
+        }
+    }
+
+    // 当前行变化：把当前行中心滚动到可视区中央（钳制在可滚范围内）。
+    // 前 N 行累计高 = current-lyric × (line-base + spacing)，当前行半高 line-cur/2
+    changed current-lyric => {
+        if (root.lyrics.length > 0) {
+            sv.content-y = -min(
+                max(0px, sv.content-height - sv.visible-height),
+                max(0px, root.current-lyric * (root.line-base + root.spacing) + root.line-cur / 2 - sv.visible-height / 2)
+            );
+        }
+    }
+
+    // 歌词列表换新：复位滚动到顶部（当前行随新歌曲回到 0）
+    changed lyrics => {
+        sv.content-y = 0px;
+    }
+}
+
+// ---------- 封面信息块（三种模式共用，尺寸可调） ----------
+component SongInfoBlock {
+    in property <Song> song;
+    in property <length> cover-size: 200px;
+    in property <length> icon-size: 64px;
+    in property <bool> compact: false;   // 沉浸模式用更小的
+
+    VerticalLayout {
+        alignment: center;
+        spacing: root.compact ? 6px : 10px;
+
+        Rectangle {
+            width: root.cover-size; height: root.cover-size;
+            border-radius: root.compact ? 12px : 16px;
+            clip: true;
+            drop-shadow-blur: root.compact ? 14px : 22px;
+            drop-shadow-color: rgba(0, 0, 0, 0.28);
+            drop-shadow-offset-y: root.compact ? 4px : 6px;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+
+            if (root.song.cover.width > 0) : Image {
+                source: root.song.cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            if (root.song.cover.width == 0) : Image {
+                source: @image-url("../assets/icons/playlist-gray.svg");
+                width: root.icon-size; height: root.icon-size;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon-faint;
+            }
+        }
+
+        if (!root.compact) : VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.song.name;
+                color: Theme.palette.text;
+                font-size: 15px; font-weight: 700;
+                horizontal-alignment: center; overflow: elide;
+            }
+            Text {
+                text: root.song.artist;
+                color: Theme.palette.text-secondary;
+                font-size: 12px;
+                horizontal-alignment: center; overflow: elide;
+            }
+        }
+    }
+}
+
+// ---------- 主面板 ----------
+export component LyricsPanel inherits Rectangle {
+    // 0 = 封面模式, 1 = 分栏模式, 2 = 沉浸模式
+    in-out property <int> mode: 0;
+    in-out property <bool> open: false;
+
+    in property <Song> current-song;
+    in property <[LyricLine]> lyrics;
+    in property <int> current-lyric: 0;
+    in property <int> current-time-ms: 0;
+    in property <length> win-width: 0px;
+    in property <length> win-height: 0px;
+
+    callback mode-cycle();          // 点击切换下一模式
+    callback close-clicked();
+
+    y: root.open ? 48px : root.win-height - 76px;
+    height: root.open ? root.win-height - 48px - 76px : 0px;
+    width: root.win-width;
+    animate y { duration: 260ms; easing: ease-out; }
+    animate height { duration: 260ms; easing: ease-out; }
+    clip: true;
+
+    // ===== 背景：所有模式都用模糊专辑（沉浸模式更强） =====
+    if (root.open && root.current-song.cover.width > 0) : Rectangle {
+        width: 100%; height: 100%;
+        Image {
+            source: root.current-song.cover;
+            width: 150%; height: 150%;
+            // x/y 不接受百分比（% 仅 width/height 可用），放大居中用负偏移表达式
+            x: parent.width * -0.25; y: parent.height * -0.25;
+            image-fit: ImageFit.cover;
+            opacity: root.mode == 2 ? 0.18 : 0.22;
+        }
+        Rectangle {
+            width: 100%; height: 100%;
+            background: Theme.palette.surface-solid.with-alpha(
+                root.mode == 2 ? 0.72 : 0.78
+            );
+        }
+        // 上下渐变压暗
+        Rectangle {
+            width: 100%; height: 70px;
+            background: @linear-gradient(180deg, Theme.palette.surface-solid 0%, transparent 100%);
+        }
+        Rectangle {
+            y: parent.height - 80px;
+            width: 100%; height: 80px;
+            background: @linear-gradient(0deg, Theme.palette.surface-solid 0%, transparent 100%);
+        }
+    }
+    if (!root.open || root.current-song.cover.width == 0) : Rectangle {
+        width: 100%; height: 100%;
+        background: Theme.palette.surface-solid;
+    }
+
+    // 顶部分割线
+    Rectangle { y: 0; width: 100%; height: 1px; background: Theme.palette.divider-strong; }
+
+    VerticalLayout {
+        padding-left: 18px; padding-right: 18px;
+        padding-top: 10px; padding-bottom: 12px;
+        spacing: 10px;
+
+        // ===== 顶部工具栏 =====
+        HorizontalLayout {
+            spacing: 8px;
+            cross-axis-alignment: center;
+            Rectangle { horizontal-stretch: 1; }
+
+            // 模式切换按钮（循环 0→1→2→0）
+            Rectangle {
+                width: 128px; height: 30px; border-radius: 15px;
+                background: mode-ta.has-hover ? Theme.palette.primary.with-alpha(0.15) : transparent;
+                border-width: 1px;
+                border-color: Theme.palette.primary.with-alpha(0.35);
+
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    padding-left: 10px; padding-right: 10px;
+
+                    Image {
+                        source: root.mode == 0
+                            ? @image-url("../assets/icons/mode-updown-gray.svg")
+                            : root.mode == 1
+                                ? @image-url("../assets/icons/mode-leftright-gray.svg")
+                                : @image-url("../assets/icons/typography.svg");
+                        width: 15px; height: 15px;
+                        vertical-alignment: center;
+                        colorize: Theme.palette.primary;
+                    }
+                    Text {
+                        text: root.mode == 0 ? Language.lyrics-cover-mode
+                            : root.mode == 1 ? Language.lyrics-split-mode
+                            : Language.lyrics-immersive-mode;
+                        color: Theme.palette.primary;
+                        font-size: 12px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                }
+                mode-ta := TouchArea {
+                    clicked => { root.mode-cycle(); }
+                    mouse-cursor: pointer;
+                }
+            }
+
+            // 关闭
+            Rectangle {
+                width: 30px; height: 30px; border-radius: 15px;
+                background: cl-ta.has-hover ? Theme.palette.divider : transparent;
+                Image {
+                    source: @image-url("../assets/icons/pip-on-gray.svg");
+                    width: 19px; height: 19px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: Theme.palette.icon;
+                }
+                cl-ta := TouchArea {
+                    clicked => { root.close-clicked(); }
+                    mouse-cursor: pointer;
+                }
+            }
+        }
+
+        // ============================================================
+        //  模式 0：封面模式（Cover Top）
+        //  上：居中大封面 + 歌名歌手
+        //  下：大歌词区（垂直占满剩余）
+        // ============================================================
+        if (root.mode == 0) : VerticalLayout {
+            spacing: 14px;
+            // 封面区固定高度，避免挤压歌词
+            HorizontalLayout {
+                alignment: center;
+                SongInfoBlock {
+                    song: root.current-song;
+                    cover-size: 200px;
+                    icon-size: 64px;
+                }
+            }
+            LyricsScroll {
+                lyrics: root.lyrics;
+                current-lyric: root.current-lyric;
+                current-time-ms: root.current-time-ms;
+                immersive: false;
+            }
+        }
+
+        // ============================================================
+        //  模式 1：分栏模式（Cover Left）
+        //  左：垂直居中封面 + 歌名（固定宽）
+        //  右：歌词区占满
+        // ============================================================
+        if (root.mode == 1) : HorizontalLayout {
+            spacing: 22px;
+
+            // 左侧信息列
+            Rectangle {
+                width: 230px;
+                height: 100%;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 0px;
+                    Rectangle { vertical-stretch: 1; }   // 顶弹性
+                    SongInfoBlock {
+                        song: root.current-song;
+                        cover-size: 180px;
+                        icon-size: 56px;
+                    }
+                    Rectangle { vertical-stretch: 1; }   // 底弹性
+                }
+            }
+
+            // 右侧歌词
+            LyricsScroll {
+                lyrics: root.lyrics;
+                current-lyric: root.current-lyric;
+                current-time-ms: root.current-time-ms;
+                immersive: false;
+            }
+        }
+
+        // ============================================================
+        //  模式 2：沉浸模式（Lyrics Focus）
+        //  几乎全屏歌词，字号更大，行距更疏
+        //  左下角放置极小封面浮标（可点击切回封面模式）
+        // ============================================================
+        if (root.mode == 2) : Rectangle {
+            width: 100%; height: 100%;
+
+            // 主歌词（最大化）
+            LyricsScroll {
+                x: 0; y: 0;
+                width: 100%; height: 100%;
+                lyrics: root.lyrics;
+                current-lyric: root.current-lyric;
+                current-time-ms: root.current-time-ms;
+                immersive: true;
+            }
+
+            // 左下角迷你封面浮标
+            Rectangle {
+                x: 4px;
+                y: parent.height - 78px;
+                width: 64px; height: 64px;
+                border-radius: 12px;
+                clip: true;
+                drop-shadow-blur: 16px;
+                drop-shadow-color: rgba(0, 0, 0, 0.35);
+                drop-shadow-offset-y: 4px;
+                background: Theme.palette.surface-solid;
+
+                if (root.current-song.cover.width > 0) : Image {
+                    source: root.current-song.cover;
+                    image-fit: ImageFit.cover;
+                    width: 100%; height: 100%;
+                }
+                if (root.current-song.cover.width == 0) : Image {
+                    source: @image-url("../assets/icons/playlist-gray.svg");
+                    width: 28px; height: 28px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: Theme.palette.icon-faint;
+                }
+
+                // 点击浮标 → 切回封面模式（mode 为双向绑定，赋值即同步外部；
+                // 不要再发 mode-cycle，否则会立刻被外部回调推进到模式 1）
+                TouchArea {
+                    clicked => { root.mode = 0; }
+                    mouse-cursor: pointer;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,211 @@
+// ============================================================================
+//  update-dialog.slint — 在线更新卡片（覆盖在主窗口上，风格对齐 close-dialog）
+//  state: 0=发现新版本（更新说明 + 取消/立即更新）
+//         1=下载中（进度条 + 百分比，不可取消避免半截文件）
+//         2=完成（重启后生效：稍后/立即重启）
+//         3=失败（错误信息：关闭/重试）
+//  遮罩空白 / Esc / 右上角 × = 关闭（下载中禁用关闭，防止更新中断留下脏状态）
+// ============================================================================
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+import { ProgressBar } from "progressbar.slint";
+
+export component UpdateDialog inherits Rectangle {
+    in property <int> state: 0;            // 见文件头
+    in property <string> new-version: "";  // 目标版本（如 0.3.0）
+    in property <string> notes: "";        // Release 说明
+    in property <float> progress: 0.0;     // 下载进度 0..1
+    in property <string> error: "";        // 失败原因
+    callback cancel();                     // 关闭（state 0/2/3 可用）
+    callback update-now();                 // 立即更新（state 0）
+    callback retry();                      // 重试（state 3）
+    callback restart();                    // 立即重启（state 2）
+
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.38);
+
+    // 遮罩空白处点击 = 关闭（下载中不响应）
+    TouchArea {
+        clicked => { if (root.state != 1) { root.cancel(); } }
+    }
+
+    // Esc = 关闭（下载中不响应）
+    FocusScope {
+        width: 0;
+        height: 0;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == "\u{1b}" && root.state != 1) {
+                root.cancel();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    card := Rectangle {
+        width: min(440px, parent.width - 48px);
+        height: min(360px, parent.height - 64px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 14px;
+        background: Theme.palette.surface-solid;
+        drop-shadow-blur: 32px;
+        drop-shadow-color: rgba(0, 0, 0, 0.30);
+        drop-shadow-offset-y: 10px;
+
+        // 卡片区域拦截点击（点卡片空白不关对话框）
+        TouchArea { }
+
+        // ---- 标题 ----
+        Text {
+            x: 24px;
+            y: 20px;
+            width: parent.width - 48px;
+            height: 24px;
+            text: root.state == 0 ? Language.update-title + " v" + root.new-version
+                : root.state == 1 ? Language.update-downloading
+                : root.state == 2 ? Language.update-done-title
+                : Language.update-failed-title;
+            color: Theme.palette.text;
+            font-size: 17px;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // ---- 右上角关闭（×，下载中隐藏）----
+        if (root.state != 1) : Rectangle {
+            x: parent.width - 24px - 24px;
+            y: 18px;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: close-touch.has-hover ? Theme.palette.hover : transparent;
+
+            Path {
+                x: 6px;
+                y: 6px;
+                width: 12px;
+                height: 12px;
+                commands: "M 0 0 L 12 12 M 12 0 L 0 12";
+                stroke: Theme.palette.icon-faint;
+                stroke-width: 1.6px;
+            }
+
+            close-touch := TouchArea {
+                clicked => { root.cancel(); }
+            }
+        }
+
+        // ---- 内容区（state 0/3：可滚动文本；state 1：进度条；state 2：完成提示）----
+        if (root.state == 0 || root.state == 3) : Flickable {
+            x: 24px;
+            y: 56px;
+            width: parent.width - 48px;
+            height: parent.height - 56px - 68px;
+            content-height: content-txt.preferred-height;
+            content-txt := Text {
+                width: parent.width;
+                text: root.state == 3 ? root.error : (root.notes == "" ? Language.update-no-notes : root.notes);
+                color: Theme.palette.text-secondary;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+
+        if (root.state == 1) : Rectangle {
+            x: 24px;
+            y: 56px;
+            width: parent.width - 48px;
+            height: 60px;
+            // 复用播放进度条组件：从左向右增长，与播放器视觉统一
+            ProgressBar {
+                x: 0;
+                y: 16px;
+                width: parent.width;
+                progress: root.progress;
+            }
+            Text {
+                x: 0;
+                y: 32px;
+                width: parent.width;
+                height: 18px;
+                text: Math.round(root.progress * 100) + "%";
+                color: Theme.palette.text-faint;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+        }
+
+        if (root.state == 2) : Text {
+            x: 24px;
+            y: 56px;
+            width: parent.width - 48px;
+            height: 60px;
+            text: Language.update-done-desc;
+            color: Theme.palette.text-secondary;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+
+        // ---- 底部按钮行（右对齐：取消/关闭在左，主操作在右）----
+        HorizontalLayout {
+            x: 24px;
+            y: parent.height - 20px - 36px;
+            width: parent.width - 48px;
+            height: 36px;
+            spacing: 6px;
+            alignment: end;
+
+            // 取消/关闭/稍后（文字按钮）
+            if (root.state != 1) : Rectangle {
+                width: cancel-label.preferred-width + 28px;
+                height: 36px;
+                border-radius: 18px;
+                background: cancel-ta.has-hover ? Theme.palette.hover : transparent;
+
+                cancel-label := Text {
+                    text: root.state == 2 ? Language.update-later : root.state == 3 ? Language.common-close : Language.common-cancel;
+                    color: Theme.palette.text-secondary;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                cancel-ta := TouchArea {
+                    clicked => { root.cancel(); }
+                }
+            }
+
+            // 主操作：立即更新 / 立即重启 / 重试（主色实心按钮）
+            if (root.state != 1) : Rectangle {
+                width: ok-label.preferred-width + 32px;
+                height: 36px;
+                border-radius: 18px;
+                background: ok-ta.has-hover ? Theme.palette.primary-strong : Theme.palette.primary;
+
+                ok-label := Text {
+                    text: root.state == 0 ? Language.update-now
+                        : root.state == 2 ? Language.update-restart
+                        : Language.update-retry;
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                ok-ta := TouchArea {
+                    clicked => {
+                        if (root.state == 0) { root.update-now(); }
+                        else if (root.state == 2) { root.restart(); }
+                        else { root.retry(); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,134 @@
+// ============================================================================
+//  songlist.slint — 通用歌曲列表（歌单详情/专辑详情/排行榜/我喜欢/最近播放/本地音乐共用）
+//  SongRow：单行（序号 + 封面/歌名/歌手 + 时长 + 悬停播放 + 当前播放高亮）
+//  SongList：标题栏 + 行列表（滚动由外部 ScrollView 负责）
+// ============================================================================
+import { Song } from "models.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+// ---- 歌曲行 ----
+export component SongRow inherits Rectangle {
+    in property <int> index: 0;
+    in property <string> name;
+    in property <string> artist;
+    in property <string> duration;
+    in property <image> cover;
+    in property <bool> current: false;
+    callback clicked;
+
+    height: 52px;
+    border-radius: 8px;
+    background: root.current ? rgba(108, 92, 231, 0.09)
+               : row-ta.has-hover ? Theme.palette.hover
+               : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 14px;
+        padding-right: 14px;
+        cross-axis-alignment: center;
+
+        // 序号（悬停时变为播放图标）
+        Rectangle {
+            width: 22px;
+            Text {
+                text: root.index + 1;
+                color: root.current ? Theme.palette.primary : Theme.palette.text-faint;
+                font-size: 12px;
+                opacity: row-ta.has-hover ? 0.0 : 1.0;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            Image {
+                source: @image-url("../assets/icons/play-white.svg");
+                width: 13px; height: 13px;
+                opacity: row-ta.has-hover ? 1.0 : 0.0;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.primary;
+            }
+        }
+
+        // 封面（40×40 圆角）
+        Rectangle {
+            width: 40px; height: 40px;
+            border-radius: 8px;
+            clip: true;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+        }
+
+        // 歌名 / 歌手
+        VerticalLayout {
+            Rectangle { vertical-stretch: 1; }
+            Text {
+                text: root.name;
+                color: root.current ? Theme.palette.primary : Theme.palette.text;
+                font-size: 13px; font-weight: 500; overflow: elide;
+            }
+            Text {
+                text: root.artist;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // 时长
+        Text {
+            text: root.duration;
+            color: Theme.palette.text-faint; font-size: 11px;
+        }
+    }
+
+    row-ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// ---- 歌曲列表（含表头）----
+export component SongList inherits Rectangle {
+    in property <[Song]> songs;
+    in property <int> current-id: 0;
+    callback song-clicked(int);
+
+    // 显式高度：表头 30 + 行高 54×N。ScrollView 靠 preferred-height 协商内容高度，
+    // 不写死时高度被压成可视高 → 内容溢出无法滚动；且表头（未布局子元素默认
+    // 相对父垂直居中）会跑到列表中间
+    height: 30px + root.songs.length * 54px;
+
+    // 表头（必须显式 y:0：未在布局中的子元素默认相对父元素居中，不是 x=0/y=0）
+    HorizontalLayout {
+        y: 0;
+        height: 30px;
+        padding-left: 14px; padding-right: 14px;
+        spacing: 12px;
+        cross-axis-alignment: center;
+        Rectangle { width: 22px; }
+        Rectangle { width: 40px; }
+        Text { text: Language.songlist-col-title; color: Theme.palette.text-faint; font-size: 11px; }
+        Rectangle { horizontal-stretch: 1; }
+        Text { text: Language.songlist-col-duration; color: Theme.palette.text-faint; font-size: 11px; }
+    }
+
+    // 行列表
+    VerticalLayout {
+        y: 30px;
+        width: 100%;
+        spacing: 2px;
+        for s[i] in root.songs : SongRow {
+            index: i;
+            name: s.name;
+            artist: s.artist;
+            duration: s.duration;
+            cover: s.cover;
+            current: s.id == root.current-id;
+            clicked => { root.song-clicked(s.id); }
+        }
+    }
+}

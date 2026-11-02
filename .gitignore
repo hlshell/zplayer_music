@@ -1,0 +1,51 @@
+# Rust 构建产物
+target/
+*.exe
+*.dll
+*.pdb
+*.exp
+*.lib
+
+# Cargo.lock 备份（保留正式 Cargo.lock）
+Cargo.lock.*
+!Cargo.lock
+
+# wasm/web 部署产物（由 cargo build + wasm-bindgen 生成，可重建）
+www/
+wasm-probe/
+
+# 本地测试/临时目录
+_ztest/
+.tmp-data/
+.tmp_assets/
+.screenshots/
+
+# 日志与临时文件
+*.log
+*.tmp
+build_out.txt
+web_out.txt
+wbg_out.txt
+wbg_install.txt
+upd_out.txt
+info_out.txt
+test_out.txt
+out*.txt
+cc*.log
+cargo_check.log
+build_check.log
+
+# 临时审计/分析报告
+perf-audit-*.html
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# 本地 cargo 环境（机器特定路径，不入库；模板见 README）
+.cargo/config.toml

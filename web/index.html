@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>ZPlayer Web</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: #14121c;
+      color: #e8e6f0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    #zplayer-root { width: 100%; height: 100vh; }
+    canvas#canvas { width: 100%; height: 100vh; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <noscript>此应用需要启用 JavaScript 才能运行。</noscript>
+  <script type="module">
+    import init from "./zplayer-music.js?v=20261025F";
+    init()
+      .catch((e) => {
+        // winit 在 Slint web 启动时有一次 "Using exceptions for control flow" 控制流信号，
+        // 是正常机制，不是错误；忽略它，其余错误才显示。
+        if (String(e).includes("Using exceptions for control flow")) {
+          console.info("ZPlayer web 已启动（winit 控制流信号，可忽略）");
+          return;
+        }
+        console.error("ZPlayer wasm 初始化失败:", e);
+        const el = document.createElement("div");
+        el.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#f88;font-size:14px";
+        el.textContent = "初始化失败，请检查控制台：" + String(e);
+        document.body.appendChild(el);
+      });
+  </script>
+</body>
+</html>

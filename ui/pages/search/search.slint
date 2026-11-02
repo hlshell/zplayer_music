@@ -1,0 +1,585 @@
+// ============================================================================
+//  pages/search.slint — 搜索页
+//  搜索在标题栏胶囊完成；本页两种状态（searched 切换）：
+//  1) 搜索主页（未搜索）：热搜列表（4 列 grid，前 3 名绿色序号 + 爆/↑角标）+ 搜索历史（chips 单删/清空）
+//  2) 搜索结果页：返回按钮 + 详情页风格头部 + 类型选择 + 热门词(随类型) + 结果列表（独立滚动，触底加载）
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { Song, Album, Playlist, MvItem, Radio, HotItem } from "../../components/models.slint";
+import { SongList } from "../../components/songlist.slint";
+import { PlaceholderPage } from "../placeholder/placeholder.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// 详情页同款缩略图行：hover 底 + 圆角封面 + 名称/副标题 + 右侧徽标文本
+component ResRow inherits Rectangle {
+    in property <image> img;
+    in property <string> name;
+    in property <string> sub;
+    in property <string> badge;
+    callback clicked;
+
+    height: 58px;
+    border-radius: 10px;
+    background: ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 10px; padding-right: 10px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 42px; height: 42px; border-radius: 7px;
+            background: Theme.palette.divider;
+            clip: true;
+            Image { source: root.img; width: 100%; height: 100%; image-fit: cover; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.name;
+                color: Theme.palette.text;
+                font-size: 13px; overflow: elide;
+            }
+            Text {
+                text: root.sub;
+                color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+            }
+        }
+        Text {
+            text: root.badge;
+            color: Theme.palette.text-faint; font-size: 11px;
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// 热搜格：斜体序号（前 3 名绿色）+ 词条 + 右侧红色角标（爆/↑）
+component HotCell inherits Rectangle {
+    in property <int> idx;        // 0-based 排名
+    in property <string> word;
+    in property <string> tag;
+    callback clicked;
+
+    border-radius: 8px;
+    background: ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px; padding-right: 10px;
+        spacing: 6px;
+        cross-axis-alignment: center;
+
+        Text {
+            width: 28px;
+            text: root.idx < 9 ? "0" + (root.idx + 1) : (root.idx + 1);
+            color: root.idx < 3 ? rgb(34, 197, 94) : Theme.palette.text-faint;
+            font-size: 13px;
+            font-weight: root.idx < 3 ? 700 : 400;
+            font-italic: true;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.word;
+            color: Theme.palette.text;
+            font-size: 13px;
+            font-weight: root.idx < 3 ? 600 : 400;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        if (root.tag != "") : Text {
+            text: root.tag;
+            color: rgb(239, 68, 68);
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// 骨架屏行：封面块 + 两行文本条，呼吸透明度动画（加载中占位，数据到达后撤下）
+// 绝对定位实现：layout 容器内按父宽百分比取宽会形成绑定循环（layout-cache ↔ width）
+component SkeletonRow inherits Rectangle {
+    // 相位（度）：行间错开形成波浪呼吸
+    in property <float> phase: 0;
+    height: 58px;
+    opacity: 0.45 + 0.3 * Math.sin(animation-tick() / 1600ms * 360deg + phase * 1deg);
+
+    // 封面块
+    Rectangle {
+        x: 10px; y: 8px; width: 42px; height: 42px;
+        border-radius: 7px;
+        background: Theme.palette.divider;
+    }
+    // 名称条
+    Rectangle {
+        x: 64px; y: 15px; height: 13px;
+        width: Math.min((root.width - 84px) * 0.6, 340px);
+        border-radius: 4px;
+        background: Theme.palette.divider;
+    }
+    // 副标题条
+    Rectangle {
+        x: 64px; y: 34px; height: 11px;
+        width: Math.min((root.width - 84px) * 0.35, 220px);
+        border-radius: 4px;
+        background: Theme.palette.divider;
+    }
+}
+
+// 根组件必须是 Rectangle（同 playlists/albums/mv/radio 验证过的模式）：
+// 继承 VerticalLayout 时页面在外层共享 sv 里被按内容全高展开，内层 sv 被撑满
+// 不滚动且吞掉滚轮事件，外层 sv 收不到 → 整页无法滚动
+export component SearchPage inherits Rectangle {
+    in-out property <string> search-text: "";
+    // 搜索类型：0=单曲 1=专辑 2=歌单 3=MV 4=电台
+    in-out property <int> search-type: 0;
+    // 状态：false=搜索主页（热搜+历史），true=搜索结果页（Rust 搜索发起时置 true）
+    in-out property <bool> searched: false;
+    // 结果加载中：true 时结果区显示骨架屏（Rust 新搜索置 true，数据到达置 false）
+    in property <bool> loading: false;
+    // 热搜榜详细列表（搜索主页 4 列 grid，Rust 拉 /search/hot/detail 前 20）
+    in property <[HotItem]> hot-list: [];
+    // 搜索历史（Rust 持久化，最新在前）
+    in property <[string]> history: [];
+    // 热门词（随类型切换，由 Rust 拉取该类型最热资源名）
+    in property <[string]> hot-words: [];
+    in property <[Song]> results;
+    in property <[Album]> album-results: [];
+    in property <[Playlist]> playlist-results: [];
+    in property <[MvItem]> mv-results: [];
+    in property <[Radio]> radio-results: [];
+    in property <int> current-id: 0;
+    callback search();
+    callback play-song(int);
+    // 播放全部：搜索结果去重追加到播放列表并播放第一首
+    callback play-all();
+    // 打开资源详情：kind 0=歌单 1=专辑 3=电台 4=MV（与详情路由一致）
+    callback open-resource(int, int);
+    // 触底加载更多
+    callback load-more();
+    // 切换搜索类型
+    callback type-select(int);
+    // 搜索历史：单条删除 / 清空
+    callback history-remove(string);
+    callback history-clear();
+
+    // 当前类型结果数（用于空态判断）
+    property <int> type-count: search-type == 1 ? album-results.length
+        : search-type == 2 ? playlist-results.length
+        : search-type == 3 ? mv-results.length
+        : search-type == 4 ? radio-results.length
+        : results.length;
+    property <string> type-name: search-type == 1 ? "专辑"
+        : search-type == 2 ? "歌单"
+        : search-type == 3 ? "MV"
+        : search-type == 4 ? "电台"
+        : "单曲";
+    property <string> type-unit: search-type == 0 ? " 首" : search-type == 1 ? " 张" : " 个";
+
+    // ==================== 搜索主页：热搜列表 + 搜索历史 ====================
+    if (!root.searched) : ScrollView {
+        width: 100%; height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            padding-left: 26px; padding-right: 26px;
+            padding-top: 12px; padding-bottom: 24px;
+            spacing: 6px;
+            alignment: start;
+
+            Text {
+                text: Language.search-hot-list;
+                color: Theme.palette.text;
+                font-size: 20px; font-weight: 700;
+            }
+            Text {
+                text: Language.search-hot-list-desc;
+                color: Theme.palette.text-faint;
+                font-size: 12px;
+            }
+
+            // 热搜 4 列 grid（绝对定位：x=列号×列宽，y=行号×行高）
+            grid := Rectangle {
+                height: (root.hot-list.length + 3) / 4 * 48px;
+                for item[i] in root.hot-list : HotCell {
+                    x: mod(i, 4) * parent.width / 4;
+                    y: (i / 4) * 48px;
+                    width: parent.width / 4;
+                    height: 48px;
+                    idx: i;
+                    word: item.word;
+                    tag: item.tag;
+                    clicked => { root.search-text = item.word; root.search(); }
+                }
+            }
+
+            // ---- 搜索历史标题行（右侧清空）----
+            HorizontalLayout {
+                height: 30px;
+                padding-top: 8px;
+                Text {
+                    text: Language.search-history;
+                    color: Theme.palette.text;
+                    font-size: 15px; font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if (root.history.length > 0) : Text {
+                    text: Language.search-history-clear;
+                    color: clear-ta.has-hover ? Theme.palette.primary : Theme.palette.text-faint;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    clear-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.history-clear(); }
+                    }
+                }
+            }
+
+            // ---- 历史词条 chips（词 + × 单删；单行排布，超出裁切）----
+            if (root.history.length > 0) : Rectangle {
+                height: 34px;
+                clip: true;
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for w in root.history : Rectangle {
+                        height: 30px;
+                        border-radius: 15px;
+                        background: chip-ta.has-hover ? Theme.palette.hover : Theme.palette.divider;
+                        width: inner.preferred-width;
+                        inner := HorizontalLayout {
+                            padding-left: 14px; padding-right: 12px;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            Text {
+                                text: w;
+                                color: Theme.palette.text-secondary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                            // × 单删（独立热区，嵌套在整 chip 点击区内层优先）
+                            Rectangle {
+                                width: x-text.preferred-width + 4px;
+                                height: 100%;
+                                x-text := Text {
+                                    text: "×";
+                                    color: del-ta.has-hover ? Theme.palette.primary : Theme.palette.text-faint;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                del-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.history-remove(w); }
+                                }
+                            }
+                        }
+                        chip-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.search-text = w; root.search(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==================== 搜索结果页 ====================
+    if (root.searched) : VerticalLayout {
+        width: 100%; height: 100%;
+        spacing: 12px;
+        padding-top: 8px;
+
+    // ---- 返回搜索主页 ----
+    HorizontalLayout {
+        height: 34px;
+        padding-left: 18px;
+        spacing: 8px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 32px; height: 32px; border-radius: 16px;
+            background: back-ta.has-hover ? Theme.palette.hover : transparent;
+            Image {
+                source: @image-url("../../assets/icons/arrow-back-up.svg");
+                width: 17px; height: 17px;
+                horizontal-alignment: center; vertical-alignment: center;
+                colorize: Theme.palette.icon;
+            }
+            back-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.searched = false; }
+            }
+        }
+        Text {
+            text: Language.search-back;
+            color: Theme.palette.text-secondary;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    // ---- 头部：详情页风格（大封面 + 类型/关键词/来源/数量）----
+    HorizontalLayout {
+        height: 176px;
+        spacing: 24px;
+        padding-left: 26px;
+        padding-right: 26px;
+        cross-axis-alignment: center;
+
+        // 左：大封面（取当前类型第一条结果）
+        Rectangle {
+            width: 160px; height: 160px; border-radius: 14px;
+            clip: true;
+            background: Theme.palette.divider;
+            if (root.search-type == 0 && root.results.length > 0) : Image {
+                source: root.results[0].cover; width: 100%; height: 100%; image-fit: cover;
+            }
+            if (root.search-type == 1 && root.album-results.length > 0) : Image {
+                source: root.album-results[0].cover; width: 100%; height: 100%; image-fit: cover;
+            }
+            if (root.search-type == 2 && root.playlist-results.length > 0) : Image {
+                source: root.playlist-results[0].cover; width: 100%; height: 100%; image-fit: cover;
+            }
+            if (root.search-type == 3 && root.mv-results.length > 0) : Image {
+                source: root.mv-results[0].cover; width: 100%; height: 100%; image-fit: cover;
+            }
+            if (root.search-type == 4 && root.radio-results.length > 0) : Image {
+                source: root.radio-results[0].cover; width: 100%; height: 100%; image-fit: cover;
+            }
+        }
+
+        // 右：信息区
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+            alignment: center;
+            Text {
+                text: root.type-name + "搜索结果";
+                color: Theme.palette.primary;
+                font-size: 12.5px; font-weight: 600;
+            }
+            Text {
+                text: root.search-text == "" ? root.type-name : root.search-text;
+                color: Theme.palette.text;
+                font-size: 24px; font-weight: 700;
+                overflow: elide;
+            }
+            Text {
+                text: Language.sources-netease;
+                color: Theme.palette.text-faint;
+                font-size: 13px;
+            }
+            Text {
+                text: root.loading ? "搜索中…" : root.type-count + root.type-unit;
+                color: Theme.palette.text-faint;
+                font-size: 12px;
+            }
+        }
+    }
+
+    // ---- 类型选择（单曲/专辑/歌单/MV/电台）----
+    HorizontalLayout {
+        height: 30px;
+        spacing: 8px;
+        padding-left: 26px;
+        padding-right: 26px;
+        alignment: start;
+        for name[idx] in ["单曲", "专辑", "歌单", "MV", "电台"] : Rectangle {
+            height: 28px;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: idx == root.search-type
+                ? Theme.palette.primary
+                : (tc-ta.has-hover ? Theme.palette.divider : transparent);
+            background: idx == root.search-type
+                ? rgba(108, 92, 231, 0.14)
+                : (tc-ta.has-hover ? Theme.palette.hover : transparent);
+            HorizontalLayout {
+                padding-left: 14px; padding-right: 14px;
+                Text {
+                    text: name;
+                    color: idx == root.search-type ? Theme.palette.primary : Theme.palette.text-secondary;
+                    font-size: 12px;
+                    font-weight: idx == root.search-type ? 600 : 400;
+                    vertical-alignment: center;
+                }
+            }
+            tc-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.type-select(idx); }
+            }
+        }
+    }
+
+    // ---- 热门搜索 + 播放全部（单曲类型）----
+    HorizontalLayout { height: 30px; spacing: 10px; alignment: start;
+        padding-left: 26px; padding-right: 26px;
+        Text { text: Language.search-hot; color: Theme.palette.text-faint; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+        for kw in root.hot-words: Rectangle {
+            height: 26px;
+            border-radius: 13px;
+            border-width: 1px;
+            border-color: hot-ta.has-hover ? Theme.palette.primary : transparent;
+            background: hot-ta.has-hover ? rgba(108, 92, 231, 0.12) : rgba(108, 92, 231, 0.06);
+            HorizontalLayout {
+                padding-left: 13px; padding-right: 13px;
+                Text {
+                    text: kw;
+                    color: hot-ta.has-hover ? Theme.palette.primary : Theme.palette.text-secondary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+            hot-ta := TouchArea {
+                clicked => { root.search-text = kw; root.search(); }
+                mouse-cursor: pointer;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if (root.search-type == 0 && root.results.length > 0) : Rectangle {
+            width: 84px; height: 28px; border-radius: 14px;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+            HorizontalLayout {
+                padding-left: 10px; padding-right: 10px;
+                spacing: 5px; cross-axis-alignment: center;
+                Image {
+                    source: @image-url("../../assets/icons/play-white.svg");
+                    width: 13px; height: 13px;
+                }
+                Text {
+                    text: Language.detail-play-all;
+                    color: Theme.palette.icon-white; font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+            pa-ta := TouchArea { clicked => { root.play-all(); } mouse-cursor: pointer; }
+        }
+    }
+
+    // ---- 搜索结果（独立滚动区，按类型分派；触底加载更多） ----
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+        if (root.type-count > 0) : sv := ScrollView {
+            width: 100%; height: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+
+            // 触底检测：content-y 为负值域（顶部=0，向下为负），滚动量 = -content-y。
+            // 视口底距内容底 ≤ 80px 时请求下一页（Rust 侧 loading/has-more 守卫去重）
+            changed content-y => {
+                if (root.type-count > 0 && -sv.content-y >= sv.content-height - sv.visible-height - 80px) {
+                    root.load-more();
+                }
+            }
+            // 内容不足一屏时自动补页（Timer 轮询；追加后仍不足一屏会继续补，
+            // Rust 侧 has-more=false 后 begin_page 拒绝，自然停止）
+            Timer {
+                interval: 200ms;
+                triggered => {
+                    if (root.type-count > 0 && sv.content-height <= sv.visible-height + 8px) {
+                        root.load-more();
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 0;
+                padding-left: 26px;
+                padding-right: 26px;
+                padding-bottom: 20px;
+
+                // 单曲：歌曲列表
+                if (root.search-type == 0) : SongList {
+                    songs: root.results;
+                    current-id: root.current-id;
+                    song-clicked(id) => { root.play-song(id); }
+                }
+
+                // 专辑：缩略图行（副标题=歌手，右侧=年份）
+                if (root.search-type == 1) : Rectangle {
+                    height: root.album-results.length * 58px;
+                    for a[i] in root.album-results : ResRow {
+                        y: i * 58px;
+                        width: parent.width;
+                        img: a.cover; name: a.name; sub: a.artist; badge: a.year;
+                        clicked => { root.open-resource(1, a.id); }
+                    }
+                }
+
+                // 歌单：缩略图行（副标题=网易云，右侧=播放数）
+                if (root.search-type == 2) : Rectangle {
+                    height: root.playlist-results.length * 58px;
+                    for p[i] in root.playlist-results : ResRow {
+                        y: i * 58px;
+                        width: parent.width;
+                        img: p.cover; name: p.name; sub: Language.sources-netease; badge: p.plays;
+                        clicked => { root.open-resource(0, p.id); }
+                    }
+                }
+
+                // MV：缩略图行（副标题=歌手，右侧=时长）
+                if (root.search-type == 3) : Rectangle {
+                    height: root.mv-results.length * 58px;
+                    for m[i] in root.mv-results : ResRow {
+                        y: i * 58px;
+                        width: parent.width;
+                        img: m.cover; name: m.name; sub: m.artist; badge: m.duration;
+                        clicked => { root.open-resource(4, m.id); }
+                    }
+                }
+
+                // 电台：缩略图行（副标题=主播，右侧=订阅数）
+                if (root.search-type == 4) : Rectangle {
+                    height: root.radio-results.length * 58px;
+                    for r[i] in root.radio-results : ResRow {
+                        y: i * 58px;
+                        width: parent.width;
+                        img: r.cover; name: r.name; sub: r.desc; badge: r.plays;
+                        clicked => { root.open-resource(3, r.id); }
+                    }
+                }
+            }
+        }
+        // 骨架屏：加载中铺满结果区占位（覆盖在下层 sv 之上，数据到达后撤下）
+        if (root.loading) : Rectangle {
+            width: 100%; height: 100%;
+            background: Theme.palette.window-bg;
+            VerticalLayout {
+                padding-left: 26px; padding-right: 26px;
+                alignment: start;
+                for i in 10 : SkeletonRow { phase: i * 40; }
+            }
+        }
+        // 空态：非加载中且无结果时才显示（加载中显示骨架屏，避免闪烁空态）。
+        // 不复用 PlaceholderPage：那是搜索主页/其他页的整页空态（大图标 +“在顶部搜索框
+        // 输入关键词”文案），放在结果页底部会被看成残留的旧默认页内容。
+        if (!root.loading && root.type-count == 0) : Rectangle {
+            width: 100%;
+            height: 100%;
+            VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: "没有找到相关" + root.type-name;
+                    color: Theme.palette.text-secondary;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "换个关键词或切换类型试试";
+                    color: Theme.palette.text-faint;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+    }
+}

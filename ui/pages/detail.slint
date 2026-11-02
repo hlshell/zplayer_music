@@ -1,0 +1,426 @@
+﻿// ============================================================================
+//  pages/detail.slint — 统一详情页（覆盖层，不占导航位）
+//  固定顶条(吸顶)：返回 + 标题(对应名) + 搜索框(仅筛当前列表) + 列表样式切换 + 收藏 + 播放全部
+//  滚动内容：封面大块(左封面 hover播放/类型角标 + 右信息 类型/标题/歌手/数量) + 歌曲列表
+//  歌曲列表两样式切换：0=缩略图行，1=多列(序号/歌名/歌手/专辑/时长)
+//  MV/电台等类型只做标签兜底，数据后续再补。
+// ============================================================================
+import { Song } from "../components/models.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+import { ScrollableTextInput } from "../components/scrollable-text-input.slint";
+
+export component DetailPage inherits Rectangle {
+    in property <string> title: "";
+    in property <string> desc: "";
+    in property <[Song]> songs: [];
+    in property <Song> current-song;
+    in property <image> bg-cover;
+    in property <string> d-type: Language.nav-playlists;      // 类型标签：歌单/专辑/MV/电台
+    in-out property <int> list-style: 0;      // 0=缩略图行 1=多列
+    in-out property <bool> liked: false;      // 详情整体收藏态（由 Rust 同步）
+    in property <bool> show-like: true;        // 头部爱心是否显示（每日推荐传 false）
+    in-out property <string> search-text: ""; // 详情内搜索（本地过滤当前列表）
+    callback play-song(int);
+    callback like-toggle-id(int);
+    callback like-toggle();                   // 头部资源收藏切换
+    callback play-all();
+    callback back();
+    callback search-changed(string);
+
+    // 页面根底色必须不透明：surface 带 alpha 会透出底下内容区
+    background: Theme.palette.window-bg;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        // ================= 固定顶条（吸顶，滚动时始终可见）=================
+        Rectangle {
+            width: 100%;
+            height: 52px;
+            background: Theme.palette.surface-solid;
+
+            // 顶条底部分隔线
+            Rectangle {
+                width: 100%; height: 1px;
+                y: parent.height - 1px;
+                background: Theme.palette.divider;
+            }
+
+            HorizontalLayout {
+                width: 100%; height: 100%;
+                padding-left: 12px; padding-right: 12px;
+                spacing: 10px;
+                cross-axis-alignment: center;
+
+                // 返回
+                Rectangle {
+                    width: 32px; height: 32px; border-radius: 16px;
+                    background: back-ta.has-hover ? Theme.palette.hover : transparent;
+                    Image {
+                        source: @image-url("../assets/icons/arrow-back-up.svg");
+                        width: 17px; height: 17px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: Theme.palette.icon;
+                    }
+                    back-ta := TouchArea { clicked => { root.back(); } mouse-cursor: pointer; }
+                }
+                // 标题（进入该详情的卡片对应名）
+                Text {
+                    text: root.title;
+                    color: Theme.palette.text;
+                    font-size: 15px; font-weight: 600;
+                    overflow: elide;
+                }
+                Rectangle { horizontal-stretch: 1; }
+
+                // 详情内搜索框（仅筛当前列表；对齐标题栏胶囊样式：单层整体输入框，
+                // 原生 TextInput 无内置底色边框，避免 LineEdit 自带样式叠加两层效果）
+                Rectangle {
+                    width: 200px; height: 32px;
+                    border-radius: 16px;
+                    border-width: 1px;
+                    border-color: dti.has-focus ? Theme.palette.primary : Theme.palette.divider;
+                    background: Theme.palette.hover;
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        padding-left: 11px;
+                        padding-right: 10px;
+                        height: 100%;
+                        cross-axis-alignment: center;
+
+                        // 胶囊内搜索图标
+                        Image {
+                            source: @image-url("../assets/icons/search-faint.svg");
+                            width: 14px; height: 14px;
+                            colorize: dti.has-focus ? Theme.palette.primary : Theme.palette.icon-faint;
+                            vertical-alignment: center;
+                        }
+
+                        // 输入区：低层 TextInput（无内置边框），占位提示由上层条件 Text 叠加
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            dti := ScrollableTextInput {
+                                width: 100%; height: 100%;
+                                text <=> root.search-text;
+                                font-size: 12.5px;
+                                edited => { root.search-changed(root.search-text); }
+                            }
+                            if (root.search-text == "") : Text {
+                                x: 0; y: 0;
+                                height: 100%;
+                                text: Language.detail-search-song;
+                                color: Theme.palette.text-faint;
+                                font-size: 12.5px;
+                                horizontal-alignment: left;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // 列表样式切换（layout-rows=缩略图 / layout-columns=多列）
+                Rectangle {
+                    width: 32px; height: 32px; border-radius: 16px;
+                    background: st-ta.has-hover ? Theme.palette.hover : transparent;
+                    Image {
+                        source: root.list-style == 0
+                            ? @image-url("../assets/icons/layout-rows-gray.svg")
+                            : @image-url("../assets/icons/layout-columns-gray.svg");
+                        width: 17px; height: 17px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: Theme.palette.icon;
+                    }
+                    st-ta := TouchArea {
+                        clicked => { root.list-style = root.list-style == 0 ? 1 : 0; }
+                        mouse-cursor: pointer;
+                    }
+                }
+
+                // 收藏（接通 Rust：liked 由 detail-like-toggle 后 Rust 同步写回）
+                if (root.show-like) : Rectangle {
+                    width: 32px; height: 32px; border-radius: 16px;
+                    background: lk-ta.has-hover ? Theme.palette.hover : transparent;
+                    Image {
+                        source: root.liked
+                            ? @image-url("../assets/icons/heart-fill-red.svg")
+                            : @image-url("../assets/icons/heart-gray.svg");
+                        width: 16px; height: 16px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: root.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+                    }
+                    lk-ta := TouchArea {
+                        clicked => { root.like-toggle(); }
+                        mouse-cursor: pointer;
+                    }
+                }
+
+                // 播放全部
+                Rectangle {
+                    width: 96px; height: 32px; border-radius: 16px;
+                    background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px;
+                        spacing: 6px; cross-axis-alignment: center;
+                        Image {
+                            source: @image-url("../assets/icons/play-white.svg");
+                            width: 14px; height: 14px;
+                        }
+                        Text {
+                            text: Language.detail-play-all;
+                            color: Theme.palette.icon-white; font-size: 12.5px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    pa-ta := TouchArea { clicked => { root.play-all(); } mouse-cursor: pointer; }
+                }
+            }
+        }
+
+        // ================= 滚动内容 =================
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            clip: true;
+
+            sv := ScrollView {
+                width: 100%; height: 100%;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    spacing: 0;
+                    padding-left: 14px; padding-right: 14px;
+                    padding-bottom: 20px;
+
+                    // ---- 封面大块（滚动时随内容滚走，即“收起封面”）----
+                    Rectangle {
+                        width: 100%;
+                        height: 230px;
+
+                        HorizontalLayout {
+                            spacing: 28px;
+                            cross-axis-alignment: center;
+
+                            // 左：大封面（hover 播放按钮 + 类型角标）
+                            Rectangle {
+                                width: 186px; height: 186px; border-radius: 14px;
+                                clip: true;
+                                background: Theme.palette.divider;
+
+                                if (root.bg-cover.width > 0) : Image {
+                                    width: 100%; height: 100%;
+                                    source: root.bg-cover;
+                                    image-fit: cover;
+                                }
+
+                                // 暗化遮罩（保证角标/播放按钮可见）
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: rgba(20, 16, 40, 0.18);
+                                }
+
+                                // 左上类型角标
+                                Rectangle {
+                                    x: 8px; y: 8px;
+                                    height: 20px; border-radius: 10px;
+                                    background: rgba(0, 0, 0, 0.45);
+                                    HorizontalLayout {
+                                        Text {
+                                            text: root.d-type;
+                                            color: white; font-size: 10.5px; font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // hover 中央播放按钮
+                                Rectangle {
+                                    width: 46px; height: 46px; border-radius: 23px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    background: rgba(255, 255, 255, 0.92);
+                                    opacity: cover-ta.has-hover ? 1.0 : 0.0;
+                                    animate opacity { duration: 150ms; }
+                                    Image {
+                                        source: @image-url("../assets/icons/play-white.svg");
+                                        width: 20px; height: 20px;
+                                        horizontal-alignment: center; vertical-alignment: center;
+                                        colorize: #4a3fae;
+                                    }
+                                }
+
+                                cover-ta := TouchArea {
+                                    width: 100%; height: 100%;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.play-all(); }
+                                }
+                            }
+
+                            // 右：信息区
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 7px;
+                                alignment: start;
+
+                                Text {
+                                    text: root.d-type;
+                                    color: Theme.palette.primary;
+                                    font-size: 12.5px; font-weight: 600;
+                                }
+                                Text {
+                                    text: root.title;
+                                    color: Theme.palette.text;
+                                    font-size: 24px; font-weight: 700;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: root.desc;
+                                    color: Theme.palette.text-faint;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: root.songs.length + Language.detail-song-unit;
+                                    color: Theme.palette.text-faint;
+                                    font-size: 12px;
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- 歌曲列表（单 for，行内按 list-style 切换两样式）----
+                    for song[idx] in root.songs : Rectangle {
+                        height: root.list-style == 0 ? 58px : 44px;
+                        border-radius: root.list-style == 0 ? 10px : 8px;
+                        background: row-ta.has-hover ? Theme.palette.hover : transparent;
+
+                        // 样式1：缩略图行
+                        if (root.list-style == 0) : HorizontalLayout {
+                            spacing: 12px;
+                            padding-left: 10px; padding-right: 10px;
+                            cross-axis-alignment: center;
+
+                            Rectangle {
+                                width: 42px; height: 42px; border-radius: 7px;
+                                background: Theme.palette.divider;
+                                clip: true;
+                                Image { source: song.cover; width: 100%; height: 100%; image-fit: cover; }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text {
+                                    text: song.name;
+                                    color: song.id == root.current-song.id ? Theme.palette.primary : Theme.palette.text;
+                                    font-size: 13px; overflow: elide;
+                                }
+                                Text {
+                                    text: song.artist;
+                                    color: Theme.palette.text-faint; font-size: 11px; overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: song.duration;
+                                color: Theme.palette.text-faint; font-size: 11px;
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px;
+                                background: lk0-ta.has-hover ? Theme.palette.divider : transparent;
+                                Image {
+                                    source: song.liked
+                                        ? @image-url("../assets/icons/heart-fill-red.svg")
+                                        : @image-url("../assets/icons/heart-gray.svg");
+                                    width: 15px; height: 15px;
+                                    horizontal-alignment: center; vertical-alignment: center;
+                                    colorize: song.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+                                }
+                                lk0-ta := TouchArea { mouse-cursor: pointer; clicked => { root.like-toggle-id(song.id); } }
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px;
+                                background: pl0-ta.has-hover ? Theme.palette.divider : transparent;
+                                Image {
+                                    source: song.id == root.current-song.id
+                                        ? @image-url("../assets/icons/pause-white.svg")
+                                        : @image-url("../assets/icons/play-white.svg");
+                                    width: 14px; height: 14px;
+                                    horizontal-alignment: center; vertical-alignment: center;
+                                    colorize: song.id == root.current-song.id ? Theme.palette.primary : Theme.palette.icon;
+                                }
+                                pl0-ta := TouchArea { mouse-cursor: pointer; clicked => { root.play-song(song.id); } }
+                            }
+                        }
+
+                        // 样式2：多列（序号/歌名/歌手/专辑/时长 + 收藏 + 播放）
+                        if (root.list-style == 1) : HorizontalLayout {
+                            spacing: 10px;
+                            padding-left: 14px; padding-right: 14px;
+                            cross-axis-alignment: center;
+
+                            Text {
+                                width: 34px;
+                                text: idx + 1;
+                                color: song.id == root.current-song.id ? Theme.palette.primary : Theme.palette.text-faint;
+                                font-size: 12px; horizontal-alignment: center;
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: song.name;
+                                color: song.id == root.current-song.id ? Theme.palette.primary : Theme.palette.text;
+                                font-size: 13px; overflow: elide;
+                            }
+                            Text {
+                                width: 150px;
+                                text: song.artist;
+                                color: Theme.palette.text-faint; font-size: 12px; overflow: elide;
+                            }
+                            Text {
+                                width: 150px;
+                                text: song.album;
+                                color: Theme.palette.text-faint; font-size: 12px; overflow: elide;
+                            }
+                            Text {
+                                width: 50px;
+                                text: song.duration;
+                                color: Theme.palette.text-faint; font-size: 12px;
+                            }
+                            Rectangle {
+                                width: 26px; height: 26px; border-radius: 13px;
+                                background: lk1-ta.has-hover ? Theme.palette.divider : transparent;
+                                Image {
+                                    source: song.liked
+                                        ? @image-url("../assets/icons/heart-fill-red.svg")
+                                        : @image-url("../assets/icons/heart-gray.svg");
+                                    width: 14px; height: 14px;
+                                    horizontal-alignment: center; vertical-alignment: center;
+                                    colorize: song.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+                                }
+                                lk1-ta := TouchArea { mouse-cursor: pointer; clicked => { root.like-toggle-id(song.id); } }
+                            }
+                            Rectangle {
+                                width: 26px; height: 26px; border-radius: 13px;
+                                background: pl1-ta.has-hover ? Theme.palette.divider : transparent;
+                                Image {
+                                    source: song.id == root.current-song.id
+                                        ? @image-url("../assets/icons/pause-white.svg")
+                                        : @image-url("../assets/icons/play-white.svg");
+                                    width: 13px; height: 13px;
+                                    horizontal-alignment: center; vertical-alignment: center;
+                                    colorize: song.id == root.current-song.id ? Theme.palette.primary : Theme.palette.icon;
+                                }
+                                pl1-ta := TouchArea { mouse-cursor: pointer; clicked => { root.play-song(song.id); } }
+                            }
+                        }
+                        row-ta := TouchArea { clicked => { root.play-song(song.id); } mouse-cursor: pointer; }
+                    }
+                }
+            }
+        }
+    }
+}

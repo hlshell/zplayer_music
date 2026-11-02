@@ -1,0 +1,80 @@
+// ============================================================================
+//  pages/settings/sources-popup.slint — 音源查看弹窗（只读，不选择）
+//  列出当前可用的音源及其接入状态；由 settings.slint 外壳居中渲染在非裁剪覆盖层。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export struct SourceEntry {
+    name: string,
+    state: string,
+    ok: bool,
+}
+
+export component SourcesPopup inherits Rectangle {
+    in property <string> title: Language.sources-title;
+    in property <[SourceEntry]> items: [];
+    callback closed();
+
+    property <length> row-h: 38px;
+    width: 300px;
+    height: min(
+        16px + 26px + 10px + root.items.length * root.row-h
+        + (root.items.length > 0 ? (root.items.length - 1) * 6px : 0px) + 14px + 40px,
+        440px
+    );
+    border-radius: 14px;
+    background: Theme.palette.surface-solid;
+    drop-shadow-blur: 10px; drop-shadow-color: rgba(0, 0, 0, 0.30); drop-shadow-offset-y: 4px;
+    border-width: 1px; border-color: Theme.palette.divider;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 6px;
+        padding-left: 16px; padding-right: 16px; padding-top: 16px; padding-bottom: 14px;
+        // 标题
+        Text {
+            text: root.title;
+            color: Theme.palette.text;
+            font-size: 14.5px;
+            font-weight: 600;
+            height: 26px;
+        }
+        // 音源列表（每行：名称 + 状态）
+        for it in root.items : Rectangle {
+            height: root.row-h;
+            border-radius: 10px;
+            background: it.ok ? Theme.palette.surface : Theme.palette.surface;
+            border-width: 1px;
+            border-color: it.ok ? Theme.palette.divider : Theme.palette.divider;
+            HorizontalLayout { spacing: 8px; padding-left: 14px; padding-right: 14px; cross-axis-alignment: center;
+                Text {
+                    text: it.name;
+                    color: Theme.palette.text;
+                    font-size: 13px;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Text {
+                    text: it.state;
+                    color: it.ok ? Theme.palette.primary : Theme.palette.text-faint;
+                    font-size: 12px;
+                }
+            }
+        }
+        // 关闭按钮
+        Rectangle {
+            height: 34px;
+            border-radius: 9px;
+            background: close-ta.has-hover ? Theme.palette.hover : Theme.palette.surface;
+            border-width: 1px; border-color: Theme.palette.divider;
+            Text {
+                text: Language.common-close;
+                color: Theme.palette.text;
+                font-size: 13px;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            close-ta := TouchArea { clicked => { root.closed(); } mouse-cursor: pointer; }
+        }
+    }
+}

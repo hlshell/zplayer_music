@@ -1,0 +1,539 @@
+// ============================================================================
+//  mini-player.slint — 迷你窗口（宽高 395x72；高度由抽屉状态决定：基础 72，开抽屉 ≈476）
+//  布局（左中右三段，播放按钮居中）：
+//    左：封面(圆角小图) + 歌名 + 歌手（垂直居中）
+//    中：上一曲 | 播放·暂停(最大) | 下一曲（居中）
+//    右：爱心 | 播放模式 | 播放列表 | 退出（靠右，垂直居中）
+//    进度条（轨道 + 渐变填充线，仅显示，无点击/悬停时间）
+//    播放列表抽屉（向下弹出，可滚动，鼠标离开 2s 自动收起）
+// ============================================================================
+import { Song } from "models.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+// ---- 迷你播放列表单项：封面 + 歌名/歌手（两行）+ 悬停显示移除按钮；点击整行播放 ----
+component ListItem inherits Rectangle {
+    in property <Song> song;
+    callback play-song(int);
+    callback remove-song(int);
+    callback like-toggle-id(int);
+    // 点击时快照的歌曲 ID：for 组件复用会在移除后把实例数据更新为相邻行，
+    // clicked 触发时 song 可能已变；down 时刻快照 ID 保证移除/播放目标正确，
+    // 即使二次触发也只是对同一 ID 重复操作（Rust 侧按 ID 比对，幂等无害）。
+    property <int> play-press-id: 0;
+    property <int> rm-press-id: 0;
+    property <int> like-press-id: 0;
+
+    height: 40px;
+    width: 100%;
+    // 行悬停（含爱心/移除按钮热区：鼠标在按钮上时 it-ta 被截走，需并入判定）
+    property <bool> row-hover: it-ta.has-hover || rm-ta.has-hover || lk-ta.has-hover;
+    background: row-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            background: Theme.palette.divider;
+            clip: true;
+            Image {
+                source: root.song.cover;
+                width: 100%;
+                height: 100%;
+                image-fit: cover;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.song.name;
+                color: Theme.palette.text;
+                font-size: 12px;
+                overflow: elide;
+            }
+            Text {
+                text: root.song.artist;
+                color: Theme.palette.text-faint;
+                font-size: 10px;
+                overflow: elide;
+            }
+        }
+    }
+
+    it-ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.play-press-id = root.song.id;
+            }
+        }
+        clicked => { root.play-song(root.play-press-id); }
+    }
+
+    // 移除单曲（tabler trash）：默认常显，最右侧；悬停自身时加深底色。
+    // 声明在 it-ta 之后 = z 序更高可点击
+    Rectangle {
+        x: parent.width - self.width - 6px;
+        y: (parent.height - self.height) / 2;
+        width: 28px;
+        height: 28px;
+        border-radius: 14px;
+        background: rm-ta.has-hover ? Theme.palette.divider : transparent;
+        Image {
+            source: @image-url("../assets/icons/trash-gray.svg");
+            width: 16px;
+            height: 16px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            colorize: Theme.palette.icon;
+        }
+        rm-ta := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.rm-press-id = root.song.id;
+                }
+            }
+            clicked => { root.remove-song(root.rm-press-id); }
+        }
+    }
+
+    // 收藏爱心（tabler heart）：已收藏红心、未收藏灰心，默认常显；
+    // 紧邻移除按钮左侧（间距 8px），点击切换收藏（不换歌）。
+    // 声明在 it-ta 之后 = z 序更高可点击（放布局里会被整行 TouchArea 盖住）
+    Rectangle {
+        x: parent.width - self.width - 42px;
+        y: (parent.height - self.height) / 2;
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: lk-ta.has-hover ? Theme.palette.divider : transparent;
+        Image {
+            source: root.song.liked
+                ? @image-url("../assets/icons/heart-fill-red.svg")
+                : @image-url("../assets/icons/heart-gray.svg");
+            width: 14px; height: 14px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            colorize: root.song.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+        }
+        lk-ta := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.like-press-id = root.song.id;
+                }
+            }
+            clicked => { root.like-toggle-id(root.like-press-id); }
+        }
+    }
+}
+
+export component MiniPlayer inherits Rectangle {
+    in property <Song> song;
+    in property <bool> playing: false;
+    in property <float> progress: 0.0;
+    // 派生当前秒（同主栏实现）：进度 × 总时长
+    property <int> elapsed-sec: round(root.progress * root.song.duration-sec);
+    in property <bool> liked: false;
+    in property <int> play-mode: 0;
+    in property <[Song]> queue;
+    in-out property <bool> queue-open: false;
+    // 播放加载中：封面盖 loader-4 转动 + 进度条加载闪烁（Rust 驱动）
+    in-out property <bool> loading: false;
+    in-out property <float> loader-angle: 0.0;
+    in-out property <float> pulse: 0.0;
+
+    // 秒 → "mm:ss"（分钟与秒均两位补零；与主播放栏 fmt-sec 同实现，格式 00:00 / 03:36）
+    function fmt-sec(s: int) -> string {
+        return (Math.floor(s / 60) < 10 ? "0" : "") + Math.floor(s / 60) + ":"
+            + (Math.mod(s, 60) < 10 ? "0" : "") + Math.mod(s, 60);
+    }
+
+    callback play-toggle();
+    callback prev-song();
+    callback next-song();
+    callback like-clicked();
+    callback play-mode-changed();
+    callback queue-toggle();
+    callback close-mini();
+    callback drag-start(length, length);
+    // 播放列表抽屉：点击单曲播放 / 移除单曲 / 行内收藏切换（id 为歌曲 ID）
+    callback play-song(int);
+    callback remove-song(int);
+    callback like-toggle-id(int);
+    // 抽屉区域是否被鼠标悬停（Rust 每 ~200ms 用 GetCursorPos 按窗口几何计算后写入：
+    // Slint 的 has-hover 会被抽屉内容（ScrollView/ListItem）截走，无法作为判定源）
+    in-out property <bool> queue-hover;
+
+    width: 100%;
+    height: 100%;
+    background: Theme.palette.surface-solid;
+    clip: true;
+
+    // ========== 顶部主区（高 72，参考图2）==========
+    Rectangle {
+        y: 0px;
+        height: 72px;
+        width: 100%;
+        background: Theme.palette.surface;
+
+        // 整条可拖（点到按钮时由子 TouchArea 吃掉事件，不会拖窗）
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            moved => { root.drag-start(self.mouse-x, self.mouse-y); }
+        }
+
+        HorizontalLayout {
+            width: 100%;
+            height: 100%;
+            spacing: 4px;
+            padding-left: 10px;
+            padding-right: 6px;
+
+            // ---- 左：封面 + 歌名/歌手（固定宽，贴左）----
+            Rectangle {
+                width: 100px;
+                height: 100%;
+                horizontal-stretch: 0;
+
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: 6px;
+                    alignment: center;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: Theme.palette.divider;
+                        clip: true;
+                        Image {
+                            source: root.song.cover;
+                            width: 100%;
+                            height: 100%;
+                            image-fit: cover;
+                        }
+                        // 加载中：暗罩 + 旋转 loader-4（主题主色，22px 更清晰）
+                        if (root.loading) : Rectangle {
+                            width: 100%; height: 100%;
+                            border-radius: 6px;
+                            background: rgba(0, 0, 0, 0.50);
+                            Image {
+                                source: @image-url("../assets/icons/loader-4.svg");
+                                width: 22px; height: 22px;
+                                horizontal-alignment: center; vertical-alignment: center;
+                                colorize: Theme.palette.primary;
+                                transform-rotation: root.loader-angle * 1deg;
+                                transform-origin: { x: 11px, y: 11px };
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+
+                        Text {
+                            text: root.song.name != "" ? root.song.name : Language.mini-not-playing;
+                            color: Theme.palette.text;
+                            font-size: 12px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        if root.song.artist != "" : Text {
+                            text: root.song.artist;
+                            color: Theme.palette.text-faint;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+
+            // ---- 中：上一曲 | 播放·暂停(最大) | 下一曲（居中）+ 播放键下方时间行（同主栏）----
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 100%;
+
+                // 按钮组：非布局子元素必须显式几何（缺省相对父居中），垂直居中与原先一致
+                HorizontalLayout {
+                    x: 0; y: 0;
+                    width: 100%; height: 100%;
+                    alignment: center;
+                    spacing: 5px;
+                    cross-axis-alignment: center;
+
+                // 上一曲
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: pv-ta.has-hover ? Theme.palette.divider : transparent;
+                    Image {
+                        source: @image-url("../assets/icons/prev-gray.svg");
+                        width: 20px;
+                        height: 20px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        colorize: Theme.palette.icon;
+                    }
+                    pv-ta := TouchArea {
+                        clicked => { root.prev-song(); }
+                        mouse-cursor: pointer;
+                    }
+                }
+
+                // 播放 / 暂停（主色圆钮，最大）
+                Rectangle {
+                    width: 38px;
+                    height: 38px;
+                    border-radius: 19px;
+                    background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                    Image {
+                        source: root.playing
+                            ? @image-url("../assets/icons/pause-white.svg")
+                            : @image-url("../assets/icons/play-white.svg");
+                        width: 24px;
+                        height: 24px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        colorize: Theme.palette.icon-white;
+                    }
+                    pl-ta := TouchArea {
+                        clicked => { root.play-toggle(); }
+                        mouse-cursor: pointer;
+                    }
+                }
+
+                // 下一曲
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: nx-ta.has-hover ? Theme.palette.divider : transparent;
+                    Image {
+                        source: @image-url("../assets/icons/next-gray.svg");
+                        width: 20px;
+                        height: 20px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        colorize: Theme.palette.icon;
+                    }
+                    nx-ta := TouchArea {
+                        clicked => { root.next-song(); }
+                        mouse-cursor: pointer;
+                    }
+                }
+                }
+
+                // 时间：播放键（38px 垂直居中 17~55）正下方；行高 16 贴进度条顶缘（56~72）
+                HorizontalLayout {
+                    x: 0;
+                    y: 56px;
+                    width: 100%;
+                    height: 16px;
+                    alignment: center;
+                    spacing: 4px;
+
+                    Text {
+                        text: root.fmt-sec(root.elapsed-sec);
+                        color: Theme.palette.text-secondary;
+                        font-size: 12px;
+                    }
+                    Text { text: "/"; color: Theme.palette.text-secondary; font-size: 12px; }
+                    Text {
+                        text: root.song.duration;
+                        color: Theme.palette.text-secondary;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            // ---- 右：爱心 | 播放模式 | 播放列表 | 退出（固定宽，贴右）----
+            Rectangle {
+                horizontal-stretch: 0;
+                height: 100%;
+
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    alignment: end;
+                    spacing: 3px;
+                    cross-axis-alignment: center;
+
+                    // 爱心（镂空 ↔ 红色实心）
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: lk-ta.has-hover ? Theme.palette.divider : transparent;
+                        Image {
+                            source: root.liked
+                                ? @image-url("../assets/icons/heart-fill-red.svg")
+                                : @image-url("../assets/icons/heart-gray.svg");
+                            width: 20px;
+                            height: 20px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            colorize: root.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+                        }
+                        lk-ta := TouchArea {
+                            clicked => { root.like-clicked(); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+
+                    // 播放模式（循环/单曲/随机）
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: mo-ta.has-hover ? Theme.palette.divider : transparent;
+                        Image {
+                            source: root.play-mode == 0
+                                ? @image-url("../assets/icons/repeat-gray.svg")
+                                : root.play-mode == 1
+                                    ? @image-url("../assets/icons/repeat-once-gray.svg")
+                                    : @image-url("../assets/icons/shuffle-gray.svg");
+                            width: 20px;
+                            height: 20px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            colorize: Theme.palette.icon;
+                        }
+                        mo-ta := TouchArea {
+                            clicked => { root.play-mode-changed(); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+
+                    // 播放列表（tabler playlist，点击向下弹出抽屉）
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: qu-ta.has-hover ? Theme.palette.divider : transparent;
+                        Image {
+                            source: @image-url("../assets/icons/playlist-gray.svg");
+                            width: 22px;
+                            height: 22px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            colorize: Theme.palette.icon;
+                        }
+                        qu-ta := TouchArea {
+                            clicked => { root.queue-toggle(); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+
+                    // 退出迷你
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: cl-ta.has-hover ? Theme.palette.divider : transparent;
+                        Image {
+                            source: @image-url("../assets/icons/win-close-gray.svg");
+                            width: 18px;
+                            height: 18px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            colorize: Theme.palette.icon;
+                        }
+                        cl-ta := TouchArea {
+                            clicked => { root.close-mini(); }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ========== 进度条（轨道 + 渐变填充线，仅显示）==========
+    Rectangle {
+        y: 72px;
+        height: 4px;
+        width: 100%;
+        background: Theme.palette.scroll-track;
+
+        Rectangle {
+            // 显式 x:0 —— Slint 未在布局中的子元素默认相对父元素居中，
+            // 缺省时进度填充会以中心为原点向左右生长（同主播放栏）
+            x: 0;
+            width: parent.width * min(1.0, max(0.0, root.progress));
+            height: 100%;
+            background: @linear-gradient(90deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+        }
+        // 加载中：中央光点 + 向左右扩散波纹（pulse 0..1 往返驱动；主题主色、更长位移更醒目）
+        if (root.loading) : Rectangle {
+            Rectangle {
+                x: parent.width / 2 - 5px; y: 0; width: 10px; height: 4px;
+                border-radius: 2px;
+                background: Theme.palette.primary;
+                opacity: 0.5 + 0.5 * root.pulse;
+            }
+            Rectangle {
+                x: parent.width / 2 - 5px - 10px - root.pulse * 160px;
+                width: 8px; height: 4px; border-radius: 2px;
+                background: Theme.palette.primary;
+                opacity: max(0.0, 1.0 - root.pulse * 1.4);
+            }
+            Rectangle {
+                x: parent.width / 2 + 5px + root.pulse * 160px;
+                width: 8px; height: 4px; border-radius: 2px;
+                background: Theme.palette.primary;
+                opacity: max(0.0, 1.0 - root.pulse * 1.4);
+            }
+        }
+    }
+
+    // ========== 播放列表抽屉（向下弹出，可滚动，鼠标离开 2s 收起）==========
+    Rectangle {
+        y: 76px;
+        height: root.height - 76px;
+        width: 100%;
+        visible: root.queue-open;
+        background: Theme.palette.surface-solid;
+        border-radius: 0px;
+
+        // 抽屉区域：has-hover 绑定到 root.queue-hover，供 Rust 轮询 2s 收起
+        dr-ta := TouchArea {
+            width: 100%;
+            height: 100%;
+        }
+
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+
+            ScrollView {
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: always-off;
+                width: 100%;
+
+                VerticalLayout {
+                    for s in root.queue : ListItem {
+                        song: s;
+                        play-song(id) => { root.play-song(id); }
+                        remove-song(id) => { root.remove-song(id); }
+                        like-toggle-id(id) => { root.like-toggle-id(id); }
+                    }
+                }
+            }
+        }
+    }
+}

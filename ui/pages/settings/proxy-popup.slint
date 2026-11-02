@@ -1,0 +1,114 @@
+// ============================================================================
+//  pages/settings/proxy-popup.slint — 代理配置弹窗
+//  代理类型(HTTP/HTTPS/SOCKS4/SOCKS5) + 左标签右输入框(占满)；确定回传 submit(type, host, port)
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+import { Button } from "std-widgets.slint";
+import { ScrollableTextInput } from "../../components/scrollable-text-input.slint";
+
+export component ProxyPopup inherits Rectangle {
+    in property <string> title: Language.proxy-title;
+    in-out property <int> type-index: 0;
+    in-out property <string> host: "";
+    in-out property <string> port: "";
+    callback submit(int, string, string);
+    callback closed();
+
+    width: 340px;
+    border-radius: 14px;
+    background: Theme.palette.surface-solid;
+    drop-shadow-blur: 26px; drop-shadow-color: rgba(0, 0, 0, 0.30); drop-shadow-offset-y: 8px;
+    border-width: 1px; border-color: Theme.palette.divider;
+
+    VerticalLayout {
+        spacing: 14px;
+        padding-left: 18px; padding-right: 18px; padding-top: 16px; padding-bottom: 16px;
+
+        Text {
+            text: root.title;
+            color: Theme.palette.text;
+            font-size: 14.5px;
+            font-weight: 600;
+        }
+
+        // ---- 代理类型（胶囊按钮组）----
+        Text { text: Language.proxy-type; color: Theme.palette.text-secondary; font-size: 12px; }
+        HorizontalLayout { spacing: 8px;
+            for t[idx] in ["HTTP", "HTTPS", "SOCKS4", "SOCKS5"] : Rectangle {
+                horizontal-stretch: 1;
+                height: 34px;
+                border-radius: 9px;
+                background: idx == root.type-index ? Theme.palette.primary : Theme.palette.surface;
+                border-width: 1px;
+                border-color: idx == root.type-index ? Theme.palette.primary : Theme.palette.divider;
+                Text {
+                    text: t;
+                    color: idx == root.type-index ? Theme.palette.icon-white : Theme.palette.text;
+                    font-size: 12px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                t-ta := TouchArea { clicked => { root.type-index = idx; } mouse-cursor: pointer; }
+            }
+        }
+
+        // ---- 代理地址：左标签 + 右输入框占满 ----
+        HorizontalLayout { spacing: 10px; cross-axis-alignment: center;
+            Text { text: Language.net-proxy-addr; color: Theme.palette.text-secondary; font-size: 12px; width: 64px; }
+            Rectangle {
+                horizontal-stretch: 1; height: 34px;
+                border-radius: 8px;
+                background: Theme.palette.surface;
+                border-width: 1px; border-color: Theme.palette.divider;
+                // 原生 TextInput 无 placeholder-text 属性，用条件 Text 实现占位符
+                if (root.host == "") : Text {
+                    x: 10px;
+                    y: (parent.height - self.height) / 2;
+                    text: Language.net-proxy-host-ph;
+                    color: Theme.palette.text-faint;
+                    font-size: 13px;
+                }
+                ScrollableTextInput {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-x: 10px;
+                    text: root.host;
+                    font-size: 13px;
+                    edited => { root.host = self.text; }
+                }
+            }
+        }
+
+        // ---- 端口：左标签 + 右输入框占满 ----
+        HorizontalLayout { spacing: 10px; cross-axis-alignment: center;
+            Text { text: Language.net-proxy-port; color: Theme.palette.text-secondary; font-size: 12px; width: 64px; }
+            Rectangle {
+                horizontal-stretch: 1; height: 34px;
+                border-radius: 8px;
+                background: Theme.palette.surface;
+                border-width: 1px; border-color: Theme.palette.divider;
+                // 原生 TextInput 无 placeholder-text 属性，用条件 Text 实现占位符
+                if (root.port == "") : Text {
+                    x: 10px;
+                    y: (parent.height - self.height) / 2;
+                    text: Language.net-proxy-port-ph;
+                    color: Theme.palette.text-faint;
+                    font-size: 13px;
+                }
+                ScrollableTextInput {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-x: 10px;
+                    text: root.port;
+                    font-size: 13px;
+                    edited => { root.port = self.text; }
+                }
+            }
+        }
+
+        HorizontalLayout { spacing: 10px; alignment: end;
+            Button { text: Language.common-cancel; clicked => { root.closed(); } }
+            Button { text: Language.common-ok; clicked => { root.submit(root.type-index, root.host, root.port); } }
+        }
+    }
+}

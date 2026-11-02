@@ -1,0 +1,45 @@
+// ============================================================================
+//  components/marquee.slint — 跑马灯文本：悬停时左右往返滑动显示超长文本
+//  Slint 无组件内 Timer / 循环动画，动画时钟由 Rust 侧驱动：
+//  MarqueeState.pos ∈ [0,1] 三角波（main.rs Timer 每 30ms 步进，约 3s 单程），
+//  仅当任意 MarqueeText 悬停时计时器才运行（hover-changed 回调启停，闲置零开销）。
+//  文本无溢出时静止；未悬停立即复位到起点（截断显示，不铺满超出区域）。
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+// 全局跑马灯状态：pos 由 main.rs 在悬停期间定时步进；hover-changed 启停该计时器
+export global MarqueeState {
+    in-out property <float> pos: 0;
+    callback hover-changed(bool);
+}
+
+export component MarqueeText inherits Rectangle {
+    in property <string> text: "";
+    in property <color> text-color: Theme.palette.text;
+    in property <length> font-size: 13px;
+    // 悬停状态由调用方传入（通常是整行 TouchArea 的 has-hover）
+    in property <bool> hover: false;
+
+    // 文本自然宽度超出可视宽度的溢出量（<=0 表示完整可见，无需滑动）
+    property <length> overflow: Math.max(0px, t.preferred-width - self.width);
+
+    min-width: 0px;
+    // 关键：显式高度绑定（Rectangle 容器在 HorizontalLayout 中高度默认推导为 0，
+    // 必须绑到文本行高，否则整个组件不可见）
+    height: t.preferred-height;
+    horizontal-stretch: 1;
+    clip: true;
+
+    // 悬停状态变化：通知 Rust 启停跑马灯时钟
+    changed hover => { MarqueeState.hover-changed(self.hover); }
+
+    t := Text {
+        // 悬停：按全局时钟在 0 ~ -overflow 间往返；未悬停：复位到起点
+        x: root.hover ? (-root.overflow * MarqueeState.pos) : 0px;
+        text: root.text;
+        color: root.text-color;
+        font-size: root.font-size;
+        wrap: no-wrap;
+        vertical-alignment: center;
+    }
+}

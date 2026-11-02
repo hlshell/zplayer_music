@@ -1,0 +1,49 @@
+// ============================================================================
+//  components/scrollable-text-input.slint — 光标跟随滚动的纯输入控件
+//  Slint 的 TextInput 不会在光标移出可见区时自动滚动（官方文档明示由外层负责）。
+//  本组件：外层 clip 视口 + TextInput 自身 self.x 平移，在 cursor-position-changed(Point)
+//  回调里读光标像素 x，逼近右缘（留 12px）时左移，让光标始终可见；靠左则归 0。
+//
+//  组件为「纯输入」：不携带任何视觉（边框/底色/圆角/占位/后缀/配色均由调用处外层
+//  保留），仅新增一层 clip 视口 + 光标平移，因此替换后各输入框视觉零变化。
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+export component ScrollableTextInput inherits Rectangle {
+    in-out property <string> text;
+    in property <length> font-size: 13px;
+    // Rectangle 自带 color（填充色），故输入文字色命名 text-color
+    in property <brush> text-color: Theme.palette.text;
+    // 内容左缩进（原输入框用 x 偏移实现的内缩，改用 padding-x 由组件统一控制）
+    in property <length> padding-x: 0px;
+    out property <bool> has-focus;
+    callback edited();
+    callback accepted();
+    // 键盘透传：调用处执行副作用（Slint 回调无法返回 accept/reject，TextInput 仍处理按键）
+    callback key-pressed(KeyEvent);
+
+    clip: true;
+    property <length> scroll-x: 0px;
+    has-focus: ti.has-focus;
+
+    ti := TextInput {
+        x: root.scroll-x + root.padding-x;
+        y: 0px;
+        // 固定大宽度（透明、clip 裁剪视口），scroll-x 由光标 p.x 精确驱动，
+        // 无需测量内容宽；超出视口的部分由组件 clip 裁掉
+        width: max(root.width - root.padding-x * 2, 10000px) + root.padding-x * 2;
+        height: 100%;
+        text <=> root.text;
+        font-size: root.font-size;
+        color: root.text-color;
+        vertical-alignment: center;
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+        key-pressed(e) => { root.key-pressed(e); reject }
+        cursor-position-changed(p) => {
+            let avail = root.width - root.padding-x * 2;
+            // 光标逼近右缘（右留 12px）时左移；下限为内容尾部不滚出视口右缘
+            root.scroll-x = clamp(avail - 12px - p.x, min(0px, root.width - ti.width), 0px);
+        }
+    }
+}

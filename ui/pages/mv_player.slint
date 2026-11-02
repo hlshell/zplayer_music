@@ -1,0 +1,1309 @@
+// ============================================================================
+//  pages/mv_player.slint — 全屏 MV 播放器（覆盖式独立界面）
+//  视频铺满（黑信封），顶部控制条 + 底部控制条始终可见。
+//  鼠标 idle（约 2.6s 无移动）自动隐藏控制条，移动鼠标即唤醒。
+// ============================================================================
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+import { MvQueueEntry } from "../components/models.slint";
+import { MarqueeText } from "../components/marquee.slint";
+import { ScrollableTextInput } from "../components/scrollable-text-input.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// ============================================================================
+//  MvQueueCard — 播放列表/搜索结果的 MV 卡片（16:9 封面 + 时长角标 + 跑马灯）
+//  正在播放时：边框呼吸 + 中心 ▶ 脉冲
+// ============================================================================
+export component MvQueueCard inherits Rectangle {
+    in property <MvQueueEntry> entry;
+    in property <bool> play-pulse: false;
+    callback clicked(int);
+
+    width: 344px;
+    height: 220px;
+    clip: true;
+    border-radius: 10px;
+
+    // ---- 正在播放：外层主题色边框（静态，不呼吸；动效只保留中心 ▶ 脉冲）----
+    if (entry.playing) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: Theme.palette.primary;
+        border-radius: 10px;
+    }
+    if (entry.playing) : Rectangle {
+        x: 2px; y: 2px;
+        width: parent.width - 4px; height: parent.height - 4px;
+        background: #1a1c20;
+        border-radius: 8px;
+        clip: true;
+    }
+
+    // ---- 封面（16:9，占满上半部分）----
+    Rectangle {
+        x: entry.playing ? 3px : 0;
+        y: entry.playing ? 3px : 0;
+        width: entry.playing ? parent.width - 6px : parent.width;
+        height: entry.playing ? 187px : 190px;
+        border-radius: 7px;
+        background: @linear-gradient(135deg, entry.from 0%, entry.to 100%);
+        clip: true;
+
+        // 真实封面
+        if (entry.cover.width > 0) : Image {
+            source: entry.cover;
+            width: 100%; height: 100%;
+            image-fit: ImageFit.cover;
+        }
+
+        // 右上角时长角标（短胶囊：显式宽度，避免默认撑满父宽）
+        Rectangle {
+            x: parent.width - self.width - 8px;
+            y: 8px;
+            width: 46px;
+            height: 18px;
+            border-radius: 9px;
+            background: rgba(0, 0, 0, 0.55);
+            Text {
+                text: entry.duration;
+                color: #fff; font-size: 11px;
+                width: 100%; height: 100%;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // ---- 正在播放：中心 ▶ 脉冲图标 ----
+        if (entry.playing) : Rectangle {
+            width: 48px; height: 48px; border-radius: 24px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: rgba(0, 0, 0, 0.55);
+            Rectangle {
+                width: parent.width; height: parent.height; border-radius: 24px;
+                background: rgba(255,255,255,0.25);
+                opacity: play-pulse ? 0.6 : 0.0;
+                animate opacity { duration: 500ms; }
+            }
+            Image {
+                source: @image-url("../assets/tabler/icons/filled/player-play.svg");
+                width: 22px; height: 22px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                colorize: #fff;
+            }
+        }
+
+        // 悬停播放遮罩（非正在播放时）
+        if (!entry.playing) : Rectangle {
+            x: 0; y: 0; width: 100%; height: 100%;
+            background: card-ta.has-hover ? rgba(0,0,0,0.30) : transparent;
+            animate background { duration: 150ms; }
+            Rectangle {
+                width: 36px; height: 36px; border-radius: 18px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: Theme.palette.primary;
+                opacity: card-ta.has-hover ? 1.0 : 0.0;
+                animate opacity { duration: 150ms; }
+                Image {
+                    source: @image-url("../assets/icons/play-white.svg");
+                    width: 16px; height: 16px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: #fff;
+                }
+            }
+        }
+    }
+
+    // ---- 底部半透明黑色条（含跑马灯文字）----
+    // 底部两角做圆角：Slint 的 clip 按矩形裁剪，方形底条会盖住卡片圆角
+    Rectangle {
+        x: entry.playing ? 3px : 0;
+        y: 190px;
+        width: entry.playing ? parent.width - 6px : parent.width;
+        height: 30px;
+        background: rgba(0, 0, 0, 0.65);
+        border-bottom-left-radius: entry.playing ? 8px : 10px;
+        border-bottom-right-radius: entry.playing ? 8px : 10px;
+        MarqueeText {
+            text: entry.name + (entry.artist != "" ? " · " + entry.artist : "");
+            text-color: entry.playing ? Theme.palette.primary : rgba(255,255,255,0.92);
+            font-size: 12px;
+            hover: card-ta.has-hover;
+            width: 100%; height: 100%;
+        }
+    }
+
+    card-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { clicked(entry.id); }
+    }
+}
+
+export component MvPlayer inherits Rectangle {
+    // ======== 数据源（由 Rust handler 推）=======
+    in property <image> video-frame;
+    in property <string> title;
+    in property <string> artist;
+    in-out property <int> position-ms: 0;   // seek 时本地先行回显（in-out 才可写）
+    in property <int> duration-ms: 0;
+    in property <int> buffered-ms: 0;       // 已缓冲（预加载）到的时间点
+    in-out property <bool> is-playing: true;
+    in-out property <bool> controls-visible: true;
+    in-out property <int> quality-index: 0;   // 0=480 1=720 2=1080
+    in-out property <int> volume: 100;        // 0-100（Rust 侧写回）
+    in property <string> hint;                // 轻提示内容（AppWindow.mv-hint 桥接，变化即弹出）
+    in property <string> notice;              // 过渡提示（无法播放自动跳转等；AppWindow.mv-notice 桥接）
+    in property <bool> switching: false;      // 清晰度切换中：顶部胶囊常显旋转环 + 文案
+    in property <bool> buffering: false;      // 缓冲门控中：中央显示"正在缓冲…"加载指示
+    in property <string> switch-tip: "";      // 切换状态文案（如"正在切换到 720p"）
+    in-out property <bool> compact: false;    // 画中画（迷你窗口）模式：顶栏隐藏、底栏精简
+    in-out property <bool> is-fullscreen: false;  // 全屏态（Rust 写回）：最大化/还原图标切换
+    in property <[MvQueueEntry]> queue;       // MV 播放队列（抽屉数据源，Rust 同步）
+    in property <int> queue-current: -1;      // 当前播放索引（打开抽屉/切歌时自动滚动定位）
+    in-out property <bool> need-more: false;   // 抽屉触底补页信号（桥接到 AppWindow.mvs-need-more，复用 browse 分页）
+
+    // ===== 抽屉内搜索 =====
+    in-out property <string> search-text: "";
+    in property <[MvQueueEntry]> search-results;
+    in-out property <bool> search-active: false;
+    in property <[string]> search-suggestions;
+    in property <bool> search-loading: false;
+    // 抽屉搜索框恒显（Rust 打开播放器时总会置 true；默认值也设为 true，避免桥接失效时缺失）
+    in-out property <bool> show-search-box: true;
+
+    // 播放列表抽屉开关（本地状态；进画中画强制关闭）
+    property <bool> playlist-open: false;
+
+    // 清晰度选择面板（向上弹出；底栏清晰度图标按钮触发）
+    property <bool> quality-menu-open: false;
+
+    // 鼠标 idle 计时：播放中无移动累计超过阈值即隐藏控制条
+    property <int> idle-ms: 0;
+    property <int> idle-limit-ms: 2600;
+
+    // hint 弹窗状态（countdown 每 200ms 递减，归零隐藏；重复触发会重置）
+    property <string> hint-msg: "";
+    property <bool> hint-visible: false;
+    property <int> hint-countdown: 0;
+
+    // 过渡提示状态（比 hint 更醒目、停留更久：无法播放自动跳转时告知失败曲目与下一首）
+    property <string> notice-msg: "";
+    property <bool> notice-visible: false;
+    property <int> notice-countdown: 0;
+
+    // ======== 回调 ========
+    callback back();
+    callback play-pause();
+    callback seek(int);       // 毫秒
+    callback next();
+    callback prev();
+    callback quality-changed(int);
+    callback toggle-fullscreen();
+    callback compact-toggle();       // 画中画模式切换
+    callback playlist-play(int);     // 播放列表抽屉点选（索引）
+    callback set-volume(int); // 0-100
+    callback mute-toggle();
+    callback drag-start(length, length);
+    // 抽屉内搜索
+    callback search(string);
+    callback search-suggest(string);
+    callback search-more();
+    callback search-result-click(int);
+
+    background: #000;
+
+    // 内部辅助函数：毫秒 → "mm:ss"
+    // 注意：Slint 的 / 对整数也返回浮点，必须先 floor 再拼接，
+    // 否则 "197.12" 这类小数会被拼进字符串（表现为时间带毫秒）。
+    function format_ms(ms: int) -> string {
+        let total = Math.floor(Math.abs(ms) / 1000);
+        let m = Math.floor(total / 60);
+        let sec = Math.mod(total, 60);
+        return m + ":" + (sec < 10 ? "0" : "") + sec;
+    }
+
+    // ======== seek 辅助 ========
+    // 连按 ←/→ 以"上次 seek 目标"为基准累积；否则以当前进度为基准。
+    // 解码器 seek 后要数百毫秒才出新帧，若一直用 position-ms 做基准，
+    // 连按快进会被旧位置不断拉回，表现为"右键快进没反应"。
+    property <int> seek-base-ms: 0;
+    property <int> seek-tick-ms: 0;
+
+    // 绝对跳转：本地立即回显（不等下一帧），再下发到解码器
+    function seek-to(ms: int) {
+        let t = Math.max(0, Math.min(ms, Math.max(root.duration-ms, 1)));
+        root.seek-base-ms = t;
+        root.seek-tick-ms = Math.round(animation-tick() / 1ms);
+        root.position-ms = t;
+        root.seek(t);
+    }
+
+    // 相对跳转（±5s）
+    function seek-jump(delta: int) {
+        let now = Math.round(animation-tick() / 1ms);
+        let base = (root.seek-base-ms > 0 && now - root.seek-tick-ms < 800)
+            ? root.seek-base-ms : root.position-ms;
+        root.seek-to(base + delta);
+    }
+
+    // 鼠标活动：重置 idle 计时并显示控制条
+    function wake() {
+        root.idle-ms = 0;
+        if (!root.controls-visible) { root.controls-visible = true; }
+    }
+
+    // 每次重新打开播放器时复位 idle 状态，避免沿用上次隐藏后的控制条（首次打开看不到按钮）
+    changed visible => {
+        if (self.visible) {
+            root.idle-ms = 0;
+            root.controls-visible = true;
+        }
+    }
+
+    // 进入画中画：抽屉/清晰度面板强制关闭（迷你窗无入口，避免残留遮挡）
+    changed compact => {
+        if (self.compact) {
+            root.playlist-open = false;
+            root.quality-menu-open = false;
+        }
+    }
+
+    // 定位到正在播放的卡片：尽量滚动到视口中央，越界时 clamp 到可滚范围
+    function scroll-to-current() {
+        if (root.queue-current < 0 || root.search-active) { return; }
+        // 测量未就绪（抽屉刚打开，SV 高度还没算出来）则跳过，等下一帧延迟再调
+        if (sv.visible-height <= 0px || sv.content-height <= 0px) { return; }
+        let item-h = 230px;   // 卡片 220 + 列表 spacing 10
+        let top = 10px + root.queue-current * item-h;
+        let target = (sv.visible-height - 220px) / 2 - top;
+        let min-y = Math.min(0px, sv.visible-height - sv.content-height);
+        sv.content-y = -Math.max(min-y, Math.min(0px, target));
+    }
+
+    // 打开抽屉时定位到正在播放的卡片（延迟一帧，等 SV 测量完成）
+    changed playlist-open => {
+        if (self.playlist-open) { root.scroll-locate-pending = true; }
+    }
+
+    // 抽屉开着时切歌（prev/next/自动连播）：跟随滚动到新的正在播放项
+    changed queue-current => {
+        if (root.playlist-open && !root.search-active) { root.scroll-locate-pending = true; }
+    }
+
+    // 定位定时器：running 置 true 触发一次，triggered 内自行置 false 实现单次
+    // （本版本 Slint Timer 无 single-shot / mode 属性）
+    in-out property <bool> scroll-locate-pending: false;
+    scroll-locator := Timer {
+        interval: 60ms;
+        running: root.scroll-locate-pending;
+        triggered => {
+            root.scroll-locate-pending = false;
+            root.scroll-to-current();
+        }
+    }
+
+    // hint 内容变化即弹出（Rust 侧写 root.mv-hint；重复相同文案不触发——可接受）
+    changed hint => {
+        if (self.hint != "") {
+            root.hint-msg = self.hint;
+            root.hint-countdown = 9;   // ~1.8s @200ms
+            root.hint-visible = true;
+        }
+    }
+
+    // 过渡提示变化：非空即显示 ~6s；置空（正常切歌）立即收起，避免残留上次失败的提示
+    changed notice => {
+        if (self.notice != "") {
+            root.notice-msg = self.notice;
+            root.notice-countdown = 30;   // ~6s @200ms：足够读完"谁失败、接下来播什么"
+            root.notice-visible = true;
+        } else {
+            root.notice-visible = false;
+        }
+    }
+
+    // ======== 视频画面 ========
+    Image {
+        source: root.video-frame;
+        width: parent.width; height: parent.height;
+        image-fit: contain;
+    }
+
+    // ======== 缓冲门控遮罩：数据不足 5s 时暂停出画并显示加载指示（避免边缓冲边卡顿）========
+    if (root.buffering) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.38);
+
+        Rectangle {
+            width: 128px;
+            height: 40px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.72);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            // 旋转环（22px，animation-tick 驱动）
+            Rectangle {
+                x: 14px;
+                y: 9px;
+                width: 22px;
+                height: 22px;
+                background: transparent;
+                property <float> spin: mod(animation-tick() / 0.9s, 1.0);
+
+                Rectangle {   // 轨道
+                    width: 22px; height: 22px;
+                    border-radius: 11px;
+                    border-width: 2px;
+                    border-color: rgba(255, 255, 255, 0.28);
+                }
+                Rectangle {   // 绕圈高亮点
+                    width: 6px; height: 6px;
+                    border-radius: 3px;
+                    background: #fff;
+                    x: 8px + 8px * cos(360deg * parent.spin - 90deg);
+                    y: 8px + 8px * sin(360deg * parent.spin - 90deg);
+                }
+            }
+
+            Text {
+                text: "正在缓冲…";
+                x: 44px;
+                y: 0;
+                width: parent.width - 52px;
+                height: 100%;
+                color: #fff;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // ======== 鼠标活动检测（覆盖视频，位于控制条之下）========
+    // 移动与按下都唤醒控制条：控制条隐藏时用户往往不会先移动鼠标而是直接点击，
+    // 只认 move 会导致"第一下点在进度条位置却没反应"。
+    activity-ta := TouchArea {
+        x: 0; y: 0; width: 100%; height: 100%;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.move || ev.kind == PointerEventKind.down) { root.wake(); }
+        }
+    }
+
+    // ======== idle 计时器：播放中无鼠标移动则隐藏控制条（抽屉/清晰度面板打开时保持常显）========
+    Timer {
+        interval: 200ms;
+        running: root.controls-visible && root.is-playing && !root.playlist-open && !root.quality-menu-open;
+        triggered => {
+            root.idle-ms += 200;
+            if (root.idle-ms >= root.idle-limit-ms) {
+                root.controls-visible = false;
+            }
+        }
+    }
+
+    // ======== hint 倒计时：归零隐藏 ========
+    Timer {
+        interval: 200ms;
+        running: root.hint-visible;
+        triggered => {
+            root.hint-countdown -= 1;
+            if (root.hint-countdown <= 0) { root.hint-visible = false; }
+        }
+    }
+
+    // ======== 过渡提示倒计时：归零隐藏 ========
+    Timer {
+        interval: 200ms;
+        running: root.notice-visible;
+        triggered => {
+            root.notice-countdown -= 1;
+            if (root.notice-countdown <= 0) { root.notice-visible = false; }
+        }
+    }
+
+    // ======== 正在播放卡片呼吸脉冲：每 500ms 翻转一次，触发 animate 过渡 ========
+    property <bool> play-pulse: false;
+    Timer {
+        interval: 500ms;
+        running: root.queue.length > 0 && !root.compact;
+        triggered => { root.play-pulse = !root.play-pulse; }
+    }
+
+    // 抽屉触底分页：记录上一 tick 的滚动偏移，用于判定"用户刚滚动过"
+    property <length> drawer-last-scroll-y: 0px;
+
+    // ======== Esc 退出：MV 显示时由 AppWindow 调用 focus-keys() 抢占键盘焦点 ========
+    // 注意：不能用 `changed visible` 自动聚焦 —— 该 FocusScope 的 visible 恒为 true
+    // （隐藏由外层 MvPlayer.visible 控制），属性不会发生变化，回调永远不触发。
+    // FocusScope 本身不接收鼠标事件（无 TouchArea），叠在最上层不会挡住控制条点击。
+    public function focus-keys() { key-scope.focus(); }
+    public function clear-keys() { key-scope.clear-focus(); }
+
+    key-scope := FocusScope {
+        x: 0; y: 0; width: 100%; height: 100%;
+        focus-on-click: false;
+        capture-key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                // 抽屉开着先关抽屉；画中画态 ESC 先还原窗口（再按一次才退出 MV），对齐常规视频播放器习惯
+                if (root.playlist-open) {
+                    root.playlist-open = false;
+                } else if (root.compact) {
+                    root.compact-toggle();
+                } else {
+                    root.back();
+                }
+                return accept;
+            }
+            // 空格：播放/暂停
+            if (ev.text == Key.Space) {
+                root.play-pause();
+                return accept;
+            }
+            // ←/→：快退/快进 5s
+            if (ev.text == Key.LeftArrow) {
+                root.seek-jump(-5000);
+                return accept;
+            }
+            if (ev.text == Key.RightArrow) {
+                root.seek-jump(5000);
+                return accept;
+            }
+            // ↑/↓：音量 ±5
+            if (ev.text == Key.UpArrow) {
+                root.set-volume(Math.min(root.volume + 5, 100));
+                return accept;
+            }
+            if (ev.text == Key.DownArrow) {
+                root.set-volume(Math.max(root.volume - 5, 0));
+                return accept;
+            }
+            // M：静音切换
+            if (ev.text == "m" || ev.text == "M") {
+                root.mute-toggle();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    // ======== 顶部状态胶囊（清晰度切换 + 轻提示共用，y=70px 居中）========
+    // 左段：切换进度（旋转环 + 文案），切换期间常显，不受 hint 倒计时影响；
+    // 右段：一次性提示（音量/静音等），按 hint 倒计时独立消退；
+    // 两段并存时中间加竖分隔线；宽度变化走 180ms 过渡，消退时不突兀。
+    status-badge := Rectangle {
+        visible: root.switching || root.hint-visible;
+        // 左段宽：旋转环 16 + 间距 8 + 文案宽
+        property <length> left-w: root.switching ? (24px + switch-label.preferred-width) : 0px;
+        // 右段宽：一次性提示文案宽
+        property <length> right-w: root.hint-visible ? hint-label.preferred-width : 0px;
+        // 两段并存时的间距
+        property <length> gap-w: (root.switching && root.hint-visible) ? 12px : 0px;
+        width: 36px + left-w + right-w + gap-w;
+        animate width { duration: 180ms; }
+        height: 34px;
+        border-radius: 17px;
+        background: rgba(0, 0, 0, 0.72);
+        x: (parent.width - self.width) / 2;
+        y: 70px;
+
+        // 旋转环（16px，animation-tick 驱动，无需 Rust 定时器）
+        if (root.switching) : Rectangle {
+            x: 18px;
+            y: 9px;
+            width: 16px;
+            height: 16px;
+            background: transparent;
+            property <float> spin: mod(animation-tick() / 0.9s, 1.0);
+
+            Rectangle {   // 轨道
+                width: 16px; height: 16px;
+                border-radius: 8px;
+                border-width: 2px;
+                border-color: rgba(255,255,255,0.28);
+            }
+            Rectangle {   // 绕圈高亮点
+                width: 5px; height: 5px;
+                border-radius: 2.5px;
+                background: #fff;
+                x: 5.5px + 5.5px * cos(360deg * parent.spin - 90deg);
+                y: 5.5px + 5.5px * sin(360deg * parent.spin - 90deg);
+            }
+        }
+
+        // 左段文案
+        switch-label := Text {
+            x: 42px;
+            y: 0;
+            width: self.preferred-width;
+            height: 34px;
+            text: root.switch-tip;
+            color: #fff; font-size: 13px;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            opacity: root.switching ? 1.0 : 0.0;
+        }
+
+        // 分隔线（两段并存）
+        if (root.switching && root.hint-visible) : Rectangle {
+            x: 18px + parent.left-w + (parent.gap-w - 1px) / 2;
+            y: 10px;
+            width: 1px; height: 14px;
+            background: rgba(255,255,255,0.28);
+        }
+
+        // 右段文案
+        hint-label := Text {
+            x: 18px + parent.left-w + parent.gap-w;
+            y: 0;
+            width: self.preferred-width;
+            height: 34px;
+            text: root.hint-msg;
+            color: #fff; font-size: 13px;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            opacity: root.hint-visible ? 1.0 : 0.0;
+        }
+    }
+
+    // ======== 过渡提示条（无法播放自动跳转：告知失败曲目 + 即将播放的下一首）========
+    // 用独立提示条而不是 Toast：全屏播放器覆盖层在 Toast 之上，Toast 会被完全遮挡，
+    // 用户只会看到"点的是 A、播的是 B"却没有任何说明。
+    if (root.notice-visible) : Rectangle {
+        // 文案优先单行完整显示，超宽时按窗口宽度收敛并省略
+        width: Math.min(parent.width - 96px, notice-text.preferred-width + 60px);
+        height: 40px;
+        border-radius: 10px;
+        // 中性深底 + 极淡白描边（不再用饱和紫边框），警告语义交给琥珀色感叹号图标
+        background: rgba(18, 18, 22, 0.92);
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.16);
+        drop-shadow-blur: 16px;
+        drop-shadow-color: rgba(0, 0, 0, 0.45);
+        drop-shadow-offset-y: 4px;
+        x: (parent.width - self.width) / 2;
+        y: 114px;
+
+        // 感叹号图标（无左侧强调条：与圆角描边叠加显突兀）
+        Rectangle {
+            x: 14px; y: 12px; width: 16px; height: 16px;
+            border-radius: 8px;
+            background: rgba(245, 158, 11, 0.22);
+            Text {
+                text: "!";
+                width: 100%; height: 100%;
+                color: #fbbf24; font-size: 12px; font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        notice-text := Text {
+            x: 40px; y: 0;
+            width: Math.min(self.preferred-width, parent.width - 56px);
+            height: 100%;
+            text: root.notice-msg;
+            color: rgba(255, 255, 255, 0.92); font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    // ======== 顶栏拖拽区（独立于控制条可见性）========
+    // 必须放在根层级而不是 top-bar 内部：控制条 idle 隐藏后 top-bar.visible=false，
+    // 其子元素一并不可命中，拖拽会失效。这里固定覆盖顶部 56px，任何时候都能拖动窗口。
+    // 画中画模式顶栏整条隐藏，拖拽区扩到全画面（底栏控件在上层不受影响）。
+    // 顺序在 activity-ta 之上、控制条之下 → 按钮区域优先响应点击。
+    drag-area := TouchArea {
+        x: 0; y: 0; width: 100%;
+        height: root.compact ? root.height : 56px;
+        property <length> press-x: 0;
+        property <length> press-y: 0;
+        property <bool> drag-fired: false;
+        // 双击检测（画中画模式双击画面还原窗口）
+        property <float> last-click-ms: 0;
+        pointer-event(e) => {
+            // 顶栏区域的鼠标移动同样要唤醒控制条（本层在 activity-ta 之上）
+            if (e.kind == PointerEventKind.move) { root.wake(); }
+            if (e.kind == PointerEventKind.down) {
+                self.press-x = self.mouse-x;
+                self.press-y = self.mouse-y;
+                self.drag-fired = false;
+            }
+        }
+        moved => {
+            // 4px 阈值：避免轻点被误判为拖拽
+            if (!self.drag-fired
+                && Math.abs(self.mouse-x - self.press-x) + Math.abs(self.mouse-y - self.press-y) > 4px) {
+                self.drag-fired = true;
+                root.drag-start(self.mouse-x, self.mouse-y);
+            }
+        }
+        clicked => {
+            // 双击（350ms 内两次点击；拖拽后的松开不算）：
+            // 画中画模式双击画面还原窗口；普通模式双击标题栏切换最大化/还原
+            if (!self.drag-fired) {
+                let now = animation-tick() / 1ms;
+                if (now - self.last-click-ms < 350) {
+                    self.last-click-ms = 0;
+                    if (root.compact) {
+                        root.compact-toggle();
+                    } else {
+                        root.toggle-fullscreen();
+                    }
+                } else {
+                    self.last-click-ms = now;
+                }
+            }
+        }
+    }
+
+    // ======== 顶部控制条 ========
+    top-bar := Rectangle {
+        // 画中画模式顶栏整条隐藏（精简 UI：清晰度/全屏在迷你窗无意义）
+        visible: root.controls-visible && !root.compact;
+        x: 0; y: 0; width: 100%; height: 56px;
+        background: rgba(0, 0, 0, 0.55);
+        opacity: 1.0; animate opacity { duration: 300ms; }
+        clip: true;
+
+        // ← 返回（用箭头圆圈图标）
+        Rectangle {
+            // 必须显式 x/y：非布局容器里只指定 width 时 Slint 会把元素居中摆放，
+            // 导致返回按钮跑到顶栏中间（实测在窗口 x≈532）。
+            x: 0; y: 0;
+            width: 56px; height: 100%;
+            background: back-ta.has-hover ? rgba(255,255,255,0.12) : transparent;
+            Image {
+                x: (parent.width - 22px) / 2;
+                y: (parent.height - 22px) / 2;
+                source: @image-url("../assets/tabler/icons/outline/arrow-left-to-arc.svg");
+                width: 22px; height: 22px;
+                colorize: #fff;
+            }
+            back-ta := TouchArea {
+                clicked => { root.back(); }
+            }
+        }
+
+        // 标题
+        Text {
+            text: root.title + (root.artist == "" ? "" : " · " + root.artist);
+            color: #fff; font-size: 14px; font-weight: 600;
+            x: 68px; width: 300px; height: 100%;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // 右侧控制组（画中画 + 最大化；清晰度按钮在底栏音量左旁；无关闭按钮——退出走 ← 或 ESC）
+        HorizontalLayout {
+            x: parent.width - 100px; y: 0;
+            width: 100px; height: 100%;
+            spacing: 4px; padding-right: 12px;
+            cross-axis-alignment: center;
+
+            // 画中画（迷你窗口）
+            Rectangle {
+                width: 36px; height: 32px; border-radius: 4px;
+                background: pip-ta.has-hover ? rgba(255,255,255,0.12) : transparent;
+                Image { source: @image-url("../assets/icons/pip-on-gray.svg"); width: 16px; height: 16px; colorize: #fff; }
+                pip-ta := TouchArea {
+                    clicked => { root.compact-toggle(); }
+                }
+            }
+            // 最大化（无边框全屏）/ 还原
+            Rectangle {
+                width: 36px; height: 32px; border-radius: 4px;
+                background: fs-ta.has-hover ? rgba(255,255,255,0.12) : transparent;
+                Image {
+                    source: root.is-fullscreen
+                        ? @image-url("../assets/tabler/icons/outline/arrows-minimize.svg")
+                        : @image-url("../assets/tabler/icons/outline/arrows-maximize.svg");
+                    width: 16px; height: 16px; colorize: #fff;
+                }
+                fs-ta := TouchArea {
+                    clicked => { root.toggle-fullscreen(); }
+                }
+            }
+        }
+    }
+
+    // ======== 画中画模式：右上角还原按钮（顶栏整条隐藏后的退出方式之一）========
+    if (root.compact && root.controls-visible) : Rectangle {
+        x: parent.width - 44px; y: 8px;
+        width: 36px; height: 32px; border-radius: 4px;
+        background: restore-ta.has-hover ? rgba(255,255,255,0.18) : rgba(0,0,0,0.45);
+        Image { source: @image-url("../assets/icons/pip-off-gray.svg"); width: 16px; height: 16px; colorize: #fff; }
+        restore-ta := TouchArea {
+            clicked => { root.compact-toggle(); }
+        }
+    }
+
+    // ======== 底部控制条 ========
+    bottom-bar := Rectangle {
+        visible: root.controls-visible;
+        y: parent.height - 48px;
+        x: 0; width: 100%; height: 48px;
+        background: rgba(0, 0, 0, 0.65);
+        opacity: 1.0; animate opacity { duration: 300ms; }
+        clip: true;
+
+        // 悬停在控制条上方也重置 idle：否则鼠标停在按钮上不动，控制条会在
+        // 2.6s 后自行隐藏，接下来的点击落空（"点了进度条没反应"的来源之一）。
+        // 放在按钮之前：按钮的 TouchArea 在其之上，不影响点击。
+        TouchArea {
+            x: 0; y: 0; width: 100%; height: 100%;
+            pointer-event(ev) => {
+                if (ev.kind == PointerEventKind.move || ev.kind == PointerEventKind.down) { root.wake(); }
+            }
+        }
+
+        HorizontalLayout {
+            width: 100%; height: 100%;
+            padding-left: 12px; padding-right: 12px;
+            spacing: 10px; cross-axis-alignment: center;
+
+            // ⏮ 上一首（画中画模式隐藏）
+            if (!root.compact) : Rectangle {
+                width: 28px; height: 28px;
+                Image { source: @image-url("../assets/icons/prev-gray.svg"); width: 16px; height: 16px; colorize: #fff; horizontal-alignment: center; vertical-alignment: center; }
+                prev-ta := TouchArea {
+                    clicked => { root.prev(); }
+                }
+            }
+
+            // ⏸/▶
+            Rectangle {
+                width: 32px; height: 32px; border-radius: 16px;
+                Image {
+                    source: root.is-playing
+                        ? @image-url("../assets/icons/pause-white.svg")
+                        : @image-url("../assets/icons/play-white.svg");
+                    width: 16px; height: 16px; horizontal-alignment: center; vertical-alignment: center;
+                    colorize: #fff;
+                }
+                pl-ta := TouchArea {
+                    clicked => { root.play-pause(); }
+                }
+            }
+
+            // ⏭ 下一首（画中画模式隐藏）
+            if (!root.compact) : Rectangle {
+                width: 28px; height: 28px;
+                Image { source: @image-url("../assets/icons/next-gray.svg"); width: 16px; height: 16px; colorize: #fff; horizontal-alignment: center; vertical-alignment: center; }
+                next-ta := TouchArea {
+                    clicked => { root.next(); }
+                }
+            }
+
+            // 时间（当前）
+            Text {
+                text: format_ms(root.position-ms);
+                color: rgba(255,255,255,0.85); font-size: 11px;
+                width: 38px;
+            }
+
+            // 进度条（与播放条一致：轨道灰、已播放白色，从左向右生长，点击即可跳转）
+            // 外层 28px 高只为放大点击热区；轨道本身 4px 居中绘制
+            progress-bar := Rectangle {
+                horizontal-stretch: 1;
+                height: 28px;
+
+                track := Rectangle {
+                    x: 0;
+                    y: (parent.height - 4px) / 2;
+                    width: 100%;
+                    height: 4px;
+                    background: rgba(255,255,255,0.25);
+                    border-radius: 2px;
+                    clip: true;
+
+                    // 已缓冲（demux 预读到的位置）：浅色带，绘制在已播放白条之下
+                    Rectangle {
+                        x: 0; y: 0;
+                        width: track.width * max(min(root.buffered-ms / max(root.duration-ms, 1), 1), 0);
+                        height: parent.height;
+                        background: rgba(255,255,255,0.42);
+                        border-radius: 2px;
+                    }
+
+                    // 进度填充：必须显式 x:0 —— 非布局容器里只写 width 会被 Slint 居中，
+                    // 表现为进度从中间向两侧生长（进度方向错误的根因）。
+                    Rectangle {
+                        x: 0; y: 0;
+                        width: track.width * max(min(root.position-ms / max(root.duration-ms, 1), 1), 0);
+                        height: parent.height;
+                        background: #fff;
+                        border-radius: 2px;
+                    }
+                }
+
+                progress-ta := TouchArea {
+                    x: 0; y: 0;
+                    width: 100%; height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        let rel = clamp(self.mouse-x / max(self.width, 1px), 0.0, 1.0);
+                        root.seek-to(Math.round(rel * max(root.duration-ms, 1)));
+                        // 点击进度条后把焦点还给播放器，确保方向键仍可用
+                        root.focus-keys();
+                    }
+                }
+            }
+
+            // 时间（总时长）
+            Text {
+                text: format_ms(root.duration-ms);
+                color: rgba(255,255,255,0.6); font-size: 11px;
+                width: 38px;
+                horizontal-alignment: right;
+            }
+
+            // ---- 清晰度（图标：badge-sd / badge-hd / badge-2k 分别对应 480p / 720p / 1080p；
+            //      点击向上弹出选择面板，而不是点一下循环切一档）----
+            // 注意：本按钮右侧全是固定宽度元素，选择面板按右缘固定偏移居中（见面板处注释）
+            if (!root.compact) : Rectangle {
+                width: 38px; height: 30px; border-radius: 4px;
+                background: q-ta.has-hover || root.quality-menu-open
+                    ? rgba(255,255,255,0.12) : transparent;
+                Image {
+                    source: root.quality-index == 0
+                        ? @image-url("../assets/tabler/icons/outline/badge-sd.svg")
+                        : root.quality-index == 1
+                            ? @image-url("../assets/tabler/icons/outline/badge-hd.svg")
+                            : @image-url("../assets/tabler/icons/outline/badge-2k.svg");
+                    // 26px：18px 下徽章内字母笔画太细看不清
+                    width: 26px; height: 26px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: root.quality-menu-open ? Theme.palette.primary : rgba(255,255,255,0.85);
+                }
+                q-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.quality-menu-open = !root.quality-menu-open; }
+                }
+            }
+
+            // ---- 音量组：图标（点击静音切换）+ 迷你条（点击调音量）----
+            // 画中画模式隐藏音量组（键盘 ↑↓ 与滚轮在迷你窗外仍可用，窗口太小优先保进度条）
+            if (!root.compact) : Rectangle {
+                width: 28px; height: 28px;
+                Image {
+                    source: root.volume == 0
+                        ? @image-url("../assets/icons/volume-mute-line.svg")
+                        : root.volume < 34
+                            ? @image-url("../assets/icons/volume-soft-gray.svg")
+                            : root.volume < 67
+                                ? @image-url("../assets/icons/volume-mid-gray.svg")
+                                : @image-url("../assets/icons/volume-gray.svg");
+                    width: 16px; height: 16px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: #fff;
+                }
+                vol-mute-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.mute-toggle(); }
+                    // 悬停滚轮调音量（上滚 +5 / 下滚 -5）
+                    scroll-event(e) => {
+                        root.set-volume(clamp(root.volume + (e.delta-y > 0px ? 5 : -5), 0, 100));
+                        return accept;
+                    }
+                }
+            }
+            if (!root.compact) : Rectangle {
+                width: 64px; height: 28px;
+                Rectangle {
+                    x: 0;
+                    y: (parent.height - 4px) / 2;
+                    width: 100%; height: 4px;
+                    background: rgba(255,255,255,0.25);
+                    border-radius: 2px;
+                    clip: true;
+                    Rectangle {
+                        x: 0; y: 0;
+                        width: parent.width * Math.min(Math.max(root.volume / 100, 0), 1);
+                        height: parent.height;
+                        background: #fff;
+                        border-radius: 2px;
+                    }
+                }
+                vol-ta := TouchArea {
+                    x: 0; y: 0; width: 100%; height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        let rel = clamp(self.mouse-x / max(self.width, 1px), 0.0, 1.0);
+                        root.set-volume(Math.round(rel * 100));
+                    }
+                    // 悬停滚轮调音量（上滚 +5 / 下滚 -5）
+                    scroll-event(e) => {
+                        root.set-volume(clamp(root.volume + (e.delta-y > 0px ? 5 : -5), 0, 100));
+                        return accept;
+                    }
+                }
+            }
+
+            // ---- 播放列表（音量右侧；点击打开右侧抽屉；画中画模式隐藏）----
+            if (!root.compact) : Rectangle {
+                width: 28px; height: 28px; border-radius: 4px;
+                background: pls-ta.has-hover || root.playlist-open ? rgba(255,255,255,0.12) : transparent;
+                Image {
+                    source: @image-url("../assets/tabler/icons/outline/playlist.svg");
+                    width: 16px; height: 16px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: #fff;
+                }
+                pls-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.playlist-open = !root.playlist-open; }
+                }
+            }
+        }
+    }
+
+    // ======== 清晰度选择面板（向上弹出，底栏清晰度图标按钮触发）========
+    // 面板外点击收起：放在控制条之上、面板之下，保证不穿透到画面/播放列表抽屉
+    if (root.quality-menu-open && root.controls-visible && !root.compact) : TouchArea {
+        x: 0; y: 0; width: 100%; height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.quality-menu-open = false; }
+    }
+
+    if (root.quality-menu-open && root.controls-visible && !root.compact) : Rectangle {
+        // 在清晰度按钮正上方居中弹出。if 条件元素内的 id 不能外部引用，改为按右缘固定偏移：
+        // 按钮中心距右缘 = 右内边距12 + 列表28 + 间距10 + 音量条64 + 间距10 + 音量28 + 间距10 + 半按钮19 = 171px。
+        // ⚠ 底栏上述任一宽度/间距改动时须同步此常量。
+        x: Math.max(8px, Math.min(parent.width - self.width - 8px,
+            parent.width - 171px - self.width / 2));
+        // 底栏高 48，面板底边与其保持 10px 间距
+        y: parent.height - 48px - self.height - 10px;
+        width: 176px;
+        height: 3 * 46px + 16px;
+        border-radius: 10px;
+        background: rgba(18, 20, 24, 0.97);
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.14);
+        drop-shadow-blur: 18px;
+        drop-shadow-color: rgba(0, 0, 0, 0.55);
+        drop-shadow-offset-y: 6px;
+
+        // 吞掉面板内点击，避免落到下方"点外关闭"或画面拖拽区
+        TouchArea { x: 0; y: 0; width: 100%; height: 100%; clicked => { } }
+
+        VerticalLayout {
+            x: 8px; y: 8px;
+            width: parent.width - 16px;
+            height: parent.height - 16px;
+            spacing: 0;
+
+            for q in [0, 1, 2] : Rectangle {
+                height: 46px;
+                border-radius: 6px;
+                background: q == root.quality-index
+                    ? rgba(139, 92, 246, 0.16)
+                    : (row-ta.has-hover ? rgba(255, 255, 255, 0.08) : transparent);
+
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    spacing: 10px;
+                    cross-axis-alignment: center;
+
+                    Image {
+                        source: q == 0
+                            ? @image-url("../assets/tabler/icons/outline/badge-sd.svg")
+                            : q == 1
+                                ? @image-url("../assets/tabler/icons/outline/badge-hd.svg")
+                                : @image-url("../assets/tabler/icons/outline/badge-2k.svg");
+                        // 26px：与底栏按钮同尺寸，徽章字母清晰可辨
+                        width: 26px; height: 26px;
+                        colorize: q == root.quality-index ? Theme.palette.primary : rgba(255,255,255,0.72);
+                    }
+
+                    Text {
+                        text: ["480p", "720p", "1080p"][q];
+                        color: q == root.quality-index ? Theme.palette.primary : rgba(255,255,255,0.88);
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    if (q == root.quality-index) : Image {
+                        source: @image-url("../assets/tabler/icons/outline/check.svg");
+                        width: 18px; height: 18px;
+                        colorize: Theme.palette.primary;
+                    }
+                }
+
+                row-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.quality-menu-open = false;
+                        if (q != root.quality-index) { root.quality-changed(q); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ======== 抽屉外部点击区：列表打开时点画面任意处即收起 ========
+    // z 序在控制条之上、抽屉之下：既保证"点非抽屉区域收起"，又不影响抽屉内操作
+    if (root.playlist-open) : TouchArea {
+        x: 0; y: 0; width: 100%; height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.playlist-open = false; }
+    }
+
+    // ======== MV 播放列表抽屉（右侧滑出；z 序最高，盖住控制条）========
+    // 关闭时 visible=false 彻底隐藏，避免窗口拉伸时 x 跟随变化触发滑移闪现
+    playlist-drawer := Rectangle {
+        visible: root.playlist-open;
+        x: root.playlist-open ? parent.width - 360px : parent.width;
+        animate x { duration: 240ms; easing: ease-out; }
+        y: 0; width: 360px; height: 100%;
+        background: rgba(14, 16, 20, 0.97);
+        clip: true;
+
+        // 吞掉抽屉内点击，防穿透到下层 drag-area（顶部 56px 拖拽区）
+        TouchArea { x: 0; y: 0; width: 100%; height: 100%; clicked => { } }
+
+        // 左侧分割线
+        Rectangle { x: 0; width: 1px; height: 100%; background: rgba(255,255,255,0.12); }
+
+        VerticalLayout {
+            spacing: 0;
+
+            // 头部：标题 + 数量 + 关闭
+            HorizontalLayout {
+                height: 52px;
+                padding-left: 16px; padding-right: 12px;
+                spacing: 8px;
+                cross-axis-alignment: center;
+                Text { text: Language.playlist-title; color: #fff; font-size: 14px; font-weight: 700; }
+                Rectangle {
+                    min-width: 22px; height: 22px; border-radius: 11px;
+                    background: rgba(255,255,255,0.12);
+                    Text { text: root.queue.length; color: #fff; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 34px; height: 34px; border-radius: 17px;
+                    background: dcl-ta.has-hover ? rgba(255,255,255,0.12) : transparent;
+                    Image {
+                        source: @image-url("../assets/icons/win-close-gray.svg");
+                        width: 17px; height: 17px;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        colorize: #fff;
+                    }
+                    dcl-ta := TouchArea { mouse-cursor: pointer; clicked => { root.playlist-open = false; } }
+                }
+            }
+
+            Rectangle { height: 1px; width: 100%; background: rgba(255,255,255,0.10); }
+
+            // ===== 搜索框（MV 播放器抽屉通用）=====
+            if (root.show-search-box) : Rectangle {
+                height: 52px;
+                // 搜索输入框（Rectangle 非布局元素，padding 无效，改用绝对定位）
+                Rectangle {
+                    x: 12px; y: 8px;
+                    width: parent.width - 24px; height: 36px;
+                    border-radius: 18px;
+                    background: rgba(255,255,255,0.08);
+                    border-width: 1px;
+                    border-color: search-input.has-focus ? Theme.palette.primary : transparent;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        padding-left: 12px; padding-right: 12px;
+                        cross-axis-alignment: center;
+                        Image {
+                            source: @image-url("../assets/icons/search-faint.svg");
+                            width: 15px; height: 15px;
+                            colorize: rgba(255,255,255,0.5);
+                        }
+                        search-input := ScrollableTextInput {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text <=> root.search-text;
+                            text-color: #fff;
+                            font-size: 13px;
+                            // 回车搜索；清空时退出搜索模式。搜索结束后把键盘焦点
+                            // 还给播放器 FocusScope，否则方向键会被输入框吞掉。
+                            accepted => {
+                                if (root.search-text != "") {
+                                    root.search-active = true;
+                                    root.search(root.search-text);
+                                } else {
+                                    root.search-active = false;
+                                }
+                                root.focus-keys();
+                            }
+                            // 输入变化：非空触发建议；空串退出搜索
+                            edited => {
+                                if (root.search-text == "") {
+                                    root.search-active = false;
+                                    root.focus-keys();
+                                } else {
+                                    root.search-suggest(root.search-text);
+                                }
+                            }
+                        }
+                        // 占位提示（未输入时显示）
+                        if (root.search-text == "") : Text {
+                            text: "搜索 MV...";
+                            color: rgba(255,255,255,0.4);
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        // 清除按钮（有文字时显示）
+                        if (root.search-text != "") : Rectangle {
+                            width: 18px; height: 18px; border-radius: 9px;
+                            background: rgba(255,255,255,0.15);
+                            Image {
+                                source: @image-url("../assets/icons/win-close-gray.svg");
+                                width: 11px; height: 11px;
+                                horizontal-alignment: center; vertical-alignment: center;
+                                colorize: #fff;
+                            }
+                            clear-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.search-text = "";
+                                    root.search-active = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 列表（搜索模式：正在播放置顶 + 分割线 + 搜索结果；非搜索：队列）
+            // 注意：ScrollView 的可见区域由 Flickable 视口决定，内容必须是布局元素
+            // （包一层无高度的 Rectangle 会按 100% 父高解析 → 内容高=视口高，列表不可滚动）
+            sv := ScrollView {
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                // 触底分页：滚动到距底部 80px 内请求下一页
+                // content-y 为负值域（顶部 0 → 底部 -max），取负得到正向滚动量
+                changed content-y => {
+                    let y = -sv.content-y;
+                    if (sv.content-height > sv.visible-height
+                        && y >= sv.content-height - sv.visible-height - 80px) {
+                        if (root.search-active) { root.search-more(); } else { root.need-more = true; }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 10px;
+                    padding-left: 8px; padding-right: 8px;
+                    padding-top: 10px; padding-bottom: 14px;
+                    alignment: start;
+
+                    // ===== 搜索模式：正在播放置顶 + 分割线 + 搜索结果 =====
+                    if (root.search-active) : VerticalLayout {
+                            spacing: 10px;
+                            // 正在播放的卡片：按 queue-current 索引直取单张。
+                            // 不能用 for 遍历整个队列 + visible 过滤——本项目 Slint 版本中 invisible 元素
+                            // 仍参与布局，30 张卡（每张 220px）会把「搜索结果」推到大段空白之外（旧错位根因）
+                            if (root.queue-current >= 0 && root.queue-current < root.queue.length) : MvQueueCard {
+                                entry: root.queue[root.queue-current];
+                                play-pulse: root.play-pulse;
+                                clicked(id) => { root.playlist-play(id); }
+                            }
+                            // 分割线（文字居中嵌入：左线 — 搜索结果 — 右线，单行不换行）
+                            HorizontalLayout {
+                                height: 20px;
+                                spacing: 8px;
+                                cross-axis-alignment: center;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 1px;
+                                    background: rgba(255,255,255,0.15);
+                                }
+                                Text {
+                                    text: "搜索结果";
+                                    color: rgba(255,255,255,0.5);
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 1px;
+                                    background: rgba(255,255,255,0.15);
+                                }
+                            }
+                            // 搜索结果列表
+                            for entry in root.search-results : MvQueueCard {
+                                entry: entry;
+                                play-pulse: root.play-pulse;
+                                clicked(id) => { root.search-result-click(id); }
+                            }
+                            // 空结果提示
+                            if (root.search-results.length == 0) : Rectangle {
+                                height: 80px;
+                                Text {
+                                    text: root.search-loading ? "搜索中..." : "未找到相关 MV";
+                                    color: rgba(255,255,255,0.4);
+                                    font-size: 13px;
+                                    width: 100%; height: 100%;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // ===== 非搜索模式：队列列表 =====
+                        if (!root.search-active) : VerticalLayout {
+                            spacing: 10px;
+                            for entry in root.queue : MvQueueCard {
+                                entry: entry;
+                                play-pulse: root.play-pulse;
+                                clicked(id) => { root.playlist-play(id); }
+                            }
+                        }
+                }
+            }
+        }
+
+            // 搜索建议下拉（放在抽屉最末尾、布局之外 → z 序最高，盖在 ScrollView 列表之上，避免被遮挡）
+            // 坐标：头部 52 + 分割线 1 + 搜索框内偏移 48 = 101
+            if (root.search-suggestions.length > 0 && root.search-text != "" && !root.search-active) : Rectangle {
+                y: 101px;
+                x: 12px;
+                width: parent.width - 24px;
+                background: #1e2026;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: rgba(255,255,255,0.12);
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 0;
+                    for kw in root.search-suggestions : Rectangle {
+                        height: 32px;
+                        border-radius: 6px;
+                        background: sg-ta.has-hover ? rgba(255,255,255,0.08) : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px;
+                            cross-axis-alignment: center;
+                            Image {
+                                source: @image-url("../assets/icons/search-faint.svg");
+                                width: 13px; height: 13px;
+                                colorize: rgba(255,255,255,0.4);
+                            }
+                            Text {
+                                text: kw;
+                                color: #fff; font-size: 12.5px;
+                                vertical-alignment: center;
+                            }
+                        }
+                        sg-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.search-text = kw;
+                                root.search-active = true;
+                                root.search(kw);
+                            }
+                        }
+                    }
+                }
+            }
+    }
+}

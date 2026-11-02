@@ -1,0 +1,133 @@
+// ============================================================================
+//  pages/settings/play_tab.slint — 播放设置
+//  音质设置 / 音源设置（弹窗查看可用音源）/ 自动播放 / 音频输出设备
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { SettingSelectRow } from "setting-select-row.slint";
+import { SettingToggleRow } from "setting-toggle-row.slint";
+import { SettingRow } from "setting-row.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component PlayTab inherits VerticalLayout {
+    in-out property <int> quality-index;
+    in-out property <int> source-index;
+    in-out property <bool> auto-play;
+    in property <[string]> output-devices: [];
+    in-out property <int> output-index;
+    // 洛雪音源脚本
+    in-out property <bool> lx-fallback-enabled;
+    in-out property <bool> lx-auto-update;
+    in property <[string]> script-names: [];
+    // 平台标识：web（wasm）下隐藏整个音源脚本区（rfd/lx_scripts 在 web 不编译，UI 不显示）
+    in property <bool> is-web: false;
+    callback open-select(int, string, [string], int);
+    callback toggle-changed(int, bool);
+    callback clicked(int);
+    callback show-sources();
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-play; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            q := SettingSelectRow {
+                label: Language.play-quality;
+                desc: Language.play-quality-desc;
+                icon: @image-url("../../assets/icons/circuit-battery.svg");
+                options: [Language.play-q-standard, Language.play-q-high, Language.play-q-lossless];
+                current-index <=> root.quality-index;
+                open-requested() => {
+                    root.open-select(4, Language.play-quality, [Language.play-q-standard, Language.play-q-high, Language.play-q-lossless], root.quality-index);
+                }
+            }
+            src := SettingRow {
+                visible: !root.is-web;
+                label: Language.play-source;
+                desc: Language.play-source-desc;
+                value: Language.play-view;
+                icon: @image-url("../../assets/icons/clef-staff.svg");
+                clicked() => { root.show-sources(); }
+            }
+            ap := SettingToggleRow {
+                label: Language.play-auto-play;
+                desc: Language.play-auto-play-desc;
+                icon: @image-url("../../assets/icons/circle-play.svg");
+                checked <=> root.auto-play;
+                toggled(c) => { root.toggle-changed(22, c); }
+            }
+            od := SettingSelectRow {
+                visible: !root.is-web;
+                label: Language.play-output-device;
+                desc: Language.play-output-desc;
+                icon: @image-url("../../assets/icons/device-speaker.svg");
+                options: root.output-devices;
+                current-index <=> root.output-index;
+                open-requested() => {
+                    root.open-select(6, Language.play-output-device, root.output-devices, root.output-index);
+                }
+            }
+        }
+    }
+
+    // 洛雪音源脚本：导入 + 兜底开关 + 已加载脚本列表（web 下整体隐藏）
+    SectionHeader { title: Language.play-script-title; visible: !root.is-web; }
+
+    Rectangle {
+        visible: !root.is-web;
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 2px;
+            imp := SettingRow {
+                label: Language.play-import-script;
+                desc: Language.play-import-desc;
+                value: Language.play-select-file;
+                icon: @image-url("../../assets/icons/database-import.svg");
+                clicked() => { root.clicked(44); }
+            }
+            chk := SettingRow {
+                label: Language.play-check-update-script;
+                desc: Language.play-check-update-desc;
+                value: Language.common-check-update;
+                icon: @image-url("../../assets/icons/refresh-dot.svg");
+                clicked() => { root.clicked(45); }
+            }
+            au := SettingToggleRow {
+                label: Language.play-auto-update-script;
+                desc: Language.play-auto-update-desc;
+                icon: @image-url("../../assets/icons/cloud-network.svg");
+                checked <=> root.lx-auto-update;
+                toggled(c) => { root.toggle-changed(27, c); }
+            }
+            fb := SettingToggleRow {
+                label: Language.play-lx-fallback;
+                desc: Language.play-lx-fallback-desc;
+                icon: @image-url("../../assets/icons/cloud-network.svg");
+                checked <=> root.lx-fallback-enabled;
+                toggled(c) => { root.toggle-changed(26, c); }
+            }
+            Rectangle {
+                height: max(30px, root.script-names.length * 26px + 16px);
+                background: transparent;
+                VerticalLayout { spacing: 4px; padding: 10px;
+                    if (root.script-names.length == 0) : Text {
+                        text: Language.play-no-scripts;
+                        color: Theme.palette.text-faint; font-size: 12px;
+                    }
+                    for s in root.script-names : Text {
+                        text: "• " + s;
+                        color: Theme.palette.text; font-size: 12.5px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}

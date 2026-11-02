@@ -1,0 +1,114 @@
+// ============================================================================
+//  components/tab-bar.slint — 通用可复用 Tab 栏
+//  - subtle 变体：选中项浅灰圆角底（Theme.palette.active）、未选中纯文字。
+//  - 横向可滚动：隐藏滚动条，支持 横向滚轮 / Shift+滚轮 / 拖拽。
+//  - 等宽项（宽度自适应视口），项数多或窗口窄时自动溢出横向滚动。
+//  - 供设置页 Tab 及各页面次级 Tab（单曲/专辑/歌单/MV/电台等）统一复用。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+export component TabBar inherits Rectangle {
+    // ---- 输入 ----
+    in property <[string]> items;
+    // 选中下标（双向）
+    in-out property <int> current: 0;
+    callback selected(int);
+
+    // ---- 样式（默认 subtle，可覆盖）----
+    in property <length> bar-height: 36px;
+    in property <length> gap: 8px;
+    in property <length> item-min-width: 56px;
+    in property <color> selected-bg: Theme.palette.active;
+    in property <color> selected-text: Theme.palette.text;
+    in property <color> unselected-text: Theme.palette.text-secondary;
+
+    // 等宽项：填满视口（扣除间隙），不足时按最小宽度 → 溢出横向滚动
+    property <length> item-width: max(root.item-min-width,
+        (root.width - (root.items.length - 1) * root.gap - 8px) / max(1, root.items.length));
+    // 横向可滚动量（ScrollView 的 content-x 为负值域：左端=0，向右滚动为负）
+    property <length> max-scroll-x: max(0px, sv.content-width - sv.visible-width);
+
+    height: root.bar-height;
+    width: 100%;
+    clip: true;
+
+    sv := ScrollView {
+        width: 100%; height: 100%;
+        horizontal-scrollbar-policy: always-off;
+        vertical-scrollbar-policy: always-off;
+        HorizontalLayout {
+            spacing: root.gap;
+            padding-left: 4px; padding-right: 4px;
+            for item[idx] in root.items : Rectangle {
+                width: root.item-width;
+                height: root.bar-height;
+                border-radius: root.bar-height / 2;
+                background: root.current == idx ? root.selected-bg : transparent;
+                Text {
+                    text: item;
+                    color: root.current == idx ? root.selected-text : root.unselected-text;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // ---- 交互层：点击选中 / 拖拽横向滚动 / 滚轮(含 Shift+滚轮) ----
+    // 单项不挂 TouchArea，统一在此处理，避免拖拽与点击互相抢占。
+    // Slint 1.18 PointerEvent 不含位置，位置从 self.mouse-x / self.pressed-x 读取。
+    ta := TouchArea {
+        width: 100%; height: 100%;
+        mouse-cursor: pointer;
+
+        property <bool> is-down: false;
+        property <bool> dragged: false;
+        property <length> press-x: 0px;
+        property <length> start-scroll: 0px;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                self.is-down = true;
+                self.dragged = false;
+                self.press-x = self.pressed-x;
+                self.start-scroll = sv.content-x;
+            } else if (e.kind == PointerEventKind.move) {
+                if (self.is-down) {
+                    if (Math.abs((self.mouse-x - self.press-x) / 1px) > 6) { self.dragged = true; }
+                    if (self.dragged) {
+                        // 负值域钳制：[-max-scroll-x, 0]
+                        sv.content-x = max(min(0px, self.start-scroll - (self.mouse-x - self.press-x)),
+                                           0px - root.max-scroll-x);
+                    }
+                }
+            } else if (e.kind == PointerEventKind.up) {
+                if (!self.dragged) {
+                    // 视为点击：按横向位置换算选中下标（实际位置 = 鼠标 x - content-x）
+                    let idx = Math.floor((self.mouse-x - sv.content-x) / (root.item-width + root.gap));
+                    if (idx >= 0 && idx < root.items.length) {
+                        root.current = idx;
+                        root.selected(idx);
+                    }
+                }
+                self.is-down = false;
+                self.dragged = false;
+            }
+            EventResult.accept
+        }
+
+        scroll-event(e) => {
+            if (e.delta-x != 0) {
+                sv.content-x = max(min(0px, sv.content-x - e.delta-x), 0px - root.max-scroll-x);
+                EventResult.accept
+            } else if (e.modifiers.shift && e.delta-y != 0) {
+                sv.content-x = max(min(0px, sv.content-x - e.delta-y), 0px - root.max-scroll-x);
+                EventResult.accept
+            } else {
+                // 纵向滚轮透传给下层（页面内容滚动），不在此吞掉
+                EventResult.reject
+            }
+        }
+    }
+}

@@ -1,0 +1,38 @@
+// ============================================================================
+//  pages/settings/donate_tab.slint — 捐赠支持（纯 UI 占位，不接支付）
+// ============================================================================
+import { SectionHeader } from "../../components/cards.slint";
+import { Button } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { Language } from "../../language.slint";
+
+export component DonateTab inherits VerticalLayout {
+    callback donate-clicked();
+
+    spacing: 18px;
+    padding-left: 26px; padding-right: 26px;
+    padding-top: 8px; padding-bottom: 20px;
+
+    SectionHeader { title: Language.tab-donate; }
+
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout { spacing: 14px; padding: 20px;
+            Text {
+                text: Language.donate-intro;
+                color: Theme.palette.text;
+                font-size: 13.5px;
+                wrap: word-wrap;
+            }
+            Text {
+                text: Language.donate-purpose;
+                color: Theme.palette.text-secondary;
+                font-size: 12.5px;
+                wrap: word-wrap;
+            }
+            Button { text: Language.donate-button; clicked => { root.donate-clicked(); } }
+        }
+    }
+}

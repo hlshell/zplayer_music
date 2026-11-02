@@ -1,0 +1,28 @@
+// ============================================================================
+//  播放进度条（点击跳转）——已接入主题
+// ============================================================================
+import { Theme } from "../theme.slint";
+
+export component ProgressBar inherits Rectangle {
+    in-out property <float> progress: 0.0;   // 0..1
+
+    height: 5px;
+    border-radius: 3px;
+    background: Theme.palette.scroll-track;
+
+    Rectangle {
+        width: parent.width * root.progress;
+        height: parent.height;
+        border-radius: 3px;
+        background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+    }
+
+    TouchArea {
+        clicked => {
+            if (self.width > 0px) {
+                root.progress = (self.mouse-x / 1px) / (self.width / 1px);
+            }
+        }
+        mouse-cursor: pointer;
+    }
+}

@@ -1,0 +1,331 @@
+name: Release
+
+# 触发方式：
+#  1) 推送 v* 标签（推荐）：git tag v0.2.1 && git push origin v0.2.1
+#  2) Actions 页面手动触发并输入版本号
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本号（如 v0.2.1）'
+        required: true
+        default: 'v0.2.1'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ==================== Windows x64 ====================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # vcpkg 编译 FFmpeg 静态库耗时较长，缓存 installed 与二进制包档案
+      - name: 缓存 vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-ffmpeg-x64-windows-static-v1
+          restore-keys: vcpkg-ffmpeg-x64-windows-static-
+
+      - name: 安装 FFmpeg（vcpkg，全静态 → 单 exe 且无 VC++ 运行库依赖）
+        run: vcpkg install ffmpeg:x64-windows-static
+
+      - name: 配置编译环境（FFMPEG_DIR 跳过 pkg-config / libclang / bindgen 头文件）
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=C:\vcpkg" | Out-File -Append $env:GITHUB_ENV
+          "VCPKG_TARGET_TRIPLET=x64-windows-static" | Out-File -Append $env:GITHUB_ENV
+          "RUSTFLAGS=-C target-feature=+crt-static" | Out-File -Append $env:GITHUB_ENV
+          # ffmpeg-sys-next 发现 FFMPEG_DIR 后跳过 pkg-config，直接按 Cargo features
+          # （avcodec/avformat/avutil/swresample/swscale）硬编码 link-lib，彻底避免
+          # pkg-config Libs/Libs.private 里可选后端（jack/openal/lilv/mp3lame 等）污染
+          "FFMPEG_DIR=C:\vcpkg\installed\x64-windows-static" | Out-File -Append $env:GITHUB_ENV
+          "PKG_CONFIG=C:\vcpkg\installed\x64-windows\tools\pkgconf\pkgconf.exe" | Out-File -Append $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows-static\lib\pkgconfig" | Out-File -Append $env:GITHUB_ENV
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -Append $env:GITHUB_ENV
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $msvc = (Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+          $sdk = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" -Directory | Where-Object Name -match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).Name
+          "BINDGEN_EXTRA_CLANG_ARGS=-I`"$vs\VC\Tools\MSVC\$msvc\include`" -I`"${env:ProgramFiles(x86)}\Windows Kits\10\Include\$sdk\ucrt`"" | Out-File -Append $env:GITHUB_ENV
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: 打包（单 exe，FFmpeg 已静态链接）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist -Force | Out-Null
+          Copy-Item target\release\zplayer-music.exe dist\
+          Compress-Archive -Path dist\* -DestinationPath zplayer-music-windows-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: zplayer-music-windows-x64.zip
+          retention-days: 1
+
+  # ==================== Linux x64（单二进制：FFmpeg 静态内嵌）====================
+  build-linux:
+    runs-on: ubuntu-latest
+    # 用 22.04 容器把 glibc 基线压到 2.35（兼容 Debian 12 / Ubuntu 22.04 及以上），
+    # 比 ubuntu-latest(24.04, glibc 2.39) 覆盖面更广
+    container: ubuntu:22.04
+    env:
+      FFMPEG_VERSION: 7.1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖（GUI 运行库 + FFmpeg 源码构建工具链）
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils nasm \
+            build-essential pkg-config clang libclang-dev \
+            libasound2-dev libfontconfig1-dev libdbus-1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev
+
+      - name: 安装 Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 缓存 FFmpeg 静态库
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/ffmpeg-static
+          key: ffmpeg-static-linux-x64-${{ env.FFMPEG_VERSION }}-v1
+
+      - name: 编译 FFmpeg 静态库（LGPL，全内置解码器）
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          cd "/tmp/ffmpeg-${FFMPEG_VERSION}"
+          # --disable-autodetect：不探测任何外部库，杜绝 jack/openal/cdio/lilv/mp3lame
+          #   等可选后端被 Libs.private 带进链接（上一版 CI 失败的根因）
+          # --disable-zlib/iconv：去掉非必要动态依赖
+          # 不用 --disable-everything：保留全部内置 demuxer/decoder
+          #   （mp4/mkv/h264/hevc/vp8/vp9/av1/aac/mp3/opus/vorbis/flac...）
+          ./configure \
+            --prefix=/opt/ffmpeg-static \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-debug \
+            --disable-autodetect --disable-iconv --disable-zlib \
+            --enable-pic
+          make -j"$(nproc)"
+          make install
+
+      - name: cargo build（静态链接 FFmpeg → 单 ELF）
+        env:
+          FFMPEG_DIR: /opt/ffmpeg-static
+        shell: bash
+        run: |
+          set -euo pipefail
+          # libclang.so 在 apt 安装的 llvm-XX/lib 目录（版本号随系统变化，动态查找）
+          export LIBCLANG_PATH="$(find /usr/lib -maxdepth 4 -name 'libclang.so*' -print -quit | xargs -r dirname)"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/include -I/usr/include/x86_64-linux-gnu"
+          cargo build --release --locked
+
+      - name: 打包（单个可执行文件）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/zplayer-music dist/
+          strip dist/zplayer-music
+          echo "=== 动态依赖（应只剩系统图形库，不含 libav*/libsw*）==="
+          ldd dist/zplayer-music || true
+          tar -C dist -czf zplayer-music-linux-x64.tar.gz .
+          ls -lh zplayer-music-linux-x64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: zplayer-music-linux-x64.tar.gz
+          retention-days: 1
+
+  # ==================== macOS arm64 / x64（单二进制：FFmpeg 静态内嵌）====================
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest    # Apple Silicon
+            name: arm64
+          - os: macos-15-intel  # Intel（macos-13 已退役，队列不可用）
+            name: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      FFMPEG_VERSION: 7.1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装构建依赖（nasm 汇编优化 / llvm 提供 libclang）
+        run: brew install nasm pkg-config llvm
+
+      - name: 缓存 FFmpeg 静态库
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/ffmpeg-static
+          key: ffmpeg-static-macos-${{ matrix.name }}-${{ env.FFMPEG_VERSION }}-v1
+
+      - name: 编译 FFmpeg 静态库（LGPL + VideoToolbox 硬解）
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          cd "/tmp/ffmpeg-${FFMPEG_VERSION}"
+          # --disable-autodetect：不引入 homebrew 的 mp3lame/opus 等外部库（上一版 CI 链接失败根因）
+          # --enable-zlib/bzlib：链接系统自带的 libz/libbz2，不引入额外 dylib
+          # --enable-videotoolbox：Apple 系统 framework，保留硬件解码
+          ./configure \
+            --prefix=/tmp/ffmpeg-static \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-debug \
+            --disable-autodetect --disable-iconv \
+            --enable-zlib --enable-bzlib --enable-videotoolbox \
+            --enable-pic
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+      - name: cargo build（静态链接 FFmpeg → 单 Mach-O）
+        env:
+          FFMPEG_DIR: /tmp/ffmpeg-static
+        shell: bash
+        run: |
+          # brew llvm 的 libclang.dylib 在 llvm/lib/（不是 llvm/bin/）
+          export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I$(xcrun --show-sdk-path)/usr/include"
+          cargo build --release --locked
+
+      - name: 打包（单个可执行文件）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/zplayer-music dist/
+          strip dist/zplayer-music
+          # Apple Silicon 要求可执行文件至少为 ad-hoc 签名，否则无法启动
+          codesign --force --sign - dist/zplayer-music
+          echo "=== 动态依赖（应只含 /usr/lib 与系统框架）==="
+          otool -L dist/zplayer-music
+          tar -C dist -czf "zplayer-music-macos-${{ matrix.name }}.tar.gz" .
+          ls -lh "zplayer-music-macos-${{ matrix.name }}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.name }}
+          path: zplayer-music-macos-${{ matrix.name }}.tar.gz
+          retention-days: 1
+
+  # ==================== Web（wasm32） ====================
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 读取 Cargo.lock 中 wasm-bindgen 版本
+        id: wbg
+        run: echo "v=$(grep -A1 '^name = \"wasm-bindgen\"$' Cargo.lock | grep -oP 'version = \"\K[^\"]+')" >> "$GITHUB_OUTPUT"
+
+      - name: 安装 wasm-bindgen-cli（与 lockfile 同版本，预编译二进制）
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.wbg.outputs.v }}
+
+      - name: 构建 wasm（web feature，无桌面依赖）
+        run: cargo build --release --target wasm32-unknown-unknown --no-default-features --features web
+
+      - name: 生成 JS 绑定并打包
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          wasm-bindgen --target web --no-typescript \
+            --out-dir dist target/wasm32-unknown-unknown/release/zplayer-music.wasm
+          cp web/index.html dist/
+          cd dist && zip -r ../zplayer-music-web.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-web
+          path: zplayer-music-web.zip
+          retention-days: 1
+
+  # ==================== 汇总发布 ====================
+  release:
+    needs: [build-windows, build-linux, build-macos, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 列出产物
+        run: ls -la artifacts/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/zplayer-music-windows-x64.zip
+            artifacts/zplayer-music-linux-x64.tar.gz
+            artifacts/zplayer-music-macos-arm64.tar.gz
+            artifacts/zplayer-music-macos-x64.tar.gz
+            artifacts/zplayer-music-web.zip
+          body: |
+            ## 平台说明
+
+            | 文件 | 平台 | 说明 |
+            | --- | --- | --- |
+            | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用（FFmpeg 与 C 运行库已静态内嵌，单个 exe，无任何 DLL 依赖） |
+            | `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即用（单个可执行文件，FFmpeg 已静态内嵌；仅依赖系统桌面库，要求 glibc ≥ 2.35） |
+            | `zplayer-music-macos-arm64.tar.gz` | macOS Apple Silicon | 解压即用（单个可执行文件，FFmpeg 静态内嵌 + VideoToolbox 硬解） |
+            | `zplayer-music-macos-x64.tar.gz` | macOS Intel | 同上 |
+            | `zplayer-music-web.zip` | Web | 任意静态 HTTP 服务器托管即可 |
+
+            ## 待开发平台
+
+            - **Android**：仅考虑 `arm64-v8a`（不发布 armeabi-v7a / x86）
+            - **iOS**：最低要求 **iOS 18**
+            - **HarmonyOS**：适配计划中

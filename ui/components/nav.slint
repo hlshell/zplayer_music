@@ -1,0 +1,171 @@
+// ============================================================================
+//  左侧导航栏（NavItem + Sidebar）——对齐前端 sidebar.css / layout.js
+//  激活态：浅灰白 #e6e9f0 + 内描边
+//  图标：assets/icons/ 下的着色 SVG
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { CustomScrollBar } from "scroll.slint";
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+
+component NavItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> is-active: false;
+    in property <bool> is-foot: false;
+    callback clicked;
+
+    height: 38px;
+    border-radius: 10px;
+    border-width: is-active ? 1px : 0px;
+    border-color: Theme.palette.divider;
+    background: is-active
+        ? Theme.palette.active
+        : (ta.has-hover ? Theme.palette.hover : transparent);
+
+    // 铺满整行高度，交叉轴居中 → 图标与文字同一水平线
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        cross-axis-alignment: center;   // 关键：垂直居中
+
+        Image {
+            source: icon;
+            width: 18px;
+            height: 18px;
+            vertical-alignment: center;
+            colorize: is-active ? Theme.palette.primary : Theme.palette.icon;
+        }
+        Text {
+            text: label;
+            color: is-active ? Theme.palette.text
+                 : (ta.has-hover ? Theme.palette.text : (is-foot ? Theme.palette.text-faint : Theme.palette.text-secondary));
+            font-size: 13.5px;
+            font-weight: is-active ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in-out property <int> current-nav: 0;
+    // 无条件导航激活回调（重复点当前项也触发；用于收起详情覆盖层）
+    callback nav-activated(int);
+    width: 208px;
+    background: Theme.palette.surface-overlay;
+
+    // 内容单元格：侧边栏整体可滚动（缩到最小高度时退到滚动状态，保证底部播放条始终可见）
+    Rectangle {
+        width: 100%;
+        height: 100%;
+
+        HorizontalLayout {
+            spacing: 0;
+            sv := ScrollView {
+                horizontal-stretch: 1;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+                VerticalLayout {
+                    width: 100%;
+                    spacing: 4px;
+                    padding-top: 18px;
+                    padding-bottom: 18px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+
+                    // 用户块
+                    HorizontalLayout {
+                        spacing: 12px;
+                        padding: 8px;
+                        padding-bottom: 16px;
+                        cross-axis-alignment: center;
+
+                        Rectangle {
+                            width: 40px; height: 40px;
+                            border-radius: 20px;
+                            clip: true;
+                            drop-shadow-blur: 14px;
+                            drop-shadow-color: rgba(124, 107, 255, 0.4);
+                            drop-shadow-offset-y: 4px;
+                            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                            Text {
+                                text: "Z";
+                                color: Theme.palette.icon-white;
+                                font-size: 16px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            Text {
+                                text: Language.nav-not-logged;
+                                color: Theme.palette.text;
+                                font-size: 13px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: Language.nav-login-hint;
+                                color: Theme.palette.text-faint;
+                                font-size: 11px;
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.palette.divider; }
+
+                    // 主导航组
+                    VerticalLayout {
+                        spacing: 2px;
+                        NavItem { icon: @image-url("../assets/icons/home-gray.svg"); label: Language.nav-home; is-active: root.current-nav == 0; clicked => { root.current-nav = 0; root.nav-activated(0); } }
+                        NavItem { icon: @image-url("../assets/icons/search-gray.svg"); label: Language.nav-search; is-active: root.current-nav == 1; clicked => { root.current-nav = 1; root.nav-activated(1); } }
+                        NavItem { icon: @image-url("../assets/icons/playlist-gray.svg"); label: Language.nav-playlists; is-active: root.current-nav == 2; clicked => { root.current-nav = 2; root.nav-activated(2); } }
+                        NavItem { icon: @image-url("../assets/icons/album-gray.svg"); label: Language.nav-albums; is-active: root.current-nav == 3; clicked => { root.current-nav = 3; root.nav-activated(3); } }
+                        NavItem { icon: @image-url("../assets/icons/mv-gray.svg"); label: Language.nav-mv; is-active: root.current-nav == 4; clicked => { root.current-nav = 4; root.nav-activated(4); } }
+                        NavItem { icon: @image-url("../assets/icons/radio-gray.svg"); label: Language.nav-radio; is-active: root.current-nav == 5; clicked => { root.current-nav = 5; root.nav-activated(5); } }
+                        NavItem { icon: @image-url("../assets/icons/toplist-gray.svg"); label: Language.nav-toplist; is-active: root.current-nav == 6; clicked => { root.current-nav = 6; root.nav-activated(6); } }
+                        NavItem { icon: @image-url("../assets/icons/heart-gray.svg"); label: Language.nav-liked; is-active: root.current-nav == 7; clicked => { root.current-nav = 7; root.nav-activated(7); } }
+                        NavItem { icon: @image-url("../assets/icons/recent-gray.svg"); label: Language.nav-recent; is-active: root.current-nav == 8; clicked => { root.current-nav = 8; root.nav-activated(8); } }
+                        NavItem { icon: @image-url("../assets/icons/local-gray.svg"); label: Language.nav-local; is-active: root.current-nav == 9; clicked => { root.current-nav = 9; root.nav-activated(9); } }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    // 底部工具项
+                    NavItem { icon: @image-url("../assets/icons/settings-gray.svg"); label: Language.nav-settings; is-foot: true; is-active: root.current-nav == 99; clicked => { root.current-nav = 99; } }
+                }
+            }
+            // 右侧分隔线
+            Rectangle {
+                width: 1px;
+                height: 100%;
+                background: Theme.palette.divider;
+            }
+        }
+
+        // 自定义竖向滚动条叠加（ScrollView 右缘，仅在溢出时显示）
+        sb := Rectangle {
+            x: sv.x + sv.width - 14px;
+            y: sv.y + 8px;
+            width: 10px;
+            height: sv.height - 16px;
+            CustomScrollBar {
+                viewport-height: sv.visible-height;
+                content-height: sv.content-height;
+                // Slint 的 content-y 为负值域（顶部 0 → 底部 -max），取负转为正向偏移
+                scroll-offset: -sv.content-y;
+                scroll-to(o) => { sv.content-y = -o; }
+            }
+        }
+    }
+}

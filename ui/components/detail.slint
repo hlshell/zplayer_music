@@ -1,0 +1,121 @@
+// ============================================================================
+//  detail.slint — 通用详情页（歌单详情 / 专辑详情 / 排行榜详情共用）
+//  布局：左信息区（大封面 + 标题 + 元信息 + 播放全部） + 右歌曲列表
+// ============================================================================
+import { Song } from "models.slint";
+import { SongList } from "songlist.slint";
+import { Language } from "../language.slint";
+
+export component DetailPage inherits VerticalLayout {
+    in property <image> cover;
+    in property <string> title;
+    in property <string> sub;            // 作者 / 歌手
+    in property <string> meta;           // 播放量 / 发行时间等
+    in property <string> badge;          // 类型角标（歌单/专辑/榜单）
+    in property <[Song]> songs;
+    in property <int> current-id: 0;
+    callback play-all();
+    callback song-clicked(int);
+
+    spacing: 18px;
+    padding-top: 8px;
+    padding-bottom: 20px;
+    padding-left: 26px;
+    padding-right: 26px;
+
+    // 信息区：横向（封面 + 文字信息 + 操作按钮）
+    HorizontalLayout {
+        spacing: 20px;
+        cross-axis-alignment: start;
+
+        // 大封面（160×160）
+        Rectangle {
+            width: 160px; height: 160px;
+            border-radius: 14px;
+            clip: true;
+            drop-shadow-blur: 18px; drop-shadow-color: rgba(0, 0, 0, 0.18); drop-shadow-offset-y: 4px;
+            background: @linear-gradient(135deg, #6c5ce7 0%, #0fb9d4 100%);
+            if (cover.width > 0) : Image {
+                source: cover;
+                image-fit: ImageFit.cover;
+                width: 100%; height: 100%;
+            }
+            // 类型角标
+            Rectangle {
+                x: 10px; y: 10px;
+                height: 20px;
+                border-radius: 10px;
+                background: rgba(0, 0, 0, 0.45);
+                Text {
+                    text: root.badge;
+                    color: white; font-size: 10px; font-weight: 600;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    padding-left: 9px; padding-right: 9px;
+                }
+            }
+        }
+
+        // 文字信息 + 操作
+        VerticalLayout {
+            Rectangle { vertical-stretch: 1; }
+            Text { text: root.title; color: #1a1d23; font-size: 20px; font-weight: 700; overflow: elide; }
+            Text { text: root.sub; color: #5a6472; font-size: 13px; overflow: elide; }
+            Text { text: root.meta; color: #9aa3b0; font-size: 12px; overflow: elide; }
+
+            // 操作按钮行
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 34px;
+                    border-radius: 17px;
+                    background: playta.has-hover ? #16a34a : #22c55e;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        padding-left: 16px; padding-right: 16px;
+                        cross-axis-alignment: center;
+                        Image {
+                            source: @image-url("../assets/icons/play-white.svg");
+                            width: 14px; height: 14px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: Language.detail-play-all;
+                            color: white; font-size: 12px; font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                    playta := TouchArea { clicked => { root.play-all(); } mouse-cursor: pointer; }
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: 17px;
+                    border-width: 1px; border-color: rgba(0, 0, 0, 0.10);
+                    HorizontalLayout {
+                        spacing: 6px;
+                        padding-left: 16px; padding-right: 16px;
+                        cross-axis-alignment: center;
+                        Image {
+                            source: @image-url("../assets/icons/heart-gray.svg");
+                            width: 15px; height: 15px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: Language.detail-favorite;
+                            color: #5a6472; font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    favta := TouchArea { clicked => { } mouse-cursor: pointer; }
+                }
+            }
+            Rectangle { vertical-stretch: 2; }
+        }
+    }
+
+    // 歌曲列表
+    SongList {
+        songs: root.songs;
+        current-id: root.current-id;
+        song-clicked(id) => { root.song-clicked(id); }
+    }
+}
