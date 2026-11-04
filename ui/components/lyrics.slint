@@ -259,6 +259,8 @@ export component LyricsPanel inherits Rectangle {
     // ===== 背景：所有模式都用模糊专辑（沉浸模式更强） =====
     if (root.open && root.current-song.cover.width > 0) : Rectangle {
         width: 100%; height: 100%;
+        // 不透明底层：遮挡下方主界面，再叠加模糊封面与压暗层营造氛围
+        background: Theme.palette.surface-solid;
         Image {
             source: root.current-song.cover;
             width: 150%; height: 150%;
@@ -312,6 +314,8 @@ export component LyricsPanel inherits Rectangle {
 
                 HorizontalLayout {
                     alignment: center;
+                    // cross 轴居中：避免默认 stretch 把 15px 图标拉伸到 30px 高导致与文字错位
+                    cross-axis-alignment: center;
                     spacing: 6px;
                     padding-left: 10px; padding-right: 10px;
 

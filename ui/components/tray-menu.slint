@@ -1,0 +1,253 @@
+// ============================================================================
+//  tray-menu.slint — 托盘右键自绘菜单（独立置顶透明窗口）
+//  形态：全屏透明捕获层（点击菜单外任意处 → dismiss 关闭），菜单 Rectangle
+//  画在右键点击点（越界向上/向左翻转，钳制在屏内 8px 边距）。
+//  文案/主题：本窗口的 Language/Theme global 实例与主窗口相互独立，
+//  由 Rust 在每次 show 前从 AppWindow 同步（tray-* 文案 + dark + 主题色）。
+// ============================================================================
+
+import { Theme } from "../theme.slint";
+import { Language } from "../language.slint";
+// Language global 需在本组件根 re-export，Rust 侧才能 menu.global::<crate::Language>()
+export { Language } from "../language.slint";
+
+// 菜单行（文本 + hover 底 + 点击）
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> bold: false;
+    in property <bool> enabled-row: true;   // false → 标题行样式（不可点、无 hover）
+    in property <bool> has-arrow: false;    // 语言行右侧 "›"
+    callback clicked();
+    height: 32px;
+    background: transparent;
+    ta := TouchArea {
+        enabled: root.enabled-row;
+        clicked => { root.clicked(); }
+    }
+    Rectangle {
+        x: 6px;
+        y: 2px;
+        width: parent.width - 12px;
+        height: parent.height - 4px;
+        border-radius: 4px;
+        background: ta.has-hover && root.enabled-row ? Theme.palette.hover : transparent;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 10px;
+            alignment: space-between;
+            Text {
+                text: root.label;
+                color: root.enabled-row ? Theme.palette.text : Theme.palette.text-secondary;
+                font-size: 13px;
+                font-weight: root.bold ? 700 : 400;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.has-arrow: Text {
+                text: "›";
+                color: Theme.palette.text-faint;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// 分隔线（9px 槽位，居中 1px 线）
+component MenuSep inherits Rectangle {
+    height: 9px;
+    Rectangle {
+        x: 10px;
+        y: 4px;
+        width: parent.width - 20px;
+        height: 1px;
+        background: Theme.palette.divider;
+    }
+}
+
+export component TrayMenu inherits Window {
+    // ---- Rust 每次 show 前同步的状态 ----
+    in property <string> song-title: "ZPlayer Music";
+    in property <bool> playing: false;
+    in property <bool> liked: false;
+    in property <[string]> lang-names: [];
+    in property <int> lang-index: 0;
+    in property <bool> dark: false;
+    in property <int> theme-color-index: 0;
+    // 右键点击点（窗口内逻辑坐标，Rust 已做物理→逻辑 + 显示器原点换算）
+    in property <length> click-x: 0;
+    in property <length> click-y: 0;
+
+    // ---- 动作回调（Rust 接线到 AppWindow）----
+    callback action-show();
+    callback action-fav();
+    callback action-prev();
+    callback action-play();
+    callback action-next();
+    callback action-lang(int);
+    callback action-quit();
+    callback dismiss();
+
+    // 本窗口 Theme 实例独立于主窗口：同步深浅/主题色
+    init => {
+        Theme.dark = root.dark;
+        Theme.theme-color-index = root.theme-color-index;
+        fs.focus();
+    }
+    changed dark => { Theme.dark = root.dark; }
+    changed theme-color-index => { Theme.theme-color-index = root.theme-color-index; }
+
+    public function refocus() { fs.focus(); }
+
+    background: transparent;
+    no-frame: true;
+
+    // ---- 菜单尺寸常量 ----
+    private property <length> menu-w: 160px;
+    private property <length> pad-v: 6px;          // 菜单上下内边距
+    private property <length> sep-h: 9px;
+    private property <length> row-h: 32px;
+    // 10 行（标题/显示/收藏/上一首/播放暂停/下一首/语言/退出 = 8 行）+ 3 分隔
+    private property <length> menu-h: pad-v * 2 + row-h * 8 + sep-h * 3;
+    private property <length> sub-w: 132px;
+    private property <length> sub-h: pad-v * 2 + row-h * lang-names.length;
+    private property <length> edge: 8px;
+
+    // ---- 翻转/钳制后的菜单左上角 ----
+    private property <length> fx: min(max(click-x, edge), max(edge, root.width - menu-w - edge));
+    private property <length> fy: click-y + menu-h > root.height - edge
+        ? max(edge, click-y - menu-h)
+        : min(click-y, max(edge, root.height - menu-h - edge));
+    // 语言行在主菜单内的 y（标题/显示/收藏/分隔/上一首/播放/下一首/分隔 之后）
+    private property <length> lang-row-y: pad-v + row-h * 6 + sep-h * 2;
+    // 子菜单位置：默认贴右缘，越界改贴左缘；纵向与语言行对齐并钳制
+    private property <bool> sub-on-left: fx + menu-w + sub-w > root.width - edge;
+    private property <length> sub-x: sub-on-left ? fx - sub-w : fx + menu-w;
+    private property <length> sub-y: min(max(fy + lang-row-y - pad-v, edge),
+        max(edge, root.height - sub-h - edge));
+
+    in-out property <bool> sub-open: false;
+
+    fs := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+
+        // 全屏捕获层：点击菜单外任意处关闭
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { root.dismiss(); }
+        }
+
+        // ---- 主菜单 ----
+        menu := Rectangle {
+            x: root.fx;
+            y: root.fy;
+            width: root.menu-w;
+            height: root.menu-h;
+            border-radius: 8px;
+            background: Theme.palette.surface-solid;
+            border-width: 1px;
+            border-color: Theme.palette.divider;
+            drop-shadow-color: rgba(0, 0, 0, 0.22);
+            drop-shadow-offset-y: 3px;
+            drop-shadow-blur: 14px;
+
+            // 拦截菜单区域内的点击（不触发全屏层 dismiss）
+            TouchArea {}
+
+            // 左侧竖线装饰
+            Rectangle {
+                x: 3px;
+                y: parent.height * 0.2;
+                width: 3px;
+                height: parent.height * 0.6;
+                border-radius: 1.5px;
+                background: Theme.palette.primary;
+            }
+
+            VerticalLayout {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                padding-top: root.pad-v;
+                padding-bottom: root.pad-v;
+
+                MenuRow {
+                    label: root.song-title;
+                    bold: true;
+                    enabled-row: false;
+                }
+                MenuRow {
+                    label: Language.tray-show;
+                    clicked => { root.dismiss(); root.action-show(); }
+                }
+                MenuRow {
+                    label: root.liked ? Language.tray-unfav : Language.tray-fav;
+                    clicked => { root.dismiss(); root.action-fav(); }
+                }
+                MenuSep {}
+                MenuRow {
+                    label: Language.tray-prev;
+                    clicked => { root.dismiss(); root.action-prev(); }
+                }
+                MenuRow {
+                    label: root.playing ? Language.tray-pause : Language.tray-play;
+                    clicked => { root.dismiss(); root.action-play(); }
+                }
+                MenuRow {
+                    label: Language.tray-next;
+                    clicked => { root.dismiss(); root.action-next(); }
+                }
+                MenuSep {}
+                MenuRow {
+                    label: Language.tray-language;
+                    has-arrow: true;
+                    clicked => { root.sub-open = !root.sub-open; }
+                }
+                MenuSep {}
+                MenuRow {
+                    label: Language.tray-quit;
+                    clicked => { root.dismiss(); root.action-quit(); }
+                }
+            }
+        }
+
+        // ---- 语言二级子菜单 ----
+        if root.sub-open && lang-names.length > 0: Rectangle {
+            x: root.sub-x;
+            y: root.sub-y;
+            width: root.sub-w;
+            height: root.sub-h;
+            border-radius: 8px;
+            background: Theme.palette.surface-solid;
+            border-width: 1px;
+            border-color: Theme.palette.divider;
+            drop-shadow-color: rgba(0, 0, 0, 0.22);
+            drop-shadow-offset-y: 3px;
+            drop-shadow-blur: 14px;
+
+            TouchArea {}   // 拦截子菜单区域点击
+
+            VerticalLayout {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                padding-top: root.pad-v;
+                padding-bottom: root.pad-v;
+
+                for name[idx] in root.lang-names: MenuRow {
+                    label: (idx == root.lang-index ? "✓ " : "   ") + name;
+                    clicked => { root.dismiss(); root.action-lang(idx); }
+                }
+            }
+        }
+    }
+}

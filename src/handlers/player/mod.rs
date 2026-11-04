@@ -128,19 +128,25 @@ pub fn make_resolver(ctx: &Ctx) -> Resolver {
             // 4) 拉取歌词并填充 UI + 存储时间（供播放进度高亮）
             // 本地歌曲无网络 ID，跳过歌词拉取
             if !is_local {
-                if let Ok(v) = crate::network::service::song_lyric(&client, uid).await {
-                    if let Some(lrc) = v.get("lrc").and_then(|x| x.get("lyric")).and_then(|x| x.as_str()) {
-                        let parsed = lyrics::parse_lrc(lrc);
-                        // LYRICS 存一份（进度定位高亮行）；parsed 本体进 invoke 闭包，
-                        // 在 UI 线程构造 LyricLine 模型（LyricLine 含 ModelRc 非 Send）
-                        *lyrics::LYRICS.lock().unwrap() = parsed.clone();
-                        let weak2 = ui_task.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(u) = weak2.upgrade() {
-                                u.set_lyrics(Rc::new(VecModel::from(lyrics::build_lyric_lines(&parsed))).into());
-                            }
-                        });
+                match crate::network::service::song_lyric(&client, uid).await {
+                    Ok(v) => {
+                        if let Some(lrc) = v.get("lrc").and_then(|x| x.get("lyric")).and_then(|x| x.as_str()) {
+                            let parsed = lyrics::parse_lrc(lrc);
+                            log::info!("[lyrics] 歌曲 {uid} 解析到 {} 行歌词", parsed.len());
+                            // LYRICS 存一份（进度定位高亮行）；parsed 本体进 invoke 闭包，
+                            // 在 UI 线程构造 LyricLine 模型（LyricLine 含 ModelRc 非 Send）
+                            *lyrics::LYRICS.lock().unwrap() = parsed.clone();
+                            let weak2 = ui_task.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(u) = weak2.upgrade() {
+                                    u.set_lyrics(Rc::new(VecModel::from(lyrics::build_lyric_lines(&parsed))).into());
+                                }
+                            });
+                        } else {
+                            log::warn!("[lyrics] 歌曲 {uid} 响应缺少 lrc.lyric 字段: {}", v);
+                        }
                     }
+                    Err(e) => log::warn!("[lyrics] 歌曲 {uid} 歌词拉取失败: {e}"),
                 }
             }
         });

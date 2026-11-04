@@ -317,6 +317,13 @@ export component PlayBar inherits Rectangle {
                     vol-ta := TouchArea {
                         clicked => { root.mute-toggle(); }
                         mouse-cursor: pointer;
+                        // 悬停喇叭图标即可滚轮调音量（无需移到弹窗滑块上）
+                        scroll-event(e) => {
+                            root.volume = min(1.0, max(0.0, root.volume + (e.delta-y / 1px) * 0.002));
+                            root.muted = root.volume <= 0.0;
+                            root.volume-changed(root.volume);
+                            accept
+                        }
                     }
                 }
                 // 播放模式：点击循环切换 循环播放/单曲循环/随机播放，图标随模式切换

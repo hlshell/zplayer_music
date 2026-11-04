@@ -244,5 +244,14 @@
   "toplist-name-5": "云音乐特色榜",
   "toplist-name-6": "欧美金曲榜",
   "placeholder-title": "页面占位",
-  "placeholder-desc": "数据未接入，敬请期待"
+  "placeholder-desc": "数据未接入，敬请期待",
+  "tray-show": "显示",
+  "tray-fav": "收藏",
+  "tray-unfav": "取消收藏",
+  "tray-prev": "上一首",
+  "tray-play": "播放",
+  "tray-pause": "暂停",
+  "tray-next": "下一首",
+  "tray-language": "语言",
+  "tray-quit": "退出"
 }

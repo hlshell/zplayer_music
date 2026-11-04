@@ -23,6 +23,8 @@ import { Language } from "language.slint";
 export { Language } from "language.slint";
 // 跑马灯全局状态：Rust 侧（main.rs）通过 global::<MarqueeState>() 驱动时钟，需在编译根显式导出
 export { MarqueeState } from "components/marquee.slint";
+// 托盘右键自绘菜单（独立置顶透明窗口）：Rust 侧 crate::TrayMenu 实例化，需在编译根显式导出
+export { TrayMenu } from "components/tray-menu.slint";
 import { HotSong, Playlist, Artist, Album, NewSong, HeroSong, Song, SuggestItem, Radio, MvItem, LikedRes, MvQueueEntry, HotItem } from "components/models.slint";
 
 // ---- 页面模块 ----

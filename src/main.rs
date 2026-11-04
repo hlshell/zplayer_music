@@ -119,6 +119,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // 会把部分 GPU 静默回退到软件渲染，全窗口 60fps 软件光栅化实测空闲 CPU 15%+；
     // 强制 GL 后空闲 CPU 降至 0.3%。GL 不可用的机器回落默认选择（软件渲染兜底）。
     let hook = move |attrs: winit::window::WindowAttributes| {
+        // 托盘菜单窗口豁免主窗口属性（tray.rs 在 TrayMenu::new() 前置位标志）
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        if crate::platform::tray::take_tray_flag() {
+            return crate::platform::tray::apply_tray_attrs(attrs);
+        }
         let mut attrs = attrs.with_decorations(false);
         // 创建时先隐藏窗口：winit 窗口创建即显示，首帧渲染前是透明空窗（透出桌面壁纸）；
         // 事件循环启动、首帧就绪后再 ui.show()（见 pre-run 前），消除启动透明空窗
@@ -147,6 +152,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let hook_pos = saved_pos;
             slint::BackendSelector::new()
                 .with_winit_window_attributes_hook(move |attrs: winit::window::WindowAttributes| {
+                    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                    if crate::platform::tray::take_tray_flag() {
+                        return crate::platform::tray::apply_tray_attrs(attrs);
+                    }
                     let mut attrs = attrs.with_decorations(false);
                     // 同 GL 分支：首帧渲染就绪前隐藏窗口，避免透明空窗
                     attrs = attrs.with_visible(false);
@@ -417,9 +426,9 @@ fn main() -> Result<(), slint::PlatformError> {
     handlers::search::setup(&ctx);
     handlers::player::setup(&ctx, &resolver);
     handlers::modwin::setup(&ctx, saved_pos);
-    // 系统托盘（Windows）：常驻图标 + 左键显隐切换 + 右键菜单（显隐/切歌/退出）
-    #[cfg(windows)]
-    crate::platform::tray::init(ui.as_weak(), &cfg.app.language_code);
+    // 系统托盘（桌面三平台）：常驻图标 + 左键显隐切换 + 右键 Slint 自绘菜单
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    crate::platform::tray::init(ui.as_weak());
     handlers::browse::setup(&ctx);
     handlers::fav::setup(&ctx);
     handlers::local::setup(&ctx);

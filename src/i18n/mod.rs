@@ -98,6 +98,16 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_common_check_update(g("common-check-update"));
     l.set_common_current_version(g("common-current-version"));
     l.set_common_author_info(g("common-author-info"));
+    // 托盘右键菜单
+    l.set_tray_show(g("tray-show"));
+    l.set_tray_fav(g("tray-fav"));
+    l.set_tray_unfav(g("tray-unfav"));
+    l.set_tray_prev(g("tray-prev"));
+    l.set_tray_play(g("tray-play"));
+    l.set_tray_pause(g("tray-pause"));
+    l.set_tray_next(g("tray-next"));
+    l.set_tray_language(g("tray-language"));
+    l.set_tray_quit(g("tray-quit"));
     // 导航
     l.set_nav_home(g("nav-home"));
     l.set_nav_search(g("nav-search"));

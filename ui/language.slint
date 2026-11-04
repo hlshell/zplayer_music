@@ -15,6 +15,17 @@ export global Language {
     in-out property <string> common-current-version: "当前版本";
     in-out property <string> common-author-info: "作者信息";
 
+    // ---- 托盘右键菜单（tray-menu.slint 独立窗口，Rust 每次 show 前从主窗口同步）----
+    in-out property <string> tray-show: "显示";
+    in-out property <string> tray-fav: "收藏";
+    in-out property <string> tray-unfav: "取消收藏";
+    in-out property <string> tray-prev: "上一首";
+    in-out property <string> tray-play: "播放";
+    in-out property <string> tray-pause: "暂停";
+    in-out property <string> tray-next: "下一首";
+    in-out property <string> tray-language: "语言";
+    in-out property <string> tray-quit: "退出";
+
     // ---- 侧边栏导航 ----
     in-out property <string> nav-home: "首页";
     in-out property <string> nav-search: "搜索";

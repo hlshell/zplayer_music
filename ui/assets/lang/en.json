@@ -244,5 +244,14 @@
   "toplist-name-5": "Netease Featured",
   "toplist-name-6": "Global Hits",
   "placeholder-title": "Placeholder",
-  "placeholder-desc": "Data not integrated yet, stay tuned"
+  "placeholder-desc": "Data not integrated yet, stay tuned",
+  "tray-show": "Show",
+  "tray-fav": "Favorite",
+  "tray-unfav": "Unfavorite",
+  "tray-prev": "Previous",
+  "tray-play": "Play",
+  "tray-pause": "Pause",
+  "tray-next": "Next",
+  "tray-language": "Language",
+  "tray-quit": "Quit"
 }

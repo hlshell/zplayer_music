@@ -269,15 +269,40 @@ pub fn spawn_new_process() -> Result<(), String> {
     Ok(())
 }
 
-/// 启动时清理上次更新残留的 .old 文件/目录（尽力而为，失败忽略）
+/// 启动时清理上次更新残留的 .old 文件/目录。
+///
+/// 「立即重启」时新进程由 spawn_new_process() 拉起，旧进程尚未完全退出，
+/// Windows 仍持有 .old 的句柄，此刻删除必然失败；「稍后重启」时旧进程更是
+/// 持续从 .old 运行。因此放到后台线程延迟重试，避免一次失败就永久残留。
 pub fn cleanup_old() {
     let Ok(exe) = std::env::current_exe() else { return };
     let exe_old = old_path(&exe);
-    // 当前进程若正从 .old 运行（用户选了稍后重启后又手动启动了新实例），
-    // 删除会失败——忽略错误即可，下次启动再清
-    let _ = std::fs::remove_file(&exe_old);
     let lib_old = old_path(&lib_dir_of(&exe));
-    if lib_old.is_dir() {
-        let _ = std::fs::remove_dir_all(&lib_old);
+    if !exe_old.exists() && !lib_old.is_dir() {
+        return;
     }
+
+    std::thread::spawn(move || {
+        for attempt in 1..=30u32 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let exe_ok = if exe_old.exists() {
+                std::fs::remove_file(&exe_old).is_ok()
+            } else {
+                true
+            };
+            let lib_ok = if lib_old.is_dir() {
+                std::fs::remove_dir_all(&lib_old).is_ok()
+            } else {
+                true
+            };
+            if exe_ok && lib_ok {
+                log::info!("[update] 已清理旧版本残留（第 {attempt} 次尝试）");
+                return;
+            }
+        }
+        log::warn!(
+            "[update] 旧版本残留仍被占用，下次启动再清理: {}",
+            exe_old.display()
+        );
+    });
 }
