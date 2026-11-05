@@ -141,8 +141,8 @@ js-sys = "0.3"
 web-sys = { version = "=0.3.106", features = ["HtmlAudioElement","AudioContext","Blob","Url","Window","Document","Element","HtmlElement","HtmlInputElement","Event","Storage","console","Request","RequestInit","Response","ResponseInit","Headers"] }
 console_log = "1.0"
 
-# ---- 系统托盘（桌面三平台）+ WinRT Toast 通知（Windows 专属）----
-[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+# ---- 系统托盘（Windows/macOS；Linux 见 mod.rs 注释）+ WinRT Toast 通知（Windows 专属）----
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 tray-icon = "0.26"
 
 [target.'cfg(windows)'.dependencies]

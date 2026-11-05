@@ -120,7 +120,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // 强制 GL 后空闲 CPU 降至 0.3%。GL 不可用的机器回落默认选择（软件渲染兜底）。
     let hook = move |attrs: winit::window::WindowAttributes| {
         // 托盘菜单窗口豁免主窗口属性（tray.rs 在 TrayMenu::new() 前置位标志）
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
         if crate::platform::tray::take_tray_flag() {
             return crate::platform::tray::apply_tray_attrs(attrs);
         }
@@ -152,7 +152,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let hook_pos = saved_pos;
             slint::BackendSelector::new()
                 .with_winit_window_attributes_hook(move |attrs: winit::window::WindowAttributes| {
-                    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                    #[cfg(any(target_os = "windows", target_os = "macos"))]
                     if crate::platform::tray::take_tray_flag() {
                         return crate::platform::tray::apply_tray_attrs(attrs);
                     }
@@ -427,7 +427,7 @@ fn main() -> Result<(), slint::PlatformError> {
     handlers::player::setup(&ctx, &resolver);
     handlers::modwin::setup(&ctx, saved_pos);
     // 系统托盘（桌面三平台）：常驻图标 + 左键显隐切换 + 右键 Slint 自绘菜单
-    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     crate::platform::tray::init(ui.as_weak());
     handlers::browse::setup(&ctx);
     handlers::fav::setup(&ctx);
