@@ -151,6 +151,7 @@ pub fn open_local_video(
                 u.set_mv_quality(MV_QUALITY.load(Ordering::Relaxed) as i32);
                 u.set_mv_switching(false);
                 u.set_mv_buffering(false);
+                u.set_mv_loading(true);       // 首次加载遮罩
                 u.set_mv_volume(MV_VOLUME.load(Ordering::Relaxed) as i32);
                 u.set_mv_fullscreen(false);
                 u.set_mv_player_visible(true);
@@ -333,6 +334,7 @@ fn open_mv_player_internal(
                 u.set_mv_quality(MV_QUALITY.load(Ordering::Relaxed) as i32);
                 u.set_mv_switching(false);   // 清掉上一次切换残留的进度胶囊
                 u.set_mv_buffering(false);   // 清掉上一次缓冲残留的加载指示
+                u.set_mv_loading(true);      // 首次加载遮罩：首帧到来自动关闭
                 u.set_mv_volume(MV_VOLUME.load(Ordering::Relaxed) as i32);
                 u.set_mv_fullscreen(false);
                 queue::sync_ui(&u);
@@ -368,6 +370,16 @@ fn spawn_frame_feeder(
             let frame = rx.borrow_and_update().clone();
             let Some(arc_frame) = frame else { continue };
             if MV_FRAME_GEN.load(Ordering::Relaxed) != gen_id { continue; }
+            // 首帧到达：关闭"正在加载"遮罩（后续帧不再重复触发）
+            static LOADED_GUARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if LOADED_GUARD.swap(gen_id, Ordering::Relaxed) != gen_id {
+                let ui = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if MV_FRAME_GEN.load(Ordering::Relaxed) == gen_id {
+                        if let Some(u) = ui.upgrade() { u.set_mv_loading(false); }
+                    }
+                });
+            }
             // 首帧到达 = 本次播放成功，清零连续失败计数（失败跳转链到此终止）
             MV_FAIL_STREAK.store(0, Ordering::Relaxed);
             // 播放有进展：重连计数清零，并记录最新位置（断流重连恢复用）

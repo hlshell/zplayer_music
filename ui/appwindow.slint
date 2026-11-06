@@ -357,6 +357,7 @@ export component AppWindow inherits Window {
     in-out property <string> mv-notice: "";      // MV 播放器内过渡提示（无法播放自动跳转等，停留更久）
     in-out property <bool> mv-switching: false;  // 清晰度无缝切换中（顶部胶囊常显旋转环）
     in-out property <bool> mv-buffering: false;  // 缓冲门控中（播放器中央显示"正在缓冲"加载指示）
+    in-out property <bool> mv-loading: false;   // 首次加载中（播放器刚打开、首帧未到，显示"正在加载"覆盖层）
     in-out property <string> mv-switch-tip: "";  // 切换状态文案（如"正在切换到 720p"）
     in-out property <bool> mv-compact: false;    // MV 画中画（迷你窗口）模式
     in-out property <bool> mv-fullscreen: false; // MV 全屏态（Rust 写回，切换最大化/还原图标）
@@ -1006,6 +1007,7 @@ export component AppWindow inherits Window {
         notice <=> root.mv-notice;
         switching <=> root.mv-switching;
         buffering <=> root.mv-buffering;
+        loading <=> root.mv-loading;
         switch-tip <=> root.mv-switch-tip;
         compact <=> root.mv-compact;
         is-fullscreen <=> root.mv-fullscreen;

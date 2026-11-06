@@ -11,6 +11,7 @@ export component ProgressBar inherits Rectangle {
     background: Theme.palette.scroll-track;
 
     Rectangle {
+        x: 0;          // 显式贴左：防父容器对齐把进度条从中心向两侧生长
         width: parent.width * root.progress;
         height: parent.height;
         border-radius: 3px;

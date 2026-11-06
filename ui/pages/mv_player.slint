@@ -156,6 +156,7 @@ export component MvPlayer inherits Rectangle {
     in property <string> notice;              // 过渡提示（无法播放自动跳转等；AppWindow.mv-notice 桥接）
     in property <bool> switching: false;      // 清晰度切换中：顶部胶囊常显旋转环 + 文案
     in property <bool> buffering: false;      // 缓冲门控中：中央显示"正在缓冲…"加载指示
+    in property <bool> loading: false;        // 首次加载中（播放器刚打开、首帧未到）：黑色遮罩 + 旋转环 + 文案
     in property <string> switch-tip: "";      // 切换状态文案（如"正在切换到 720p"）
     in-out property <bool> compact: false;    // 画中画（迷你窗口）模式：顶栏隐藏、底栏精简
     in-out property <bool> is-fullscreen: false;  // 全屏态（Rust 写回）：最大化/还原图标切换
@@ -376,6 +377,36 @@ export component MvPlayer inherits Rectangle {
                 color: #fff;
                 font-size: 13px;
                 vertical-alignment: center;
+            }
+        }
+    }
+
+    // ======== 首次加载遮罩：播放器刚打开、MV 地址/首帧未就绪期间显示 ========
+    // 与 buffering 互斥：loading 覆盖黑色空窗期；buffering 覆盖播放中缓冲
+    if (root.loading && !root.buffering) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: #000;   // 完全黑，避免透出上一首残留帧
+        Rectangle {
+            width: 148px; height: 40px;
+            border-radius: 20px;
+            background: rgba(30, 32, 38, 0.88);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            Rectangle {
+                x: 14px; y: 9px; width: 22px; height: 22px;
+                background: transparent;
+                property <float> spin: mod(animation-tick() / 0.9s, 1.0);
+                Rectangle { width: 22px; height: 22px; border-radius: 11px; border-width: 2px; border-color: rgba(255,255,255,0.28); }
+                Rectangle { width: 6px; height: 6px; border-radius: 3px; background: #fff;
+                    x: 8px + 8px * cos(360deg * parent.spin - 90deg);
+                    y: 8px + 8px * sin(360deg * parent.spin - 90deg);
+                }
+            }
+            Text {
+                text: "正在加载…";
+                x: 44px; y: 0;
+                width: parent.width - 52px; height: 100%;
+                color: #fff; font-size: 13px; vertical-alignment: center;
             }
         }
     }
@@ -1263,16 +1294,21 @@ export component MvPlayer inherits Rectangle {
             }
         }
 
-            // 搜索建议下拉（放在抽屉最末尾、布局之外 → z 序最高，盖在 ScrollView 列表之上，避免被遮挡）
+            // 搜索建议下拉（放在抽屉最末尾、VerticalLayout 之外 → 绝对定位，x/y 生效且高度自适应建议条数）
             // 坐标：头部 52 + 分割线 1 + 搜索框内偏移 48 = 101
+            // 显式 height = 建议条数 * 32 + 12 padding，防止 VerticalLayout 把它 stretch 到剩余抽屉高度
             if (root.search-suggestions.length > 0 && root.search-text != "" && !root.search-active) : Rectangle {
                 y: 101px;
                 x: 12px;
                 width: parent.width - 24px;
+                height: root.search-suggestions.length * 32px + 12px;
                 background: #1e2026;
                 border-radius: 8px;
                 border-width: 1px;
                 border-color: rgba(255,255,255,0.12);
+                drop-shadow-blur: 16px;
+                drop-shadow-color: rgba(0,0,0,0.35);
+                drop-shadow-offset-y: 4px;
                 VerticalLayout {
                     padding: 6px;
                     spacing: 0;

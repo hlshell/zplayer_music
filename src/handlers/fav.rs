@@ -151,6 +151,51 @@ pub(crate) fn fill_recent(u: &AppWindow) {
     warm_song_rows(&u.get_recent_mv_list());
 }
 
+/// v1 旧收藏（仅 id 无元数据）：后台 song_detail 批量补全一次，完成后回写并刷新。
+/// 若当前不在 nav=7（我的最爱），则仅静默补全持久化数据不触发 UI 刷新。
+fn refresh_liked_v1_meta(
+    u: &AppWindow,
+    client: std::sync::Arc<crate::network::netease::client::NeteaseClient>,
+    rt: tokio::runtime::Handle,
+    ui: slint::Weak<crate::AppWindow>,
+) {
+    let missing = liked::ids_without_meta();
+    if missing.is_empty() {
+        return;
+    }
+    let nav_now = u.get_current_nav();
+    rt.spawn(async move {
+        if let Ok(v) = crate::network::service::song_detail(&client, &missing).await {
+            let arr = v.get("songs").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+            let base = crate::load::parse_tracks(&arr);
+            let entries: Vec<liked::LikedSong> = base
+                .iter()
+                .map(|d| liked::LikedSong {
+                    id: d.id as u32 as i64,
+                    name: d.name.to_string(),
+                    artist: d.artist.to_string(),
+                    album: d.album.to_string(),
+                    cover: d.url.clone(),
+                    duration: d.duration.to_string(),
+                    duration_sec: d.duration_sec,
+                    ts: 0,
+                })
+                .collect();
+            if !entries.is_empty() {
+                log::info!("[liked] v1 收藏元数据补全 {} 首", entries.len());
+                liked::update_song_meta(entries);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if nav_now == 7 {
+                        if let Some(u) = ui.upgrade() {
+                            fill_liked(&u);
+                        }
+                    }
+                });
+            }
+        }
+    });
+}
+
 pub fn setup(ctx: &Ctx) {
     // ---- 页面切入填充：7=我的最爱 8=最近播放（appwindow changed current-nav 触发）----
     let ui_weak = ctx.ui.clone();
@@ -160,49 +205,22 @@ pub fn setup(ctx: &Ctx) {
     ctx.app.clone_strong().on_page_fill(move |nav| {
         let Some(u) = ui_weak.upgrade() else { return; };
         match nav {
-            7 => {
-                fill_liked(&u);
-                // v1 旧收藏（仅 id 无元数据）：后台 song_detail 批量补全一次，完成后回写并刷新
-                let missing = liked::ids_without_meta();
-                if !missing.is_empty() {
-                    let client = client_pf.clone();
-                    let ui2 = ui_pf.clone();
-                    rt_pf.spawn(async move {
-                        if let Ok(v) = crate::network::service::song_detail(&client, &missing).await {
-                            let arr = v.get("songs").and_then(|t| t.as_array()).cloned().unwrap_or_default();
-                            let base = crate::load::parse_tracks(&arr);
-                            let entries: Vec<liked::LikedSong> = base
-                                .iter()
-                                .map(|d| liked::LikedSong {
-                                    id: d.id as u32 as i64,
-                                    name: d.name.to_string(),
-                                    artist: d.artist.to_string(),
-                                    album: d.album.to_string(),
-                                    cover: d.url.clone(),
-                                    duration: d.duration.to_string(),
-                                    duration_sec: d.duration_sec,
-                                    ts: 0,
-                                })
-                                .collect();
-                            if !entries.is_empty() {
-                                log::info!("[liked] v1 收藏元数据补全 {} 首", entries.len());
-                                liked::update_song_meta(entries);
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(u) = ui2.upgrade() {
-                                        if u.get_current_nav() == 7 {
-                                            fill_liked(&u);
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    });
-                }
-            }
+            7 => { fill_liked(&u); refresh_liked_v1_meta(&u, client_pf.clone(), rt_pf.clone(), ui_pf.clone()); }
             8 => fill_recent(&u),
             _ => {}
         }
     });
+
+    // ---- 启动时预填：不依赖用户是否切到 7/8 ----
+    let ui_now = ctx.ui.clone();
+    let client_pf2 = ctx.client.clone();
+    let rt_pf2 = ctx.rt.clone();
+    let ui_pf2 = ctx.ui.clone();
+    if let Some(u) = ui_now.upgrade() {
+        fill_liked(&u);
+        fill_recent(&u);
+        refresh_liked_v1_meta(&u, client_pf2, rt_pf2, ui_pf2);
+    }
 
     // ---- 我的最爱：行内红心取消资源收藏 ----
     let ui_weak = ctx.ui.clone();
