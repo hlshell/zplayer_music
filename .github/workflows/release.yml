@@ -363,6 +363,10 @@ jobs:
     needs: [check-skip, build-windows, build-linux, build-macos, build-web]
     if: needs.check-skip.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # 仓库默认 GITHUB_TOKEN 为只读（default_workflow_permissions=read），
+    # 创建 Release 与上传资产需要 contents: write；仅在本 job 提权，构建 job 保持只读
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -382,6 +386,8 @@ jobs:
             artifacts/zplayer-music-linux-x64.tar.gz
             artifacts/zplayer-music-macos-arm64.tar.gz
             artifacts/zplayer-music-macos-x64.tar.gz
+            artifacts/zplayer-music-macos-arm64.app.tar.gz
+            artifacts/zplayer-music-macos-x64.app.tar.gz
             artifacts/zplayer-music-web.zip
           body: |
             ## 平台说明
@@ -392,6 +398,8 @@ jobs:
             | `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即用（单个可执行文件，FFmpeg 已静态内嵌；仅依赖系统桌面库，要求 glibc ≥ 2.35） |
             | `zplayer-music-macos-arm64.tar.gz` | macOS Apple Silicon | 解压即用（单个可执行文件，FFmpeg 静态内嵌 + VideoToolbox 硬解） |
             | `zplayer-music-macos-x64.tar.gz` | macOS Intel | 同上 |
+            | `zplayer-music-macos-arm64.app.tar.gz` | macOS Apple Silicon | **推荐**：解压得到 `ZPlayer Music.app`，图标/无终端窗口/菜单栏托盘均正常 |
+            | `zplayer-music-macos-x64.app.tar.gz` | macOS Intel | 同上 |
             | `zplayer-music-web.zip` | Web | 任意静态 HTTP 服务器托管即可 |
 
             ## 待开发平台
