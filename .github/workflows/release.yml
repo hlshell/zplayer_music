@@ -2,6 +2,7 @@ name: Release
 
 # 触发方式：
 #  1) 推送 v* 标签（推荐）：git tag v0.2.1 && git push origin v0.2.1
+#     tag 名含 -skip-ci 后缀时 CI 跳过（用于手动测试更新进度条等场景）
 #  2) Actions 页面手动触发并输入版本号
 on:
   push:
@@ -13,16 +14,19 @@ on:
         required: true
         default: 'v0.2.1'
 
-permissions:
-  contents: write
-
-env:
-  CARGO_TERM_COLOR: always
-
+# tag 名含 -skip-ci 后缀时整次 CI 跳过（用于手动测试场景）
 jobs:
+  check-skip:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ contains(github.ref_name, '-skip-ci') }}
+    steps:
+      - run: "echo skip=${{ contains(github.ref_name, '-skip-ci') }}"
   # ==================== Windows x64 ====================
   build-windows:
-    runs-on: windows-latest
+    runs-on:     needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -80,7 +84,9 @@ jobs:
 
   # ==================== Linux x64（单二进制：FFmpeg 静态内嵌）====================
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on:     needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+ubuntu-latest
     # 用 22.04 容器把 glibc 基线压到 2.35（兼容 Debian 12 / Ubuntu 22.04 及以上），
     # 比 ubuntu-latest(24.04, glibc 2.39) 覆盖面更广
     container: ubuntu:22.04
@@ -170,6 +176,8 @@ jobs:
 
   # ==================== macOS arm64 / x64（单二进制：FFmpeg 静态内嵌）====================
   build-macos:
+    needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -311,7 +319,9 @@ jobs:
 
   # ==================== Web（wasm32） ====================
   build-web:
-    runs-on: ubuntu-latest
+    runs-on:     needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -350,7 +360,8 @@ jobs:
 
   # ==================== 汇总发布 ====================
   release:
-    needs: [build-windows, build-linux, build-macos, build-web]
+    needs: [check-skip, build-windows, build-linux, build-macos, build-web]
+    if: needs.check-skip.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

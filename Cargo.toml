@@ -1,6 +1,6 @@
 [package]
 name = "zplayer-music"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "ZPlayer Music 播放器的 Slint demo（紫色主题，对齐现有前端；无边框自定义标题栏 + 启动动画 + 真实数据对接）"
 # 进程名显示说明：任务管理器名称列 = exe 文件名。cargo 的 bin 名会同时用作 crate 名
