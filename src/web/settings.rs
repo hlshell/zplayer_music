@@ -4,7 +4,7 @@
 //!   theme-toggle / settings-select-changed(int,int) / settings-toggle-changed(int,bool) /
 //!   settings-input-changed(int,string) / settings-proxy-submit(int,string,string) /
 //!   settings-clicked(int) / settings-clear-cache(int) / settings-check-update() /
-//!   settings-donate-clicked() / cache-limit-clicked / cover-dir-clicked / song-dir-clicked /
+//!   cache-limit-clicked / cover-dir-clicked / song-dir-clicked /
 //!   cache-refresh
 //!
 //! 持久化：crate::platform::storage（web=localStorage，zplayer/ 前缀；storage::init 已由
@@ -126,17 +126,11 @@ pub fn setup(ui: &crate::AppWindow) {
         }
     });
 
-    // ---- 关于：检查更新 / 捐赠 ----
+    // ---- 关于：检查更新 ----
     let ui_w = ui.as_weak();
     ui.on_settings_check_update(move || {
         if let Some(u) = ui_w.upgrade() {
             crate::web::show_toast(&u, "已是最新版本", "info");
-        }
-    });
-    let ui_w = ui.as_weak();
-    ui.on_settings_donate_clicked(move || {
-        if let Some(u) = ui_w.upgrade() {
-            crate::web::show_toast(&u, TODO, "info");
         }
     });
 

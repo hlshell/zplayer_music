@@ -229,9 +229,6 @@ pub fn setup(ctx: &Ctx) {
                     }
                 }
             }
-            42 => {
-                toast_cd.show("快捷键设置开发中", "info");
-            }
             _ => {}
         }
     });
@@ -387,8 +384,4 @@ pub fn setup(ctx: &Ctx) {
             t_check.show("当前平台暂不支持在线更新", "info");
         });
     }
-    let t_donate = ctx.toast.clone();
-    ctx.app.clone_strong().on_settings_donate_clicked(move || {
-        t_donate.show("感谢支持！捐赠功能开发中", "info");
-    });
 }

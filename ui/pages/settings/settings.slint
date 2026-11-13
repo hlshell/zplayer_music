@@ -19,11 +19,22 @@ import { DonateTab } from "donate_tab.slint";
 import { SelectPopup } from "select-popup.slint";
 import { ProxyPopup } from "proxy-popup.slint";
 import { SourcesPopup, SourceEntry } from "sources-popup.slint";
+import { ShortcutPopup } from "shortcut-popup.slint";
 
 export component SettingsPage inherits Rectangle {
 
     // ---- 对外状态（appwindow/Rust 双向绑定）----
     in-out property <int> tab-index: 0;
+    // 快捷键：组合键列表由 Rust（配置）填充，顺序与 handlers/shortcut.rs 的 SHORTCUT_IDS 一致
+    in-out property <[string]> shortcut-combos: [];
+    in-out property <bool> active-shortcut: false;
+    in-out property <int> shortcut-capturing: -1;
+    property <[string]> shortcut-labels: [
+        Language.sc-play-pause, Language.sc-prev, Language.sc-next,
+        Language.sc-seek-back, Language.sc-seek-forward,
+        Language.sc-volume-up, Language.sc-volume-down, Language.sc-mute,
+        Language.sc-home, Language.sc-settings, Language.sc-hide,
+    ];
     // web 下隐藏"网络设置/系统管理"两个整 tab（其下全部为桌面专属项）：
     // tab-map 把可见索引映射回桌面索引（可见序 → 真实序），TabBar items 同步过滤。
     property <[int]> tab-map: root.is-web ? [0, 1, 2, 5, 6] : [0, 1, 2, 3, 4, 5, 6];
@@ -82,8 +93,12 @@ export component SettingsPage inherits Rectangle {
     callback cache-refresh();
     callback clear-cache(int);
     callback check-update();
-    callback donate-clicked();
     callback navigate(int);
+    // 快捷键：捕获到的原始按键（文本 + 修饰键）交给 Rust 规范化/校验/持久化
+    callback shortcut-capture(int, string, bool, bool, bool);
+    callback shortcut-reset();
+    // 弹窗关闭后请求把键盘焦点还给应用级快捷键作用域
+    callback refocus();
 
     // ---- 选择弹窗内部状态（居中，不锚定）----
     in-out property <int> active-select: -1;
@@ -197,7 +212,10 @@ export component SettingsPage inherits Rectangle {
                             lyrics-style <=> root.lyrics-style;
                             close-behavior-index <=> root.close-behavior-index;
                             open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
-                            clicked(id) => { root.clicked(id); }
+                            clicked(id) => {
+                                if (id == 42) { root.active-shortcut = true; }
+                                else { root.clicked(id); }
+                            }
                         }
                         if (root.real-tab == 3) : net := NetworkTab {
                             is-web: root.is-web;
@@ -239,9 +257,7 @@ export component SettingsPage inherits Rectangle {
                             version: root.version;
                             check-update() => { root.check-update(); }
                         }
-                        if (root.real-tab == 6) : DonateTab {
-                            donate-clicked() => { root.donate-clicked(); }
-                        }
+                        if (root.real-tab == 6) : DonateTab { }
                     }
                 }
             }
@@ -267,7 +283,7 @@ export component SettingsPage inherits Rectangle {
         x: 0; y: 0; width: 100%; height: 100%;
         background: rgba(0, 0, 0, 0.35);
         // 点击遮罩关闭
-        mask-ta := TouchArea { clicked => { root.active-select = -1; } }
+        mask-ta := TouchArea { clicked => { root.active-select = -1; root.refocus(); } }
         SelectPopup {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -277,6 +293,7 @@ export component SettingsPage inherits Rectangle {
             picked(idx) => {
                 root.select-picked(root.active-select, idx);
                 root.active-select = -1;
+                root.refocus();
             }
         }
     }
@@ -285,7 +302,7 @@ export component SettingsPage inherits Rectangle {
     if (root.active-proxy) : Rectangle {
         x: 0; y: 0; width: 100%; height: 100%;
         background: rgba(0, 0, 0, 0.35);
-        mask-ta2 := TouchArea { clicked => { root.active-proxy = false; } }
+        mask-ta2 := TouchArea { clicked => { root.active-proxy = false; root.refocus(); } }
         ProxyPopup {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -299,8 +316,9 @@ export component SettingsPage inherits Rectangle {
                 root.proxy-port = p.to-float() >= 0 ? Math.round(p.to-float()) : 0;
                 root.active-proxy = false;
                 root.proxy-submit(t, h, p);
+                root.refocus();
             }
-            closed() => { root.active-proxy = false; }
+            closed() => { root.active-proxy = false; root.refocus(); }
         }
     }
 
@@ -308,12 +326,42 @@ export component SettingsPage inherits Rectangle {
     if (root.active-sources) : Rectangle {
         x: 0; y: 0; width: 100%; height: 100%;
         background: rgba(0, 0, 0, 0.35);
-        mask-ta3 := TouchArea { clicked => { root.active-sources = false; } }
+        mask-ta3 := TouchArea { clicked => { root.active-sources = false; root.refocus(); } }
         SourcesPopup {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             items: root.source-entries;
-            closed() => { root.active-sources = false; }
+            closed() => { root.active-sources = false; root.refocus(); }
+        }
+    }
+
+    // ---- 快捷键配置弹窗覆盖层（居中）----
+    if (root.active-shortcut) : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.35);
+        mask-ta4 := TouchArea {
+            clicked => {
+                root.active-shortcut = false;
+                root.shortcut-capturing = -1;
+                root.refocus();
+            }
+        }
+        ShortcutPopup {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            avail-height: parent.height - 24px;
+            labels: root.shortcut-labels;
+            combos: root.shortcut-combos;
+            capturing <=> root.shortcut-capturing;
+            captured(idx, text, ctrl, alt, shift) => {
+                root.shortcut-capture(idx, text, ctrl, alt, shift);
+            }
+            reset() => { root.shortcut-reset(); }
+            closed() => {
+                root.active-shortcut = false;
+                root.shortcut-capturing = -1;
+                root.refocus();
+            }
         }
     }
 }

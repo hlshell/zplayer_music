@@ -1,108 +1,196 @@
 // ============================================================================
-//  pages/toplist.slint — 排行榜页（已接入主题）
+//  pages/toplist/toplist.slint — 排行榜页（真实数据：Rust 侧 handlers/toplist.rs 填充）
+//  响应式卡片网格（3~6 列，触发宽度同歌单/专辑页）；点击卡片 → 打开歌单详情
 // ============================================================================
 import { SectionHeader } from "../../components/cards.slint";
 import { PlaceholderPage } from "../placeholder/placeholder.slint";
+import { Toplist } from "../../components/models.slint";
 import { Theme } from "../../theme.slint";
 import { Language } from "../../language.slint";
+import { ScrollView } from "std-widgets.slint";
 
-component ToplistRow inherits Rectangle {
-    in property <string> rank;       // 排名徽标文字（如 1）
-    in property <color> rank-from;
-    in property <color> rank-to;
-    in property <string> name;
-    in property <string> update;     // 更新信息
-    in property <string> hot1;
-    in property <string> hot2;
-    in property <string> hot3;
-    callback clicked;
+// ---- 榜单卡片：封面 + 名次角标 + 榜名 + 更新频率 + 规模 + 榜首预览 ----
+component ToplistCard inherits Rectangle {
+    in property <int> index;        // 0-based，展示为 #index+1
+    in property <Toplist> data;
+    callback clicked();
 
-    height: 86px;
     border-radius: 12px;
-    background: row-ta.has-hover ? Theme.palette.hover : transparent;
+    background: card-ta.has-hover ? Theme.palette.hover : transparent;
 
-    HorizontalLayout {
-        spacing: 16px;
-        padding: 12px;
-        cross-axis-alignment: center;
+    VerticalLayout {
+        spacing: 6px;
+        padding: 8px;
 
-        // 排名徽标
+        // 封面（网络图未就绪时用渐变回退）
         Rectangle {
-            width: 62px; height: 62px;
+            height: 130px;
             border-radius: 10px;
             clip: true;
-            background: @linear-gradient(135deg, rank-from 0%, rank-to 100%);
-            Text {
-                text: root.rank;
-                color: white; font-size: 22px; font-weight: 800;
-                horizontal-alignment: center; vertical-alignment: center;
+            background: @linear-gradient(135deg, root.data.from 0%, root.data.to 100%);
+
+            if (root.data.cover.width > 0) : Image {
+                width: 100%;
+                height: 100%;
+                source: root.data.cover;
+                image-fit: cover;
+            }
+
+            // 名次角标：前三名强调色，其余半透明黑
+            Rectangle {
+                x: 8px;
+                y: 8px;
+                height: 20px;
+                border-radius: 10px;
+                background: root.index == 0 ? #ef4444
+                          : root.index == 1 ? #f59e0b
+                          : root.index == 2 ? #22c55e
+                          : rgba(0, 0, 0, 0.55);
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Text {
+                        text: "#\{root.index + 1}";
+                        color: white;
+                        font-size: 10.5px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // 悬停压暗
+            Rectangle {
+                width: 100%;
+                height: 100%;
+                background: card-ta.has-hover ? rgba(0, 0, 0, 0.22) : transparent;
             }
         }
 
-        VerticalLayout {
-            Rectangle { vertical-stretch: 1; }
-            Text { text: root.name; color: Theme.palette.text; font-size: 15px; font-weight: 600; }
-            Text { text: root.update; color: Theme.palette.text-faint; font-size: 11px; }
-            Rectangle { vertical-stretch: 1; }
+        Text {
+            text: root.data.name;
+            color: Theme.palette.text;
+            font-size: 13.5px;
+            font-weight: 600;
+            overflow: elide;
         }
-
-        Rectangle { horizontal-stretch: 1; }
-
-        // 热门歌预览
-        VerticalLayout {
-            Rectangle { vertical-stretch: 1; }
-            for txt in [root.hot1, root.hot2, root.hot3]: Text {
-                text: txt;
-                color: Theme.palette.text-secondary; font-size: 12px;
-                overflow: elide;
-            }
-            Rectangle { vertical-stretch: 1; }
+        Text {
+            text: root.data.update-freq;
+            color: Theme.palette.primary;
+            font-size: 11px;
+            overflow: elide;
         }
-
-        // 进入箭头
-        Rectangle { width: 36px; height: 36px;
-            Image {
-                source: @image-url("../../assets/icons/arrow-more-faint.svg");
-                width: 18px; height: 18px;
-                horizontal-alignment: center; vertical-alignment: center;
-                colorize: Theme.palette.text-faint;
-            }
+        Text {
+            text: root.data.meta;
+            color: Theme.palette.text-faint;
+            font-size: 11px;
+            overflow: elide;
+        }
+        Text {
+            text: root.data.top1;
+            color: Theme.palette.text-secondary;
+            font-size: 11px;
+            overflow: elide;
         }
     }
 
-    row-ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+    card-ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
 }
 
 export component ToplistPage inherits VerticalLayout {
     in property <bool> is-web: false;
-    callback open-toplist(int);
-    callback navigate(int);
+    in property <[Toplist]> toplists: [];
+    in property <bool> loading: false;
+    in property <bool> loaded: false;
 
-    spacing: 18px;
+    // 内容区宽度（AppWindow 传入），响应式列数 3~6（同歌单/专辑页）
+    in property <length> page-w: 900px;
+    property <int> grid-columns: Math.max(3, Math.min(6, Math.floor((page-w - 52px) / 172px)));
+    property <length> grid-card-w: (page-w - 52px - 16px * (grid-columns - 1)) / grid-columns;
+
+    callback open-toplist(int);
+
+    spacing: 12px;
     padding-top: 8px;
     padding-bottom: 20px;
     padding-left: 26px;
     padding-right: 26px;
 
-    // Web 端暂无榜单接口：显示待补充空态（desktop 保持原榜单）
+    // Web 端暂无榜单接口：显示待补充空态
     if (root.is-web) : PlaceholderPage {
         icon: "🏆";
         title: Language.page-notready-title;
         desc: Language.page-notready-desc;
     }
-    if (!root.is-web) : VerticalLayout {
-        SectionHeader { title: Language.toplist-official; }
-    VerticalLayout { spacing: 10px;
-        ToplistRow { rank: "1"; rank-from: #ef4444; rank-to: #f97316; name: Language.toplist-name-1; update: Language.toplist-update-live; hot1: "1. 歌曲A"; hot2: "2. 歌曲B"; hot3: "3. 歌曲C"; clicked => { root.open-toplist(0); } }
-        ToplistRow { rank: "2"; rank-from: #6c5ce7; rank-to: #0fb9d4; name: Language.toplist-name-2; update: Language.toplist-update-daily; hot1: "1. 歌曲D"; hot2: "2. 歌曲E"; hot3: "3. 歌曲F"; clicked => { root.open-toplist(1); } }
-        ToplistRow { rank: "3"; rank-from: #f59e0b; rank-to: #ef4444; name: Language.toplist-name-3; update: Language.toplist-update-daily; hot1: "1. 歌曲G"; hot2: "2. 歌曲H"; hot3: "3. 歌曲I"; clicked => { root.open-toplist(2); } }
-        ToplistRow { rank: "4"; rank-from: #22c55e; rank-to: #14b8a6; name: Language.toplist-name-4; update: Language.toplist-update-weekly; hot1: "1. 歌曲J"; hot2: "2. 歌曲K"; hot3: "3. 歌曲L"; clicked => { root.open-toplist(3); } }
-    }
 
-        SectionHeader { title: Language.toplist-global; }
-        VerticalLayout { spacing: 10px;
-            ToplistRow { rank: "5"; rank-from: #0ea5e9; rank-to: #6366f1; name: Language.toplist-name-5; update: Language.toplist-update-daily; hot1: "1. 歌曲M"; hot2: "2. 歌曲N"; hot3: "3. 歌曲O"; clicked => { root.open-toplist(4); } }
-            ToplistRow { rank: "6"; rank-from: #ec4899; rank-to: #a78bfa; name: Language.toplist-name-6; update: Language.toplist-update-daily; hot1: "1. 歌曲P"; hot2: "2. 歌曲Q"; hot3: "3. 歌曲R"; clicked => { root.open-toplist(5); } }
+    if (!root.is-web) : SectionHeader { title: Language.toplist-official; }
+
+    // 榜单网格滚动区
+    if (!root.is-web) : Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+
+        ScrollView {
+            width: 100%;
+            height: 100%;
+            horizontal-scrollbar-policy: always-off;
+            vertical-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                spacing: 16px;
+                padding-bottom: 20px;
+
+                // 首次加载骨架屏（呼吸动画）
+                if (root.loading && root.toplists.length == 0) : Rectangle {
+                    height: Math.ceil(8 * 1.0 / root.grid-columns) * 232px - 16px;
+                    opacity: 0.45 + 0.35 * abs(sin(animation-tick() / 1400ms * 360deg));
+                    for i in 8 : Rectangle {
+                        x: Math.mod(i, root.grid-columns) * (root.grid-card-w + 16px);
+                        y: Math.floor(i / root.grid-columns) * 232px;
+                        width: root.grid-card-w;
+                        height: 216px;
+                        border-radius: 12px;
+                        background: Theme.palette.hover;
+                        VerticalLayout {
+                            spacing: 6px;
+                            padding: 8px;
+                            Rectangle { height: 130px; border-radius: 10px; background: Theme.palette.divider-strong; }
+                            Rectangle { width: 70%; height: 13px; border-radius: 4px; background: Theme.palette.divider-strong; }
+                            Rectangle { width: 45%; height: 10px; border-radius: 4px; background: Theme.palette.divider; }
+                            Rectangle { width: 55%; height: 10px; border-radius: 4px; background: Theme.palette.divider; }
+                        }
+                    }
+                }
+
+                // 加载完成但无数据
+                if (!root.loading && root.loaded && root.toplists.length == 0) : Rectangle {
+                    height: 160px;
+                    Text {
+                        text: Language.toplist-empty;
+                        color: Theme.palette.text-faint;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // 榜单卡片网格（绝对定位换行，行高固定 216 + 16 间距）
+                if (root.toplists.length > 0) : Rectangle {
+                    height: Math.max(0px, Math.ceil(root.toplists.length * 1.0 / root.grid-columns) * 232px - 16px);
+                    for row[i] in root.toplists : ToplistCard {
+                        x: Math.mod(i, root.grid-columns) * (root.grid-card-w + 16px);
+                        y: Math.floor(i / root.grid-columns) * 232px;
+                        width: root.grid-card-w;
+                        height: 216px;
+                        index: i;
+                        data: row;
+                        clicked => { root.open-toplist(row.id); }
+                    }
+                }
+            }
         }
     }
 }

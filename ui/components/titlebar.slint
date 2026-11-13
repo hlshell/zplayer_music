@@ -209,11 +209,11 @@ export component TitleBar inherits Rectangle {
                         // 交叉轴居中：否则 Text/Image 被拉伸到整高，图标变形且偏移
                         cross-axis-alignment: center;
                         Text {
-                            text: root.search-type == 1 ? "专辑"
-                                : root.search-type == 2 ? "歌单"
-                                : root.search-type == 3 ? "MV"
-                                : root.search-type == 4 ? "电台"
-                                : "单曲";
+                            text: root.search-type == 1 ? Language.search-type-album
+                                : root.search-type == 2 ? Language.search-type-playlist
+                                : root.search-type == 3 ? Language.search-type-mv
+                                : root.search-type == 4 ? Language.search-type-radio
+                                : Language.search-type-song;
                             color: Theme.palette.text;
                             font-size: 11.5px;
                             vertical-alignment: center;

@@ -6,6 +6,7 @@
 
 use crate::persist::config::AppConfig;
 use crate::AppWindow;
+use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -20,6 +21,30 @@ pub mod mv;
 pub mod player;
 pub mod search;
 pub mod settings;
+pub mod shortcut;
+pub mod toplist;
+
+thread_local! {
+    /// 页面切换填充钩子（多 handler 共享）。
+    /// Slint 的 `on_page_fill` 是单一回调，重复注册会覆盖前一个；
+    /// 这里内部只绑定一次，向所有订阅者分发。
+    static PAGE_FILL_HOOKS: RefCell<Vec<Box<dyn Fn(i32)>>> = RefCell::new(Vec::new());
+    static PAGE_FILL_BOUND: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+/// 订阅页面切换填充事件（nav 索引），供各 handler 各自响应自己关心的页面。
+pub fn on_page_fill(ctx: &Ctx, hook: impl Fn(i32) + 'static) {
+    PAGE_FILL_HOOKS.with(|h| h.borrow_mut().push(Box::new(hook)));
+    if !PAGE_FILL_BOUND.with(|b| b.replace(true)) {
+        ctx.app.clone_strong().on_page_fill(|nav| {
+            PAGE_FILL_HOOKS.with(|h| {
+                for f in h.borrow().iter() {
+                    f(nav);
+                }
+            });
+        });
+    }
+}
 
 /// Toast 轻提示（显示后 2.2s 自动隐藏；须在 UI 线程调用）。
 /// 只持有 Weak（Send），可用 Arc 在 tokio 异步任务中共享；

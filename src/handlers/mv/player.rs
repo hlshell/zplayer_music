@@ -10,11 +10,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use crate::core::mv_player::MvPlayer;
 use crate::core::mv_frame::MvFrame;
-use crate::core::mv_frame_convert::mv_frame_to_image;
+use crate::core::mv_frame_convert::mv_frame_to_pixel_buffer;
 use crate::core::mv_state::MvPlaybackState;
 use crate::core::mv_event::MvPlaybackEvent;
 use crate::AppWindow;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Image};
 use tokio::sync::watch;
 
 /// 全局 MV 播放器实例。
@@ -389,12 +389,16 @@ fn spawn_frame_feeder(
             in_flight.store(true, Ordering::Relaxed);
             let ui = ui_weak.clone();
             let flag = in_flight.clone();
+            // 像素拷贝（1080p 约 8.3MB/帧）在 worker 线程完成；slint::Image 非 Send
+            // 不能跨线程，故只把 Send 的 SharedPixelBuffer 带进 UI 线程零拷贝包装，
+            // UI 线程不再承担每帧大内存 memcpy。
+            let pos_ms = (arc_frame.ts_us / 1000) as i32;
+            let px_buf = mv_frame_to_pixel_buffer(&arc_frame);
             let _ = slint::invoke_from_event_loop(move || {
                 if MV_FRAME_GEN.load(Ordering::Relaxed) == gen_id {
                     if let Some(u) = ui.upgrade() {
-                        u.set_mv_position((arc_frame.ts_us / 1000) as i32);
-                        let img = mv_frame_to_image(&arc_frame);
-                        u.set_mv_video_frame(img);
+                        u.set_mv_position(pos_ms);
+                        u.set_mv_video_frame(Image::from_rgba8(px_buf));
                     }
                 }
                 flag.store(false, Ordering::Relaxed);

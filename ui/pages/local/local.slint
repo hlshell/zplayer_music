@@ -4,11 +4,11 @@
 //  歌曲行：点击播放；视频行：点击用 MV 播放器播放（支持拖拽文件到播放器）
 // ============================================================================
 import { Song } from "../../components/models.slint";
-import { SongList } from "../../components/songlist.slint";
+import { VSongList } from "../../components/songlist.slint";
 import { PlaceholderPage } from "../placeholder/placeholder.slint";
 import { Theme } from "../../theme.slint";
 import { Language } from "../../language.slint";
-import { ScrollView, LineEdit } from "std-widgets.slint";
+import { ListView, LineEdit } from "std-widgets.slint";
 
 component StatCard inherits Rectangle {
     in property <string> value;
@@ -113,10 +113,19 @@ export component LocalPage inherits Rectangle {
     in-out property <string> search-text: "";
     in property <int> current-id: 0;
     in property <bool> is-web: false;
+    // 媒体库信息（Rust 侧扫描结果；songs/videos 已按搜索过滤，统计卡用全量值）
+    in property <string> scan-dir: "";
+    in property <bool> scanning: false;
+    in property <int> song-count: 0;
+    in property <int> video-count: 0;
+    in property <int> album-count: 0;
+    in property <string> total-duration: "00:00";
     callback play-song(int);
     callback play-video(int);
     callback search-changed(string);
     callback tab-changed(int);
+    callback pick-dir();
+    callback rescan();
 
     VerticalLayout {
         width: 100%; height: 100%;
@@ -134,6 +143,75 @@ export component LocalPage inherits Rectangle {
             color: Theme.palette.text;
             font-size: 20px; font-weight: 700;
             vertical-alignment: center;
+        }
+    }
+
+    // ---- 媒体目录栏：当前扫描路径 + 选择目录 / 重新扫描（web 端不可用）----
+    if (!root.is-web) : Rectangle {
+        height: 36px;
+        border-radius: 10px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        HorizontalLayout {
+            spacing: 8px;
+            padding-left: 12px; padding-right: 6px;
+            cross-axis-alignment: center;
+            Image {
+                source: @image-url("../../assets/icons/folder.svg");
+                width: 15px; height: 15px;
+                colorize: Theme.palette.icon-faint;
+            }
+            Text {
+                text: root.scan-dir == "" ? Language.local-dir-empty : root.scan-dir;
+                color: Theme.palette.text-secondary;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if (root.scanning) : Text {
+                text: Language.local-scanning;
+                color: Theme.palette.primary;
+                font-size: 11.5px;
+                vertical-alignment: center;
+            }
+            // 选择目录
+            Rectangle {
+                height: 26px; border-radius: 13px;
+                background: pick-ta.has-hover ? Theme.palette.hover : transparent;
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px;
+                    alignment: center;
+                    Text {
+                        text: Language.local-dir-pick;
+                        color: pick-ta.has-hover ? Theme.palette.primary : Theme.palette.text-faint;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                pick-ta := TouchArea { clicked => { root.pick-dir(); } mouse-cursor: pointer; }
+            }
+            // 重新扫描（扫描中禁用）
+            Rectangle {
+                height: 26px; border-radius: 13px;
+                background: !root.scanning && rescan-ta.has-hover ? Theme.palette.hover : transparent;
+                opacity: root.scanning ? 0.45 : 1.0;
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px;
+                    alignment: center;
+                    Text {
+                        text: Language.local-dir-rescan;
+                        color: !root.scanning && rescan-ta.has-hover ? Theme.palette.primary : Theme.palette.text-faint;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                rescan-ta := TouchArea {
+                    enabled: !root.scanning;
+                    clicked => { root.rescan(); }
+                    mouse-cursor: pointer;
+                }
+            }
         }
     }
 
@@ -164,12 +242,12 @@ export component LocalPage inherits Rectangle {
         // Rust 侧通过 local-search-changed 监听。
     }
 
-    // ---- 统计卡片 ----
+    // ---- 统计卡片（全量扫描结果）----
     HorizontalLayout { spacing: 16px;
-        StatCard { value: root.songs.length; label: Language.local-stat-song; tint: #6c5ce7; horizontal-stretch: 1; }
-        StatCard { value: root.videos.length; label: Language.local-stat-video; tint: #0ea5e9; horizontal-stretch: 1; }
-        StatCard { value: "—"; label: Language.local-stat-album; tint: #ec4899; horizontal-stretch: 1; }
-        StatCard { value: "00:00"; label: Language.local-stat-total; tint: #f59e0b; horizontal-stretch: 1; }
+        StatCard { value: root.song-count; label: Language.local-stat-song; tint: #6c5ce7; horizontal-stretch: 1; }
+        StatCard { value: root.video-count; label: Language.local-stat-video; tint: #0ea5e9; horizontal-stretch: 1; }
+        StatCard { value: root.album-count; label: Language.local-stat-album; tint: #ec4899; horizontal-stretch: 1; }
+        StatCard { value: root.total-duration; label: Language.local-stat-total; tint: #f59e0b; horizontal-stretch: 1; }
     }
 
     // ---- 分类 Tab ----
@@ -179,45 +257,40 @@ export component LocalPage inherits Rectangle {
         changed(idx) => { root.tab-changed(idx); }
     }
 
-    // ---- 滚动内容区 ----
+    // ---- 滚动内容区（虚拟化列表：ListView 仅实例化可见行，万行曲库内存恒定）----
     Rectangle {
         vertical-stretch: 1;
         clip: true;
-        sv := ScrollView {
+
+        // 歌曲 tab
+        if (root.tab == 0 && root.songs.length > 0) : VSongList {
+            width: 100%; height: 100%;
+            songs: root.songs;
+            current-id: root.current-id;
+            song-clicked(id) => { root.play-song(id); }
+        }
+        if (root.tab == 0 && root.songs.length == 0) : PlaceholderPage {
+            width: 100%; height: 100%;
+            icon: "💿";
+            title: root.is-web ? Language.local-empty-title-web : Language.local-empty-title;
+            desc: root.is-web ? Language.local-empty-desc-web : Language.local-empty-desc;
+        }
+
+        // 视频 tab
+        if (root.tab == 1 && root.videos.length > 0) : ListView {
             width: 100%; height: 100%;
             vertical-scrollbar-policy: always-off;
-            horizontal-scrollbar-policy: always-off;
-            VerticalLayout {
-                spacing: 0;
-                padding-bottom: 20px;
-
-                // 歌曲 tab
-                if (root.tab == 0 && root.songs.length > 0) : SongList {
-                    songs: root.songs;
-                    current-id: root.current-id;
-                    song-clicked(id) => { root.play-song(id); }
-                }
-                if (root.tab == 0 && root.songs.length == 0) : PlaceholderPage {
-                    icon: "💿";
-                    title: root.is-web ? Language.local-empty-title-web : Language.local-empty-title;
-                    desc: root.is-web ? Language.local-empty-desc-web : Language.local-empty-desc;
-                }
-
-                // 视频 tab
-                if (root.tab == 1 && root.videos.length > 0) : VerticalLayout {
-                    height: root.videos.length * 58px;
-                    spacing: 0;
-                    for v in root.videos : LocalVideoRow {
-                        video: v;
-                        play(id) => { root.play-video(id); }
-                    }
-                }
-                if (root.tab == 1 && root.videos.length == 0) : PlaceholderPage {
-                    icon: "🎬";
-                    title: Language.local-empty-video-title;
-                    desc: Language.local-empty-video-desc;
-                }
+            for v in root.videos : LocalVideoRow {
+                height: 58px;
+                video: v;
+                play(id) => { root.play-video(id); }
             }
+        }
+        if (root.tab == 1 && root.videos.length == 0) : PlaceholderPage {
+            width: 100%; height: 100%;
+            icon: "🎬";
+            title: Language.local-empty-video-title;
+            desc: Language.local-empty-video-desc;
         }
     }
     }

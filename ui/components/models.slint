@@ -71,6 +71,20 @@ export struct MvItem {
     to: color,
 }
 
+// 排行榜（官方榜单：封面 + 更新频率 + 前三首预览；Rust 侧由 toplist handler 填充）
+export struct Toplist {
+    id: int,
+    name: string,
+    cover: image,        // 榜单封面（空 image 时 UI 回退 from/to 渐变）
+    update-freq: string, // 更新频率（如「每天更新」）
+    meta: string,        // 「100首 · 1234.5万播放」
+    top1: string,        // 前三首预览（空串表示该名次无数据）
+    top2: string,
+    top3: string,
+    from: color,
+    to: color,
+}
+
 // MV 播放队列条目（MV 播放器右侧抽屉数据源；Rust 侧由 MvQueue 同步）
 export struct MvQueueEntry {
     id: int,

@@ -218,6 +218,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // 由启动后的后台统计线程 + 设置页 cache-refresh 回调填充
     ui.set_cover_dir(cover_dir.into());
     ui.set_song_dir(song_dir.into());
+    // 本地资源默认扫描目录：二进制所在目录下的 media（切到本地页时才真正扫描）
+    ui.set_local_scan_dir(crate::persist::config::local_dir(&cfg).display().to_string().into());
 
     // ---- 设置页多 Tab 状态初始填充（从 config.toml 恢复，见 src/config.rs）----
     ui.set_auto_launch(cfg.app.auto_launch);
@@ -422,6 +424,7 @@ fn main() -> Result<(), slint::PlatformError> {
     );
     let resolver = handlers::player::make_resolver(&ctx);
     handlers::settings::setup(&ctx);
+    handlers::shortcut::setup(&ctx);
     handlers::cache::setup(&ctx);
     handlers::search::setup(&ctx);
     handlers::player::setup(&ctx, &resolver);
@@ -432,6 +435,7 @@ fn main() -> Result<(), slint::PlatformError> {
     handlers::browse::setup(&ctx);
     handlers::fav::setup(&ctx);
     handlers::local::setup(&ctx);
+    handlers::toplist::setup(&ctx);
     handlers::mv::setup(&ctx);
     boot_mark!("handlers-setup");
 
@@ -589,6 +593,68 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 });
             }
+        }
+    }
+
+    // ---- 测量模式：本地页大数据集 + MV 软解链路回归（P0 修复验证）----
+    // 用法：zplayer-music.exe --measure-local [video_path]
+    // 日志标记 [measure] 供外部采样脚本对齐时序：
+    //   t≈8s  ENTER_LOCAL   → 切本地页（nav=9），触发首次全盘扫描 + 列表填充
+    //   t≈38s LEAVE_LOCAL   → 切回首页（10k 扫描 ≈5.2s，30s 裕量充足）
+    //   t≈41s REENTER_LOCAL → 再切本地页，SCANNED_DIR 缓存命中不重扫，仅列表填充
+    //   t≈46s MV_START      →（给了 video_path 才执行）MV 播放器播本地视频 12s
+    //   t≈46/58s DONE       → 退出事件循环
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(pos) = args.iter().position(|a| a == "--measure-local") {
+            let video = args.get(pos + 1).cloned();
+            let ui_weak = ui.as_weak();
+            let client_m = ctx.client.clone();
+            let handle = rt.handle().clone();
+            let handle_in = handle.clone();
+            let _measure_task = handle.spawn(async move {
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let ui_w = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(u) = ui_w.upgrade() {
+                        log::info!("[measure] ENTER_LOCAL");
+                        u.set_current_nav(9);
+                    }
+                });
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let ui_w = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(u) = ui_w.upgrade() {
+                        log::info!("[measure] LEAVE_LOCAL");
+                        u.set_current_nav(0);
+                    }
+                });
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let ui_w = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(u) = ui_w.upgrade() {
+                        log::info!("[measure] REENTER_LOCAL");
+                        u.set_current_nav(9);
+                    }
+                });
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                if let Some(path) = video {
+                    let ui_w = ui_weak.clone();
+                    let client_v = client_m.clone();
+                    let rt_v = handle_in.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        log::info!("[measure] MV_START");
+                        crate::handlers::mv::player::open_local_video(
+                            &ui_w, &client_v, &rt_v, path, "measure".to_string(),
+                        );
+                    });
+                    tokio::time::sleep(Duration::from_secs(12)).await;
+                }
+                let _ = slint::invoke_from_event_loop(move || {
+                    log::info!("[measure] DONE");
+                    let _ = slint::quit_event_loop();
+                });
+            });
         }
     }
 

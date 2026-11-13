@@ -42,16 +42,16 @@
 | 文件 | 平台 | 说明 |
 | --- | --- | --- |
 | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用，FFmpeg 与 C 运行库均已静态内嵌，单个 exe 即可运行（无任何 DLL 依赖） |
-| `zplayer-music-linux-x64.tar.gz` | Linux x64 | 已内置 FFmpeg 动态库（`lib/`，rpath 自动定位） |
-| `zplayer-music-macos-arm64.tar.gz` | macOS (Apple Silicon) | 已内置 FFmpeg 动态库并重写 rpath |
+| `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即得**单个可执行文件**，FFmpeg 已静态内嵌，无需额外安装 |
+| `zplayer-music-macos-arm64.tar.gz` | macOS (Apple Silicon) | 解压即得**单个可执行文件**，FFmpeg 已静态内嵌，支持 VideoToolbox 硬解 |
 | `zplayer-music-macos-x64.tar.gz` | macOS (Intel) | 同上 |
 | `zplayer-music-web.zip` | 任意静态托管 | 解压后用任意 HTTP 服务器托管 `index.html` 即可 |
 
 ### 各平台运行要求
 
 - **Windows**：Windows 10 1809+（任务栏 Toast 通知依赖 WinRT）。无需安装额外依赖。
-- **Linux**：需要可用的桌面环境（X11 或 Wayland）与 ALSA 音频。发行版已内嵌 FFmpeg 相关动态库；若 MV 无法播放，可执行 `sudo apt install ffmpeg`（Debian/Ubuntu）兜底。
-- **macOS**：macOS 12+。首次运行如提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许。
+- **Linux**：需要可用的桌面环境（X11 或 Wayland）与 ALSA 音频，系统需提供 fontconfig 等桌面基础库（主流发行版默认自带）。二进制基于 Ubuntu 22.04 构建，要求 **glibc ≥ 2.35**（Debian 12 / Ubuntu 22.04 及更新版本均可）；FFmpeg 已静态内嵌，无需安装 `ffmpeg`。
+- **macOS**：macOS 12+。首次运行如提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许，或执行 `xattr -d com.apple.quarantine ./zplayer-music`。
 - **Web**：Chrome / Edge / Firefox / Safari 最新版。
 
 ## 功能特性
@@ -157,8 +157,8 @@ python -m http.server -d www 8080
 推送形如 `v*` 的 tag 即可触发 GitHub Actions 自动构建全部平台并创建 Release：
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 流水线产出：Windows x64 / Linux x64 / macOS arm64 / macOS x64 桌面发行版 + Web 静态包。也可在 Actions 页面手动触发（输入版本号）。
@@ -190,9 +190,17 @@ git push origin v0.2.1
 │   ├── appwindow-web.slint # Web 端入口（嵌字体）
 │   ├── components/         # 标题栏/播放栏/进度条/启动页/数据模型
 │   ├── pages/              # 首页/搜索/歌单/专辑/榜单/MV/电台/我喜欢/最近/本地/设置
-│   └── assets/             # 图标、语言包
+│   └── assets/             # 图标、语言包、捐赠二维码
 └── web/index.html          # Web 部署入口页
 ```
+
+## 捐赠支持
+
+ZPlayer Music 完全免费且开源：没有广告、没有会员，所有功能都不收费。如果它帮到了你，欢迎扫码请开发者喝杯咖啡：
+
+<img src="ui/assets/donate/donate-qr.png" width="180" alt="捐赠二维码">
+
+> **捐赠仅用于支持开发**（功能开发、测试与界面设计优化）。本项目不依赖服务器运行，播放与数据都在本地完成，因此捐赠**不用于服务器、带宽或任何运营支出**。捐赠完全自愿，不会解锁任何功能，也不影响正常使用。
 
 ## 技术栈
 
@@ -201,7 +209,7 @@ git push origin v0.2.1
 | UI | Slint 1.18（fluent 样式，桌面原生渲染 / Web femtovg） |
 | 语言 | Rust（edition 2024） |
 | 音频 | rodio + cpal（桌面）；WebAudio（Web） |
-| MV 解码 | FFmpeg（ffmpeg-next 9，Windows 静态链接 / Linux·macOS 内置动态库） |
+| MV 解码 | FFmpeg（ffmpeg-next 9，三平台发行版均静态链接进单个可执行文件） |
 | 网络 | reqwest（rustls，桌面）/ web-sys fetch（Web） |
 | 数据源 | 网易云 weapi（aes-cbc 加密）+ 咪咕/酷我/酷狗/QQ/Joox/SoundCloud 兜底 |
 

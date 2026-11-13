@@ -25,7 +25,7 @@ export { Language } from "language.slint";
 export { MarqueeState } from "components/marquee.slint";
 // 托盘右键自绘菜单（独立置顶透明窗口）：Rust 侧 crate::TrayMenu 实例化，需在编译根显式导出
 export { TrayMenu } from "components/tray-menu.slint";
-import { HotSong, Playlist, Artist, Album, NewSong, HeroSong, Song, SuggestItem, Radio, MvItem, LikedRes, MvQueueEntry, HotItem } from "components/models.slint";
+import { HotSong, Playlist, Artist, Album, NewSong, HeroSong, Song, SuggestItem, Radio, MvItem, LikedRes, MvQueueEntry, HotItem, Toplist } from "components/models.slint";
 
 // ---- 页面模块 ----
 import { HomePage } from "pages/home/home.slint";
@@ -173,7 +173,16 @@ export component AppWindow inherits Window {
     callback settings-clicked(int);
     callback settings-clear-cache(int);
     callback settings-check-update();
-    callback settings-donate-clicked();
+
+    // 应用内快捷键（窗口聚焦时生效）：
+    // 组合键列表由 Rust 按 handlers/shortcut.rs 的 SHORTCUT_IDS 顺序填充；
+    // shortcut-key 上报原始按键，规范化/匹配/动作分发全在 Rust 侧完成。
+    in-out property <[string]> shortcut-combos: [];
+    // 正在捕获快捷键的行索引（-1 = 无），设置页弹窗与 Rust 共用
+    in-out property <int> shortcut-capturing: -1;
+    callback shortcut-key(string, bool, bool, bool);
+    callback shortcut-capture(int, string, bool, bool, bool);
+    callback shortcut-reset();
 
     // 深浅主题：整体维度（双向绑定全局 Theme.dark）
     in-out property <bool> dark <=> Theme.dark;
@@ -184,7 +193,7 @@ export component AppWindow inherits Window {
     in-out property <float> volume: 0.8;
     in-out property <bool> muted: false;
     in-out property <bool> liked: false;
-    property <float> pre-volume: 0.8;   // 静音前音量，取消静音时恢复
+    in-out property <float> pre-volume: 0.8;   // 静音前音量，取消静音时恢复（快捷键静音需读写）
     in-out property <bool> lyrics-open: false;
     in-out property <bool> lyrics-style: true;   // true=上封面/下歌词, false=左封面/右歌词
     in-out property <bool> playlist-open: false;
@@ -209,6 +218,9 @@ export component AppWindow inherits Window {
         if root.detail-visible { root.detail-back(); }
         root.nav-anim();
         root.page-fill(current-nav);
+        // 切页后把键盘焦点还给快捷键作用域（点导航是 TouchArea，本身不抢焦点，
+        // 但若之前焦点在搜索框等输入控件上，这里兜底恢复快捷键）
+        root.refocus-shortcuts();
     }
     // 音量弹窗：悬停音量按钮（PlayBar.vol-hover）或悬停弹窗自身时保持弹出
     property <bool> vol-open: pb.vol-hover || vol-pop-ta.has-hover;
@@ -292,6 +304,13 @@ export component AppWindow inherits Window {
     in-out property <[Song]> local-video-list: [];
     in-out property <int> local-tab: 0;
     in-out property <string> local-search-text: "";
+    // 本地媒体库：当前扫描目录 / 扫描中 / 全量统计
+    in-out property <string> local-scan-dir: "";
+    in-out property <bool> local-scanning: false;
+    in-out property <int> local-song-count: 0;
+    in-out property <int> local-video-count: 0;
+    in-out property <int> local-album-count: 0;
+    in-out property <string> local-total-duration: "00:00";
     // 内容区加载中状态：Rust 侧数据请求期间置 true，填充完成后置 false
     in-out property <bool> loading: false;
     // 页面切换动画（方案A）：内容区整体淡入淡出 + 轻微位移，Rust 检测 current-nav 变化触发
@@ -338,6 +357,10 @@ export component AppWindow inherits Window {
     in-out property <int> mv-cat: 0;                 // 全部MV=0 / 精选MV=1
     in-out property <[string]> mv-categories: [];    // MV 分类名
     in-out property <[MvItem]> mvs;                  // MV 列表（mv/all、mv/exclusive/rcmd）
+    // 排行榜页（官方榜单，首次切入 nav=6 时由 Rust 拉取并填充）
+    in-out property <[Toplist]> toplists: [];
+    in-out property <bool> toplists-loading: false;
+    in-out property <bool> toplists-loaded: false;
     in-out property <bool> mvs-need-more: false;
     in-out property <bool> mvs-loading-more: false;
     in-out property <bool> mvs-no-more: false;
@@ -559,8 +582,11 @@ export component AppWindow inherits Window {
                                 }
                                 if (root.current-nav == 6) : ToplistPage {
                                     is-web: root.is-web;
-                                    open-toplist(id) => { }
-                                    navigate(idx) => { root.current-nav = idx; }
+                                    page-w: root.width - 208px;
+                                    toplists: root.toplists;
+                                    loading: root.toplists-loading;
+                                    loaded: root.toplists-loaded;
+                                    open-toplist(id) => { root.open-resource-detail(0, id); }
                                 }
                                 if (root.current-nav == 4) : MvPage {
                                     is-web: root.is-web;
@@ -618,10 +644,18 @@ export component AppWindow inherits Window {
                                     tab <=> root.local-tab;
                                     search-text <=> root.local-search-text;
                                     current-id: root.current-song.id;
+                                    scan-dir: root.local-scan-dir;
+                                    scanning: root.local-scanning;
+                                    song-count: root.local-song-count;
+                                    video-count: root.local-video-count;
+                                    album-count: root.local-album-count;
+                                    total-duration: root.local-total-duration;
                                     play-song(id) => { root.play-song(id); }
                                     play-video(id) => { root.local-play-video(id); }
                                     search-changed(t) => { root.local-search-changed(t); }
                                     tab-changed(idx) => { root.local-tab-changed(idx); }
+                                    pick-dir() => { root.local-pick-dir(); }
+                                    rescan() => { root.local-rescan(); }
                                 }
                             }
                         }
@@ -689,8 +723,14 @@ export component AppWindow inherits Window {
                     cache-refresh() => { root.cache-refresh(); }
                     clear-cache(k) => { root.settings-clear-cache(k); }
                     check-update() => { root.settings-check-update(); }
-                    donate-clicked() => { root.settings-donate-clicked(); }
                     navigate(idx) => { root.current-nav = idx; }
+                    shortcut-combos <=> root.shortcut-combos;
+                    shortcut-capturing <=> root.shortcut-capturing;
+                    shortcut-capture(idx, text, ctrl, alt, shift) => {
+                        root.shortcut-capture(idx, text, ctrl, alt, shift);
+                    }
+                    shortcut-reset() => { root.shortcut-reset(); }
+                    refocus() => { root.refocus-shortcuts(); }
                 }
                 // 详情覆盖层（方案A：不占导航位；detail-visible 控制，来源侧边栏自然高亮）
                 // 始终在树（visible 切换而非 if 销毁重建 → 淡入淡出动画流畅不卡顿）
@@ -949,7 +989,7 @@ export component AppWindow inherits Window {
         VerticalLayout {
             padding: 5px;
             spacing: 0;
-            for name[idx] in ["单曲", "专辑", "歌单", "MV", "电台"] : Rectangle {
+            for name[idx] in [Language.search-type-song, Language.search-type-album, Language.search-type-playlist, Language.search-type-mv, Language.search-type-radio] : Rectangle {
                 height: 30px;
                 border-radius: 6px;
                 background: idx == root.search-type
@@ -1055,6 +1095,8 @@ export component AppWindow inherits Window {
             mv-focus-timer.running = true;
         } else {
             mvp.clear-keys();
+            // MV 覆盖层卸载后焦点会悬空，交还给应用级快捷键作用域
+            root.refocus-shortcuts();
         }
     }
 
@@ -1117,6 +1159,12 @@ export component AppWindow inherits Window {
         restart => { root.update-restart(); }
     }
 
+    // 关闭类弹层收起后把焦点还给快捷键作用域（弹窗内 FocusScope 卸载会让焦点悬空）
+    changed close-dialog-open => { if (!root.close-dialog-open) { root.refocus-shortcuts(); } }
+    changed update-dialog-open => { if (!root.update-dialog-open) { root.refocus-shortcuts(); } }
+    // 启动画面收起后同样兜底持焦（首帧前的 focus 可能落空）
+    changed splash-visible => { if (!root.splash-visible) { root.refocus-shortcuts(); } }
+
     // 与 Rust 交互的全局回调
     callback drag-start(length, length);
     callback titlebar-clicked();
@@ -1170,10 +1218,12 @@ export component AppWindow inherits Window {
     callback recent-remove(int);
     callback recent-clear();
     callback recent-tab-changed(int);
-    // 本地资源页：播放本地视频 / 搜索 / 分类切换
+    // 本地资源页：播放本地视频 / 搜索 / 分类切换 / 选择扫描目录 / 重新扫描
     callback local-play-video(int);
     callback local-search-changed(string);
     callback local-tab-changed(int);
+    callback local-pick-dir();
+    callback local-rescan();
     // 详情返回：Rust 侧执行淡出后置 detail-visible=false（避免直接卸载造成生硬/卡顿）
     callback detail-back();
     // ===== MV 全屏播放器 callback（由 handlers::mv::setup 注册）=====
@@ -1193,4 +1243,24 @@ export component AppWindow inherits Window {
     callback mv_search_suggest(string);  // 获取搜索建议
     callback mv_search_more();           // 搜索结果加载更多
     callback mv_search_result_click(int); // 点击搜索结果（id）
+
+    // ===== 应用内快捷键：常驻焦点作用域 =====
+    // 窗口内容无其他焦点控件（LineEdit 等）时由它持有键盘焦点；
+    // 文本框获得焦点后自动让位（此时按键用于输入，不触发快捷键）。
+    // 这里只上报原始按键，组合键规范化 / 匹配 / 动作分发在 Rust（handlers/shortcut.rs）。
+    sc := FocusScope {
+        x: 0; y: 0; width: 0; height: 0;
+        key-pressed(ev) => {
+            root.shortcut-key(ev.text, ev.modifiers.control, ev.modifiers.alt, ev.modifiers.shift);
+            return reject;
+        }
+    }
+    // 启动 / 切页 / 弹窗关闭后重新持焦：立即 focus() 在首帧前可能落空，延后一帧
+    shortcut-refocus-timer := Timer {
+        interval: 60ms;
+        running: false;
+        triggered => { self.running = false; sc.focus(); }
+    }
+    public function refocus-shortcuts() { shortcut-refocus-timer.running = true; }
+    init => { shortcut-refocus-timer.running = true; }
 }

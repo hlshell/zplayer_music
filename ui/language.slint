@@ -112,8 +112,26 @@ export global Language {
     in-out property <string> close-remember: "记住我的选择";
     in-out property <string> close-exit-app: "退出应用";
     in-out property <string> app-shortcut: "快捷键配置";
-    in-out property <string> app-shortcut-desc: "自定义全局快捷键";
+    in-out property <string> app-shortcut-desc: "自定义应用内快捷键（窗口聚焦时生效）";
     in-out property <string> app-shortcut-custom: "自定义";
+    // ---- 快捷键配置弹窗 ----
+    in-out property <string> shortcut-title: "快捷键配置";
+    in-out property <string> shortcut-hint: "点击组合键后按下新按键即可修改";
+    in-out property <string> shortcut-press: "按下组合键…";
+    in-out property <string> shortcut-reset: "恢复默认";
+    in-out property <string> shortcut-conflict-toast: "该组合键已被其他操作占用";
+    in-out property <string> shortcut-updated-toast: "快捷键已更新";
+    in-out property <string> sc-play-pause: "播放 / 暂停";
+    in-out property <string> sc-prev: "上一首";
+    in-out property <string> sc-next: "下一首";
+    in-out property <string> sc-seek-back: "快退 5 秒";
+    in-out property <string> sc-seek-forward: "快进 5 秒";
+    in-out property <string> sc-volume-up: "音量 +";
+    in-out property <string> sc-volume-down: "音量 -";
+    in-out property <string> sc-mute: "静音 / 取消静音";
+    in-out property <string> sc-home: "返回首页";
+    in-out property <string> sc-settings: "打开设置";
+    in-out property <string> sc-hide: "隐藏窗口";
 
     // ---- 网络设置 ----
     in-out property <string> net-threads: "下载线程数";
@@ -176,9 +194,11 @@ export global Language {
     in-out property <string> update-retry: "重试";
 
     // ---- 捐赠 ----
-    in-out property <string> donate-intro: "ZPlayer Music 是免费、开源的音乐播放器。\n如果你喜欢它，可以捐赠以支持持续开发：";
-    in-out property <string> donate-purpose: "你的支持将用于：服务器维护、版权合规、功能开发与设计优化。";
-    in-out property <string> donate-button: "支持我们";
+    in-out property <string> donate-intro: "ZPlayer Music 免费、开源，无广告、无会员，全部功能免费。\n如果它帮到了你，可以扫码请开发者喝杯咖啡：";
+    in-out property <string> donate-qr-hint: "使用手机扫描下方二维码";
+    in-out property <string> donate-purpose-title: "捐赠用途";
+    in-out property <string> donate-purpose: "捐赠仅用于支持开发者投入的时间与精力：功能开发、测试与界面设计优化。\n本项目不依赖服务器运行，播放与数据都在你的设备本地完成，因此捐赠不用于服务器、带宽或任何运营支出。";
+    in-out property <string> donate-note: "捐赠完全自愿，不解锁任何功能，也不影响使用。";
 
     // ---- 音源查看弹窗 ----
     in-out property <string> sources-title: "可用音源";
@@ -241,6 +261,25 @@ export global Language {
     in-out property <string> search-result-suffix: " 首）";
     in-out property <string> search-empty-title: "搜索音乐";
     in-out property <string> search-empty-desc: "在顶部搜索框输入关键词，搜索网易云曲库";
+    // 搜索类型名（顶部类型选择器 / 类型菜单 / 结果页 Tab 共用）
+    in-out property <string> search-type-song: "单曲";
+    in-out property <string> search-type-album: "专辑";
+    in-out property <string> search-type-playlist: "歌单";
+    in-out property <string> search-type-mv: "MV";
+    in-out property <string> search-type-radio: "电台";
+    in-out property <string> search-searching: "搜索中…";
+    in-out property <string> search-none-prefix: "没有找到相关";
+    in-out property <string> search-none-desc: "换个关键词或切换类型试试";
+    in-out property <string> search-results-suffix: "搜索结果";
+    in-out property <string> search-unit-song: " 首";
+    in-out property <string> search-unit-album: " 张";
+    in-out property <string> search-unit-other: " 个";
+
+    // ---- MV 播放器 ----
+    in-out property <string> mv-buffering: "正在缓冲…";
+    in-out property <string> mv-loading: "正在加载…";
+    in-out property <string> mv-search-placeholder: "搜索 MV...";
+    in-out property <string> mv-search-results: "搜索结果";
 
     // ---- 网格页（专辑/歌单/MV/电台）----
     in-out property <string> page-all-albums: "全部专辑";
@@ -264,12 +303,16 @@ export global Language {
     in-out property <string> local-empty-title-web: "Web 端暂不支持本地资源";
     in-out property <string> local-empty-desc-web: "网页版无法读取本地文件，请在桌面端使用";
     in-out property <string> local-empty-title: "本地资源为空";
-    in-out property <string> local-empty-desc: "将本地音频/视频文件放入 MusicPlayer 目录后自动扫描";
+    in-out property <string> local-empty-desc: "将音视频文件放入媒体目录后自动扫描，也可自选其他目录";
     in-out property <string> local-empty-video-title: "暂无本地视频";
-    in-out property <string> local-empty-video-desc: "将视频文件放入 MusicPlayer 目录后自动扫描";
+    in-out property <string> local-empty-video-desc: "将视频文件放入媒体目录后自动扫描，也可自选其他目录";
     in-out property <string> local-search-placeholder: "搜索本地歌曲或视频...";
     in-out property <string> local-tab-song: "歌曲";
     in-out property <string> local-tab-video: "视频";
+    in-out property <string> local-dir-empty: "未选择目录";
+    in-out property <string> local-dir-pick: "选择目录";
+    in-out property <string> local-dir-rescan: "重新扫描";
+    in-out property <string> local-scanning: "扫描中…";
 
     // ---- 我的最爱 ----
     in-out property <string> liked-count-songs: " 首歌曲";
@@ -308,6 +351,7 @@ export global Language {
     in-out property <string> toplist-name-4: "原创榜";
     in-out property <string> toplist-name-5: "云音乐特色榜";
     in-out property <string> toplist-name-6: "欧美金曲榜";
+    in-out property <string> toplist-empty: "暂无榜单数据";
 
     // ---- 占位页 ----
     in-out property <string> placeholder-title: "页面占位";

@@ -6,6 +6,7 @@
 import { Song } from "models.slint";
 import { Theme } from "../theme.slint";
 import { Language } from "../language.slint";
+import { ListView } from "std-widgets.slint";
 
 // ---- 歌曲行 ----
 export component SongRow inherits Rectangle {
@@ -88,6 +89,48 @@ export component SongRow inherits Rectangle {
     row-ta := TouchArea {
         clicked => { root.clicked(); }
         mouse-cursor: pointer;
+    }
+}
+
+// ---- 虚拟化歌曲列表（ListView 按需实例化：仅可见行进元素树，万行曲库内存恒定）----
+// 表头固定不随滚动；行距与 SongList 一致（54px 间距 = 52px 行 + 2px 间隔）。
+// 与 SongList 的差异：自带滚动（外层不要再包 ScrollView）。
+export component VSongList inherits Rectangle {
+    in property <[Song]> songs;
+    in property <int> current-id: 0;
+    callback song-clicked(int);
+
+    // 表头
+    HorizontalLayout {
+        y: 0; width: 100%; height: 30px;
+        padding-left: 14px; padding-right: 14px;
+        spacing: 12px;
+        cross-axis-alignment: center;
+        Rectangle { width: 22px; }
+        Rectangle { width: 40px; }
+        Text { text: Language.songlist-col-title; color: Theme.palette.text-faint; font-size: 11px; }
+        Rectangle { horizontal-stretch: 1; }
+        Text { text: Language.songlist-col-duration; color: Theme.palette.text-faint; font-size: 11px; }
+    }
+
+    ListView {
+        y: 30px;
+        width: 100%;
+        height: parent.height - 30px;
+        vertical-scrollbar-policy: always-off;
+        for s[i] in root.songs : Rectangle {
+            height: 54px;
+            SongRow {
+                y: 0; width: 100%; height: 52px;
+                index: i;
+                name: s.name;
+                artist: s.artist;
+                duration: s.duration;
+                cover: s.cover;
+                current: s.id == root.current-id;
+                clicked => { root.song-clicked(s.id); }
+            }
+        }
     }
 }
 

@@ -39,15 +39,30 @@ pub fn log_dir() -> PathBuf {
     data_dir().join("log")
 }
 
-/// 本地资源扫描目录：优先用户音乐目录，其次 data_dir/local。
+/// 本地资源扫描目录：
+/// - 配置了 `local.dir` 时用自定义目录；
+/// - 否则默认扫描**二进制所在目录下的 media**（便携式布局，解压即用）；
+/// - 安装目录不可写（如 Program Files）时退回 `data_dir/media`，避免功能不可用。
 /// 目录不存在时自动创建，确保"放入文件即扫描"的体验。
-pub fn local_dir() -> PathBuf {
-    let dir = dirs::audio_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| data_dir())
-        .join("ZPlayerMusic");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+pub fn local_dir(cfg: &AppConfig) -> PathBuf {
+    let custom = cfg.local.dir.trim();
+    if !custom.is_empty() {
+        let p = PathBuf::from(custom);
+        let _ = std::fs::create_dir_all(&p);
+        return p;
+    }
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(data_dir);
+    let dir = exe_dir.join("media");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        dir
+    } else {
+        let fallback = data_dir().join("media");
+        let _ = std::fs::create_dir_all(&fallback);
+        fallback
+    }
 }
 
 /// 缓存根目录：优先用户统一设置的 cache.dir，其次默认 data_dir/cache。
@@ -108,6 +123,10 @@ pub struct AppConfig {
     pub lx: LxSection,
     #[serde(rename = "cache")]
     pub cache: CacheSection,
+    #[serde(rename = "local")]
+    pub local: LocalSection,
+    #[serde(rename = "shortcut")]
+    pub shortcut: ShortcutSection,
     #[serde(rename = "last-song")]
     pub last_song: LastSongSection,
 }
@@ -121,8 +140,102 @@ impl Default for AppConfig {
             network: NetworkSection::default(),
             lx: LxSection::default(),
             cache: CacheSection::default(),
+            local: LocalSection::default(),
+            shortcut: ShortcutSection::default(),
             last_song: LastSongSection::default(),
         }
+    }
+}
+
+/// 应用内快捷键（窗口聚焦时生效）。
+/// 组合字符串格式固定为「修饰键 Ctrl/Alt/Shift 顺序 + 键名」，如 "Ctrl+Left"、"Space"、"Ctrl+,"。
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct ShortcutSection {
+    pub play_pause: String,
+    pub prev: String,
+    pub next: String,
+    pub seek_back: String,
+    pub seek_forward: String,
+    pub volume_up: String,
+    pub volume_down: String,
+    pub mute: String,
+    pub home: String,
+    pub settings: String,
+    pub hide: String,
+}
+
+impl Default for ShortcutSection {
+    fn default() -> Self {
+        Self {
+            play_pause: "Space".to_string(),
+            prev: "Ctrl+Left".to_string(),
+            next: "Ctrl+Right".to_string(),
+            seek_back: "Ctrl+Shift+Left".to_string(),
+            seek_forward: "Ctrl+Shift+Right".to_string(),
+            volume_up: "Ctrl+Up".to_string(),
+            volume_down: "Ctrl+Down".to_string(),
+            mute: "Ctrl+M".to_string(),
+            home: "Ctrl+Home".to_string(),
+            settings: "Ctrl+,".to_string(),
+            hide: "Ctrl+H".to_string(),
+        }
+    }
+}
+
+/// 快捷键动作 id（顺序与设置页列表、UI 模型一一对应）
+pub const SHORTCUT_IDS: [&str; 11] = [
+    "play_pause", "prev", "next", "seek_back", "seek_forward",
+    "volume_up", "volume_down", "mute", "home", "settings", "hide",
+];
+
+impl ShortcutSection {
+    pub fn get(&self, id: &str) -> &str {
+        match id {
+            "play_pause" => &self.play_pause,
+            "prev" => &self.prev,
+            "next" => &self.next,
+            "seek_back" => &self.seek_back,
+            "seek_forward" => &self.seek_forward,
+            "volume_up" => &self.volume_up,
+            "volume_down" => &self.volume_down,
+            "mute" => &self.mute,
+            "home" => &self.home,
+            "settings" => &self.settings,
+            "hide" => &self.hide,
+            _ => "",
+        }
+    }
+
+    pub fn set(&mut self, id: &str, combo: &str) {
+        let slot = match id {
+            "play_pause" => &mut self.play_pause,
+            "prev" => &mut self.prev,
+            "next" => &mut self.next,
+            "seek_back" => &mut self.seek_back,
+            "seek_forward" => &mut self.seek_forward,
+            "volume_up" => &mut self.volume_up,
+            "volume_down" => &mut self.volume_down,
+            "mute" => &mut self.mute,
+            "home" => &mut self.home,
+            "settings" => &mut self.settings,
+            "hide" => &mut self.hide,
+            _ => return,
+        };
+        *slot = combo.to_string();
+    }
+
+    /// 按 SHORTCUT_IDS 顺序导出组合键列表（UI 模型）
+    pub fn to_list(&self) -> Vec<String> {
+        SHORTCUT_IDS.iter().map(|id| self.get(id).to_string()).collect()
+    }
+
+    /// 该组合键是否已被其他动作占用（返回占用的动作 id）
+    pub fn conflicting(&self, combo: &str, exclude_id: &str) -> Option<&'static str> {
+        SHORTCUT_IDS
+            .iter()
+            .find(|id| **id != exclude_id && self.get(id).eq_ignore_ascii_case(combo))
+            .copied()
     }
 }
 
@@ -302,6 +415,19 @@ impl Default for CacheSection {
             dir: String::new(),
             evict_strategy: 0,
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct LocalSection {
+    /// 本地资源扫描目录（空 = 二进制所在目录下的 media）
+    pub dir: String,
+}
+
+impl Default for LocalSection {
+    fn default() -> Self {
+        Self { dir: String::new() }
     }
 }
 

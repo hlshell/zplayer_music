@@ -10,8 +10,8 @@
 //  平台资产映射（与 .github/workflows/release.yml 产物一致）：
 //    windows/x86_64 → zplayer-music-windows-x64.zip   （单 exe，FFmpeg 静态内嵌）
 //    linux/x86_64   → zplayer-music-linux-x64.tar.gz  （zplayer-music + lib/）
-//    macos/x86_64   → zplayer-music-macos-x64.tar.gz  （Intel）
-//    macos/aarch64  → zplayer-music-macos-arm64.tar.gz（Apple Silicon M 系列）
+//    macos/x86_64   → zplayer-music-macos-x64.app.tar.gz  （Intel，.app bundle）
+//    macos/aarch64  → zplayer-music-macos-arm64.app.tar.gz（Apple Silicon，.app bundle）
 // ============================================================================
 
 use std::path::{Path, PathBuf};
@@ -43,9 +43,9 @@ fn asset_name() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => Some("zplayer-music-windows-x64.zip"),
         ("linux", "x86_64") => Some("zplayer-music-linux-x64.tar.gz"),
-        ("macos", "x86_64") => Some("zplayer-music-macos-x64.tar.gz"),
+        ("macos", "x86_64") => Some("zplayer-music-macos-x64.app.tar.gz"),
         // Apple Silicon（M 系列）：macOS aarch64 → arm64 资产
-        ("macos", "aarch64") => Some("zplayer-music-macos-arm64.tar.gz"),
+        ("macos", "aarch64") => Some("zplayer-music-macos-arm64.app.tar.gz"),
         _ => None,
     }
 }
@@ -212,11 +212,15 @@ pub fn apply(pkg: &Path) -> Result<(), String> {
         ar.unpack(&stage).map_err(|e| format!("更新包解压失败: {e}"))?;
     }
 
-    // 2) 找到暂存目录中的新主程序（zip/tar 内文件名固定为 zplayer-music[.exe]）
-    let new_exe_name = if cfg!(windows) { "zplayer-music.exe" } else { "zplayer-music" };
-    let new_exe = stage.join(new_exe_name);
+    // 2) 找到暂存目录中的新主程序
+    //    Windows/Linux：包根目录的 zplayer-music[.exe]
+    //    macOS：.app bundle 内的可执行文件（包结构固定为 ZPlayer Music.app/Contents/MacOS/）
+    #[cfg(target_os = "macos")]
+    let new_exe = stage.join("ZPlayer Music.app/Contents/MacOS/zplayer-music");
+    #[cfg(not(target_os = "macos"))]
+    let new_exe = stage.join(if cfg!(windows) { "zplayer-music.exe" } else { "zplayer-music" });
     if !new_exe.is_file() {
-        return Err(format!("更新包内未找到 {new_exe_name}"));
+        return Err(format!("更新包内未找到 {}", new_exe.display()));
     }
 
     // 3) 运行中文件改名 .old（Windows 允许改名运行中的 exe；Unix 允许改名/覆盖
@@ -250,6 +254,28 @@ pub fn apply(pkg: &Path) -> Result<(), String> {
             let mut perm = meta.permissions();
             perm.set_mode(0o755);
             let _ = std::fs::set_permissions(&exe, perm);
+        }
+    }
+
+    // 6) macOS：替换二进制后原 ad-hoc 签名失效，必须重签，否则 Apple Silicon 拒绝启动。
+    //    运行在 .app 内 → 深签整个 bundle；运行在裸二进制（旧版 tar 用户升级）→ 只签 exe
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = exe
+            .ancestors()
+            .nth(3)
+            .filter(|p| p.extension().is_some_and(|e| e == "app"));
+        let sign_target = bundle.unwrap_or(&exe);
+        let mut cmd = std::process::Command::new("codesign");
+        cmd.arg("--force");
+        if bundle.is_some() {
+            cmd.arg("--deep");
+        }
+        cmd.args(["--sign", "-"]).arg(sign_target);
+        match cmd.status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => return Err(format!("codesign 重签失败: {s}")),
+            Err(e) => return Err(format!("codesign 执行失败: {e}")),
         }
     }
 

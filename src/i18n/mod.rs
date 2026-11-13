@@ -245,8 +245,10 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_update_retry(g("update-retry"));
     // 捐赠
     l.set_donate_intro(g("donate-intro"));
+    l.set_donate_qr_hint(g("donate-qr-hint"));
+    l.set_donate_purpose_title(g("donate-purpose-title"));
     l.set_donate_purpose(g("donate-purpose"));
-    l.set_donate_button(g("donate-button"));
+    l.set_donate_note(g("donate-note"));
     // 音源弹窗
     l.set_sources_title(g("sources-title"));
     l.set_sources_connected(g("sources-connected"));
@@ -317,6 +319,7 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_page_no_more(g("page-no-more"));
     // 本地音乐
     l.set_local_stat_song(g("local-stat-song"));
+    l.set_local_stat_video(g("local-stat-video"));
     l.set_local_stat_album(g("local-stat-album"));
     l.set_local_stat_artist(g("local-stat-artist"));
     l.set_local_stat_total(g("local-stat-total"));
@@ -324,6 +327,15 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_local_empty_desc_web(g("local-empty-desc-web"));
     l.set_local_empty_title(g("local-empty-title"));
     l.set_local_empty_desc(g("local-empty-desc"));
+    l.set_local_empty_video_title(g("local-empty-video-title"));
+    l.set_local_empty_video_desc(g("local-empty-video-desc"));
+    l.set_local_search_placeholder(g("local-search-placeholder"));
+    l.set_local_tab_song(g("local-tab-song"));
+    l.set_local_tab_video(g("local-tab-video"));
+    l.set_local_dir_empty(g("local-dir-empty"));
+    l.set_local_dir_pick(g("local-dir-pick"));
+    l.set_local_dir_rescan(g("local-dir-rescan"));
+    l.set_local_scanning(g("local-scanning"));
     // 我的最爱
     l.set_liked_count_songs(g("liked-count-songs"));
     l.set_liked_count_favs(g("liked-count-favs"));
@@ -357,6 +369,7 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_toplist_name_4(g("toplist-name-4"));
     l.set_toplist_name_5(g("toplist-name-5"));
     l.set_toplist_name_6(g("toplist-name-6"));
+    l.set_toplist_empty(g("toplist-empty"));
     // 占位页
     l.set_placeholder_title(g("placeholder-title"));
     l.set_placeholder_desc(g("placeholder-desc"));

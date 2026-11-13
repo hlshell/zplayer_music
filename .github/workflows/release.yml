@@ -238,7 +238,7 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS="-I$(xcrun --show-sdk-path)/usr/include"
           cargo build --release --locked
 
-      - name: 打包（单个可执行文件）
+      - name: 整理二进制（strip + ad-hoc 签名 + 依赖检查）
         shell: bash
         run: |
           set -euo pipefail
@@ -249,12 +249,9 @@ jobs:
           codesign --force --sign - dist/zplayer-music
           echo "=== 动态依赖（应只含 /usr/lib 与系统框架）==="
           otool -L dist/zplayer-music
-          tar -C dist -czf "zplayer-music-macos-${{ matrix.name }}.tar.gz" .
-          ls -lh "zplayer-music-macos-${{ matrix.name }}.tar.gz"
 
-      # 打包 .app bundle：修复裸二进制三问题 ——
-      # (a) Finder/Dock 显示通用 exec 图标、(b) 双击启动附带终端窗口、(c) 状态栏托盘
-      # 需要正常 app 运行环境。裸二进制 tar 保留（在线更新器替换目标）。
+      # macOS 只发布 .app bundle（图标 / 无终端窗口 / 状态栏托盘均正常）；
+      # 在线更新器同样以 .app.tar.gz 为资产（替换 .app/Contents/MacOS 内二进制后重签）
       - name: 打包 .app bundle（ZPlayer Music.app）
         shell: bash
         run: |
@@ -312,9 +309,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos-${{ matrix.name }}
-          path: |
-            zplayer-music-macos-${{ matrix.name }}.tar.gz
-            zplayer-music-macos-${{ matrix.name }}.app.tar.gz
+          path: zplayer-music-macos-${{ matrix.name }}.app.tar.gz
           retention-days: 1
 
   # ==================== Web（wasm32） ====================
@@ -384,8 +379,6 @@ jobs:
           files: |
             artifacts/zplayer-music-windows-x64.zip
             artifacts/zplayer-music-linux-x64.tar.gz
-            artifacts/zplayer-music-macos-arm64.tar.gz
-            artifacts/zplayer-music-macos-x64.tar.gz
             artifacts/zplayer-music-macos-arm64.app.tar.gz
             artifacts/zplayer-music-macos-x64.app.tar.gz
             artifacts/zplayer-music-web.zip
@@ -396,9 +389,7 @@ jobs:
             | --- | --- | --- |
             | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用（FFmpeg 与 C 运行库已静态内嵌，单个 exe，无任何 DLL 依赖） |
             | `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即用（单个可执行文件，FFmpeg 已静态内嵌；仅依赖系统桌面库，要求 glibc ≥ 2.35） |
-            | `zplayer-music-macos-arm64.tar.gz` | macOS Apple Silicon | 解压即用（单个可执行文件，FFmpeg 静态内嵌 + VideoToolbox 硬解） |
-            | `zplayer-music-macos-x64.tar.gz` | macOS Intel | 同上 |
-            | `zplayer-music-macos-arm64.app.tar.gz` | macOS Apple Silicon | **推荐**：解压得到 `ZPlayer Music.app`，图标/无终端窗口/菜单栏托盘均正常 |
+            | `zplayer-music-macos-arm64.app.tar.gz` | macOS Apple Silicon | 解压得到 `ZPlayer Music.app`（FFmpeg 静态内嵌 + VideoToolbox 硬解；图标/无终端窗口/菜单栏托盘均正常） |
             | `zplayer-music-macos-x64.app.tar.gz` | macOS Intel | 同上 |
             | `zplayer-music-web.zip` | Web | 任意静态 HTTP 服务器托管即可 |
 

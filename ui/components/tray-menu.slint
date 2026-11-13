@@ -17,12 +17,18 @@ component MenuRow inherits Rectangle {
     in property <bool> bold: false;
     in property <bool> enabled-row: true;   // false → 标题行样式（不可点、无 hover）
     in property <bool> has-arrow: false;    // 语言行右侧 "›"
+    in property <bool> marquee: false;      // true → 超长文本跑马灯往返滚动（歌名标题行用）
+    in property <bool> reserve-check: false; // true → 文本左侧预留 ✓ 槽位（子菜单行对齐用）
+    in property <bool> checked: false;      // 槽位内画 ✓（矢量绘制，不依赖字体字形）
+    in property <bool> selected: false;     // 选中态：常驻高亮底 + primary 文本
     callback clicked();
+    callback entered();                     // hover 进入（hover 展开/收起二级菜单用）
     height: 32px;
     background: transparent;
     ta := TouchArea {
         enabled: root.enabled-row;
         clicked => { root.clicked(); }
+        changed has-hover => { if self.has-hover { root.entered(); } }
     }
     Rectangle {
         x: 6px;
@@ -30,18 +36,60 @@ component MenuRow inherits Rectangle {
         width: parent.width - 12px;
         height: parent.height - 4px;
         border-radius: 4px;
-        background: ta.has-hover && root.enabled-row ? Theme.palette.hover : transparent;
+        background: root.selected || (ta.has-hover && root.enabled-row) ? Theme.palette.hover : transparent;
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 10px;
             alignment: space-between;
-            Text {
-                text: root.label;
-                color: root.enabled-row ? Theme.palette.text : Theme.palette.text-secondary;
-                font-size: 13px;
-                font-weight: root.bold ? 700 : 400;
-                vertical-alignment: center;
-                overflow: elide;
+            HorizontalLayout {
+                spacing: 0;
+                // ✓ 槽位：子菜单行统一预留，checked 时绘制对勾（两段旋转矩形）
+                if root.reserve-check: Rectangle {
+                    width: 14px;
+                    if root.checked: Rectangle {
+                        width: 12px;
+                        height: 12px;
+                        y: (parent.height - self.height) / 2;
+                        // 短臂：左下 → 拐点（右下 45°）
+                        Rectangle { width: 5px; height: 1.8px; border-radius: 0.9px; background: Theme.palette.primary; x: 0.5px; y: 8.6px; transform-rotation: 45deg; }
+                        // 长臂：拐点 → 右上（-45°）
+                        Rectangle { width: 10px; height: 1.8px; border-radius: 0.9px; background: Theme.palette.primary; x: 2.9px; y: 6.1px; transform-rotation: -45deg; }
+                    }
+                }
+                if !root.marquee: Text {
+                    text: root.label;
+                    color: root.selected ? Theme.palette.primary :
+                           (root.enabled-row ? Theme.palette.text : Theme.palette.text-secondary);
+                    font-size: 13px;
+                    font-weight: root.bold ? 700 : 400;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            // 跑马灯：clip 容器 + Text 横向往返位移，两端各停留 hold 时长
+            if root.marquee: Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+                Text {
+                    text: root.label;
+                    color: root.enabled-row ? Theme.palette.text : Theme.palette.text-secondary;
+                    font-size: 13px;
+                    font-weight: root.bold ? 700 : 400;
+                    vertical-alignment: center;
+                    height: parent.height;
+                    // 超出部分宽度；<=0 时静止不滚动
+                    property <length> over: max(0px, self.preferred-width - parent.width);
+                    property <duration> hold: 1.4s;                     // 两端停留
+                    property <duration> move: (over / 1px) * 55ms;      // ~18px/s，随长度自适应
+                    property <duration> total: 2 * (hold + move);
+                    property <duration> t: mod(animation-tick(), total);
+                    // 去程 → 尾停留 → 回程 → 头停留（线性，带停顿的三角波）
+                    x: over <= 0px ? 0px :
+                       t < hold ? 0px :
+                       t < hold + move ? -over * ((t - hold) / move) :
+                       t < hold + move + hold ? -over :
+                       -over * (1 - (t - hold - move - hold) / move);
+                }
             }
             if root.has-arrow: Text {
                 text: "›";
@@ -163,16 +211,6 @@ export component TrayMenu inherits Window {
             // 拦截菜单区域内的点击（不触发全屏层 dismiss）
             TouchArea {}
 
-            // 左侧竖线装饰
-            Rectangle {
-                x: 3px;
-                y: parent.height * 0.2;
-                width: 3px;
-                height: parent.height * 0.6;
-                border-radius: 1.5px;
-                background: Theme.palette.primary;
-            }
-
             VerticalLayout {
                 x: 0;
                 y: 0;
@@ -184,38 +222,47 @@ export component TrayMenu inherits Window {
                     label: root.song-title;
                     bold: true;
                     enabled-row: false;
+                    marquee: true;   // 歌名超长时跑马灯往返滚动，可看完整信息
                 }
                 MenuRow {
                     label: Language.tray-show;
                     clicked => { root.dismiss(); root.action-show(); }
+                    entered => { root.sub-open = false; }
                 }
                 MenuRow {
                     label: root.liked ? Language.tray-unfav : Language.tray-fav;
                     clicked => { root.dismiss(); root.action-fav(); }
+                    entered => { root.sub-open = false; }
                 }
                 MenuSep {}
                 MenuRow {
                     label: Language.tray-prev;
                     clicked => { root.dismiss(); root.action-prev(); }
+                    entered => { root.sub-open = false; }
                 }
                 MenuRow {
                     label: root.playing ? Language.tray-pause : Language.tray-play;
                     clicked => { root.dismiss(); root.action-play(); }
+                    entered => { root.sub-open = false; }
                 }
                 MenuRow {
                     label: Language.tray-next;
                     clicked => { root.dismiss(); root.action-next(); }
+                    entered => { root.sub-open = false; }
                 }
                 MenuSep {}
                 MenuRow {
                     label: Language.tray-language;
                     has-arrow: true;
+                    // hover 展开（系统菜单惯例）；点击仍可 toggle 兜底
+                    entered => { root.sub-open = true; }
                     clicked => { root.sub-open = !root.sub-open; }
                 }
                 MenuSep {}
                 MenuRow {
                     label: Language.tray-quit;
                     clicked => { root.dismiss(); root.action-quit(); }
+                    entered => { root.sub-open = false; }
                 }
             }
         }
@@ -244,7 +291,10 @@ export component TrayMenu inherits Window {
                 padding-bottom: root.pad-v;
 
                 for name[idx] in root.lang-names: MenuRow {
-                    label: (idx == root.lang-index ? "✓ " : "   ") + name;
+                    label: name;
+                    reserve-check: true;
+                    checked: idx == root.lang-index;   // 左侧绘制 ✓
+                    selected: idx == root.lang-index;  // 常驻高亮 + primary 文本
                     clicked => { root.dismiss(); root.action-lang(idx); }
                 }
             }

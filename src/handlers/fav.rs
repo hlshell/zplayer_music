@@ -202,7 +202,7 @@ pub fn setup(ctx: &Ctx) {
     let client_pf = ctx.client.clone();
     let rt_pf = ctx.rt.clone();
     let ui_pf = ctx.ui.clone();
-    ctx.app.clone_strong().on_page_fill(move |nav| {
+    super::on_page_fill(ctx, move |nav| {
         let Some(u) = ui_weak.upgrade() else { return; };
         match nav {
             7 => { fill_liked(&u); refresh_liked_v1_meta(&u, client_pf.clone(), rt_pf.clone(), ui_pf.clone()); }

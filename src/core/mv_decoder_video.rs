@@ -11,7 +11,8 @@ use crate::core::mv_frame::{MvFrame, MvFrameBuffer};
 use crate::core::mv_state::MvPlaybackState;
 
 use ffmpeg::codec::context::Context;
-use ffmpeg::software::scaling::{Context as Scaler, Flags};
+use ffmpeg::codec::threading;
+use ffmpeg::software::scaling::Flags;
 use ffmpeg::util::format::Pixel;
 use ffmpeg::util::frame::Video;
 use ffmpeg_next as ffmpeg;
@@ -19,6 +20,62 @@ use ffmpeg_next as ffmpeg;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use ffmpeg::ffi::av_hwframe_transfer_data;
+
+/// 多线程像素转换器（libswscale 切片多线程）。
+/// "threads" 选项仅在 sws_scale_frame 路径生效；ffmpeg-next 的
+/// scaling::Context::get（sws_getContext）无法设置线程数，这里直接走 FFI。
+/// 旧版 libswscale 不支持 "threads" 时 av_opt_set_int 静默失败，退化为单线程，行为不变。
+struct MtScaler {
+    ptr: *mut ffmpeg::ffi::SwsContext,
+}
+// SwsContext 仅在解码线程内使用（字段随 mv_drain_video 调用栈传递，不跨线程共享）
+unsafe impl Send for MtScaler {}
+
+impl MtScaler {
+    fn new(src_fmt: Pixel, src_w: u32, src_h: u32, dst_fmt: Pixel, dst_w: u32, dst_h: u32) -> Option<Self> {
+        use ffmpeg::ffi;
+        unsafe {
+            let ctx = ffi::sws_alloc_context();
+            if ctx.is_null() {
+                return None;
+            }
+            let src_f: ffi::AVPixelFormat = src_fmt.into();
+            let dst_f: ffi::AVPixelFormat = dst_fmt.into();
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get()).unwrap_or(2).clamp(2, 8) as i64;
+            let set = |k: &[u8], v: i64| {
+                ffi::av_opt_set_int(ctx as *mut _, k.as_ptr() as *const _, v, 0)
+            };
+            set(b"srcw\0", src_w as i64);
+            set(b"srch\0", src_h as i64);
+            set(b"src_format\0", src_f as i64);
+            set(b"dstw\0", dst_w as i64);
+            set(b"dsth\0", dst_h as i64);
+            set(b"dst_format\0", dst_f as i64);
+            set(b"sws_flags\0", Flags::BILINEAR.bits() as i64);
+            set(b"threads\0", threads);
+            if ffi::sws_init_context(ctx, std::ptr::null_mut(), std::ptr::null_mut()) < 0 {
+                ffi::sws_freeContext(ctx);
+                return None;
+            }
+            Some(Self { ptr: ctx })
+        }
+    }
+
+    fn run(&mut self, src: &Video, dst: &mut Video) -> Result<(), i32> {
+        unsafe {
+            // dst 缓冲已存在且参数匹配时由 libswscale 复用，不重复分配
+            let r = ffmpeg::ffi::sws_scale_frame(self.ptr, dst.as_mut_ptr(), src.as_ptr());
+            if r < 0 { Err(r) } else { Ok(()) }
+        }
+    }
+}
+
+impl Drop for MtScaler {
+    fn drop(&mut self) {
+        unsafe { ffmpeg::ffi::sws_freeContext(self.ptr) }
+    }
+}
 
 pub fn mv_video_decode_thread(
     rx: mpsc::Receiver<crate::core::mv_demux::MvTaggedPacket>,
@@ -35,6 +92,12 @@ pub fn mv_video_decode_thread(
     let codec = ffmpeg::decoder::find(codec_id).ok_or(crate::core::mv_error::MvPlayerError::DecoderNotFound)?;
     let mut dec_wrap = ctx.decoder();
     let hw_pix_fmt: Option<i32> = unsafe { mv_try_enable_hw_decoder(dec_wrap.as_mut_ptr(), codec.as_ptr()) };
+    // 软解启用帧级多线程解码（count=0 由 libavcodec 按 CPU 核数自动决定）；
+    // hwaccel 与 frame threading 不兼容，硬解成功时保持默认单线程。
+    if hw_pix_fmt.is_none() {
+        dec_wrap.set_threading(threading::Config::kind(threading::Type::Frame));
+        log::info!(target: "mv_video", "software decode with frame threading");
+    }
     let mut vdec = dec_wrap.open_as(codec).and_then(|o| o.video())?;
 
     // 输出尺寸（cfg.target_width 有值就用，否则原分辨率）
@@ -47,7 +110,7 @@ pub fn mv_video_decode_thread(
         crate::core::mv_config::MvPixelFormat::Rgba => Pixel::RGBA,
     };
 
-    let mut scaler: Option<(Scaler, Pixel, u32, u32)> = None;
+    let mut scaler: Option<(MtScaler, Pixel, u32, u32)> = None;
     let mut vyuv = Video::empty();
     let mut vout = Video::empty();
 
@@ -94,7 +157,7 @@ pub fn mv_video_decode_thread(
 #[allow(clippy::too_many_arguments)]
 fn mv_drain_video(
     vdec: &mut ffmpeg::codec::decoder::Video,
-    scaler: &mut Option<(Scaler, Pixel, u32, u32)>,
+    scaler: &mut Option<(MtScaler, Pixel, u32, u32)>,
     vyuv: &mut Video, vout: &mut Video,
     pace: &mut MvPaceState,
     vtb: ffmpeg::Rational,
@@ -153,9 +216,9 @@ fn mv_drain_video(
             None => true,
         };
         if need_init {
-            match Scaler::get(src_fmt, src_w, src_h, out_pix, out_w, out_h, Flags::BILINEAR) {
-                Ok(s) => *scaler = Some((s, src_fmt, src_w, src_h)),
-                Err(e) => { log::warn!(target: "mv_video", "scaler init error: {e}"); continue; }
+            match MtScaler::new(src_fmt, src_w, src_h, out_pix, out_w, out_h) {
+                Some(s) => *scaler = Some((s, src_fmt, src_w, src_h)),
+                None => { log::warn!(target: "mv_video", "scaler init error"); continue; }
             }
         }
         let s = match scaler.as_mut() {

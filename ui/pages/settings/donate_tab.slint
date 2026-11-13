@@ -1,38 +1,80 @@
 // ============================================================================
-//  pages/settings/donate_tab.slint — 捐赠支持（纯 UI 占位，不接支付）
+//  pages/settings/donate_tab.slint — 捐赠支持（收款二维码 + 用途说明）
 // ============================================================================
 import { SectionHeader } from "../../components/cards.slint";
-import { Button } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
 import { Language } from "../../language.slint";
 
 export component DonateTab inherits VerticalLayout {
-    callback donate-clicked();
-
     spacing: 18px;
     padding-left: 26px; padding-right: 26px;
     padding-top: 8px; padding-bottom: 20px;
 
     SectionHeader { title: Language.tab-donate; }
 
+    // ---- 卡片一：说明 + 收款二维码 ----
     Rectangle {
         border-radius: 12px;
         background: Theme.palette.surface;
         border-width: 1px; border-color: Theme.palette.divider;
-        VerticalLayout { spacing: 14px; padding: 20px;
+        VerticalLayout {
+            spacing: 16px; padding: 22px;
             Text {
                 text: Language.donate-intro;
                 color: Theme.palette.text;
                 font-size: 13.5px;
                 wrap: word-wrap;
             }
+            // 二维码固定白底：深色主题下也必须保持黑码白底才可被手机识别
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 208px; height: 208px;
+                    border-radius: 10px;
+                    background: white;
+                    border-width: 1px; border-color: Theme.palette.divider;
+                    Image {
+                        source: @image-url("../../assets/donate/donate-qr.png");
+                        image-fit: contain;
+                        width: 100%; height: 100%;
+                    }
+                }
+            }
+            Text {
+                text: Language.donate-qr-hint;
+                color: Theme.palette.text-secondary;
+                font-size: 12.5px;
+                horizontal-alignment: center;
+                width: 100%;
+            }
+        }
+    }
+
+    // ---- 卡片二：捐赠用途（明确不含服务器/运营支出）----
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.palette.surface;
+        border-width: 1px; border-color: Theme.palette.divider;
+        VerticalLayout {
+            spacing: 10px; padding: 20px;
+            Text {
+                text: Language.donate-purpose-title;
+                color: Theme.palette.primary;
+                font-size: 13px;
+                font-weight: 600;
+            }
             Text {
                 text: Language.donate-purpose;
+                color: Theme.palette.text;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+            Text {
+                text: Language.donate-note;
                 color: Theme.palette.text-secondary;
                 font-size: 12.5px;
                 wrap: word-wrap;
             }
-            Button { text: Language.donate-button; clicked => { root.donate-clicked(); } }
         }
     }
 }

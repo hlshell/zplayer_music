@@ -273,7 +273,11 @@ fn place_window(menu: &crate::TrayMenu, px: f64, py: f64) -> bool {
         let Some(mon) = mon else { return };
         let (origin, size) = (mon.position(), mon.size());
         w.set_outer_position(winit::dpi::PhysicalPosition::new(origin.x, origin.y));
-        let _ = w.request_inner_size(winit::dpi::PhysicalSize::new(size.width, size.height));
+        // 高度减 1px：borderless + AlwaysOnTop + 精确全屏尺寸会被 Windows 全屏优化
+        // 提升为独立合成层，密集显隐时透明区域被 DWM 渲染成不透明黑（全屏黑只剩菜单）。
+        // 矮 1px 规避；缺的 1px 在屏幕底缘（任务栏区域），点击捕获无感。
+        let h = size.height.saturating_sub(1);
+        let _ = w.request_inner_size(winit::dpi::PhysicalSize::new(size.width, h));
         // Windows：补 WS_EX_NOACTIVATE（不抢前台焦点；winit 0.30 无对应属性）
         #[cfg(target_os = "windows")]
         apply_no_activate(w);

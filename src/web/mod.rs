@@ -10,7 +10,7 @@
 //!                liked-unlike / recent-remove / recent-clear / page-fill / nav-anim
 //!   settings.rs: theme-toggle / settings-select-changed / settings-toggle-changed /
 //!                settings-input-changed / settings-proxy-submit / settings-clicked /
-//!                settings-clear-cache / settings-check-update / settings-donate-clicked /
+//!                settings-clear-cache / settings-check-update /
 //!                cache-limit-clicked / cover-dir-clicked / song-dir-clicked / cache-refresh
 //!   web_main   : drag-start / titlebar-clicked / win-minimize / win-mini / win-maximize /
 //!                win-close / toast-hidden（无窗口系统空接 + Toast 关闭）
