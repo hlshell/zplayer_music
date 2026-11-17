@@ -43,15 +43,15 @@
 | --- | --- | --- |
 | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用，FFmpeg 与 C 运行库均已静态内嵌，单个 exe 即可运行（无任何 DLL 依赖） |
 | `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即得**单个可执行文件**，FFmpeg 已静态内嵌，无需额外安装 |
-| `zplayer-music-macos-arm64.tar.gz` | macOS (Apple Silicon) | 解压即得**单个可执行文件**，FFmpeg 已静态内嵌，支持 VideoToolbox 硬解 |
-| `zplayer-music-macos-x64.tar.gz` | macOS (Intel) | 同上 |
+| `zplayer-music-macos-arm64.app.tar.gz` | macOS (Apple Silicon) | 解压得到 **`ZPlayer Music.app`** bundle（图标 / 菜单栏托盘 / 无终端窗口均正常），FFmpeg 静态内嵌，支持 VideoToolbox 硬解 |
+| `zplayer-music-macos-x64.app.tar.gz` | macOS (Intel) | 同上 |
 | `zplayer-music-web.zip` | 任意静态托管 | 解压后用任意 HTTP 服务器托管 `index.html` 即可 |
 
 ### 各平台运行要求
 
 - **Windows**：Windows 10 1809+（任务栏 Toast 通知依赖 WinRT）。无需安装额外依赖。
 - **Linux**：需要可用的桌面环境（X11 或 Wayland）与 ALSA 音频，系统需提供 fontconfig 等桌面基础库（主流发行版默认自带）。二进制基于 Ubuntu 22.04 构建，要求 **glibc ≥ 2.35**（Debian 12 / Ubuntu 22.04 及更新版本均可）；FFmpeg 已静态内嵌，无需安装 `ffmpeg`。
-- **macOS**：macOS 12+。首次运行如提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许，或执行 `xattr -d com.apple.quarantine ./zplayer-music`。
+- **macOS**：macOS 12+。首次运行如提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许，或执行 `xattr -d com.apple.quarantine "ZPlayer Music.app"`（命令作用于整个 .app bundle）。
 - **Web**：Chrome / Edge / Firefox / Safari 最新版。
 
 ## 功能特性
@@ -59,7 +59,7 @@
 - **首页发现**：每日精选（渐变 Hero + 5 首）、精选歌单、热歌榜、热门歌单、歌手、专辑、新歌速递
 - **搜索**：歌曲 / 歌单 / 专辑多类型搜索，带搜索建议
 - **播放**：rodio 真实音频驱动（进度、音量、播放/暂停、上/下一首），网易云主源 + 多音源自动兜底（咪咕 / 酷我 / 酷狗 / QQ / Joox / SoundCloud；桌面端另支持洛雪 `lx` 脚本音源）
-- **MV 播放**：FFmpeg 静态内嵌于单个可执行文件（软解 + 音频同步），macOS 额外启用 VideoToolbox 硬件解码
+- **MV 播放**：FFmpeg 静态内嵌（Linux / Windows 单二进制、macOS 内嵌于 `.app/Contents/MacOS/`），macOS 额外启用 VideoToolbox 硬件解码
 - **我的音乐**：我喜欢、最近播放、本地音乐（文件夹扫描 + 标签解析 + 拖拽导入）
 - **设置**：主题模式（浅色/深色/跟随系统）、主题色、界面字体、歌词布局、关闭行为、全局快捷键、网络代理与 RealIP、缓存目录/上限/淘汰策略与一键清理、开机自启、中英文切换、版本更新检查、捐赠支持
 - **桌面集成**：自定义无边框窗口（边缘缩放、标题栏拖拽、位置记忆）、系统托盘、Windows Toast 通知
