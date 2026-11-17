@@ -1,0 +1,13 @@
+{
+  "name": "zplayer-web-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "node server.cjs",
+    "test": "node run.js",
+    "selftest": "node --check smoke.spec.mjs && node --check server.cjs && echo OK"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}
