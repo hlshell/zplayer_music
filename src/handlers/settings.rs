@@ -33,6 +33,15 @@ pub fn setup(ctx: &Ctx) {
                 u.set_language_code(code.clone());
                 u.set_language_index(idx);
                 crate::i18n::load(&u, &c.app.language_code);
+                // Rust 侧写入的文案需按新语言重新生成（设备名由系统提供，不重扫）
+                u.set_cache_limit_text(
+                    (if c.app.cache_limit_mb == 0 {
+                        crate::i18n::t("cache-unlimited")
+                    } else {
+                        c.app.cache_limit_mb.to_string()
+                    })
+                    .into(),
+                );
             }
             3 => {
                 c.app.font_index = idx;
@@ -151,7 +160,7 @@ pub fn setup(ctx: &Ctx) {
             #[cfg(not(target_arch = "wasm32"))]
             41 => {
                 // 缓存根目录（歌曲/封面/歌词统一存放其下子目录）
-                if let Some(s) = tinyfiledialogs::select_folder_dialog("选择缓存根目录", "") {
+                if let Some(s) = tinyfiledialogs::select_folder_dialog(&crate::i18n::t("dialog-pick-cache-dir"), "") {
                     let mut c = shared_cd.borrow_mut();
                     c.cache.dir = s.clone();
                     c.cache.cover_dir = String::new();
@@ -167,7 +176,7 @@ pub fn setup(ctx: &Ctx) {
             #[cfg(not(target_arch = "wasm32"))]
             45 => {
                 // 检查更新音源脚本：从内置维护清单拉取并校验
-                toast_cd.show("正在检查音源更新…", "info");
+                toast_cd.show(&crate::i18n::t("toast-script-checking"), "info");
                 let rt_job = rt_cd.clone();
                 let ui_job = ui_cd.clone();
                 let toast_job = toast_cd.clone();
@@ -180,9 +189,20 @@ pub fn setup(ctx: &Ctx) {
                                     .map(|s| s.into())
                                     .collect();
                             let msg = if rep.added.is_empty() {
-                                format!("已是最新（{} 个内置源暂不可用）", rep.failed.len())
+                                format!(
+                                    "{}{}{}",
+                                    crate::i18n::t("toast-script-latest-prefix"),
+                                    rep.failed.len(),
+                                    crate::i18n::t("toast-script-latest-suffix")
+                                )
                             } else {
-                                format!("已更新 {} 个音源：{}", rep.added.len(), rep.added.join(", "))
+                                format!(
+                                    "{}{}{}{}",
+                                    crate::i18n::t("toast-script-updated-prefix"),
+                                    rep.added.len(),
+                                    crate::i18n::t("toast-script-updated-mid"),
+                                    rep.added.join(", ")
+                                )
                             };
                             let msg_clone = msg.clone();
                             let _ = slint::invoke_from_event_loop(move || {
@@ -203,7 +223,7 @@ pub fn setup(ctx: &Ctx) {
             #[cfg(not(target_arch = "wasm32"))]
             44 => {
                 // 导入洛雪音源脚本：选择 .js → 复制到脚本目录 → 校验 → 加入启用列表
-                if let Some(s) = tinyfiledialogs::open_file_dialog("导入洛雪音源脚本", "", Some((&["*.js"], ""))) {
+                if let Some(s) = tinyfiledialogs::open_file_dialog(&crate::i18n::t("dialog-import-script"), "", Some((&["*.js"], ""))) {
                     let p = std::path::PathBuf::from(s);
                     match crate::network::sources::lx_scripts::import_script(&p) {
                         Ok(name) => {
@@ -219,7 +239,10 @@ pub fn setup(ctx: &Ctx) {
                                     .map(|s| s.into())
                                     .collect();
                             u.set_lx_scripts(slint::ModelRc::from(names.as_slice()));
-                            toast_cd.show(&format!("已导入音源脚本：{name}"), "success");
+                            toast_cd.show(
+                                &format!("{}{name}", crate::i18n::t("toast-script-imported-prefix")),
+                                "success",
+                            );
                             log::info!("[settings] 导入洛雪音源脚本 → {name}");
                         }
                         Err(e) => {
@@ -329,7 +352,7 @@ pub fn setup(ctx: &Ctx) {
                         updater::apply(&pkg).map(|_| ver)
                     })
                     .await
-                    .unwrap_or_else(|e| Err(format!("更新任务失败: {e}")));
+                    .unwrap_or_else(|e| Err(format!("{}{e}", crate::i18n::t("update-err-task"))));
                     let _ = slint::invoke_from_event_loop(move || {
                         let Some(u) = ui2.upgrade() else { return };
                         match result {
@@ -381,7 +404,7 @@ pub fn setup(ctx: &Ctx) {
         // 移动端（待定）：保留占位提示，避免回调悬空
         let t_check = ctx.toast.clone();
         ctx.app.clone_strong().on_settings_check_update(move || {
-            t_check.show("当前平台暂不支持在线更新", "info");
+            t_check.show(&crate::i18n::t("toast-update-unsupported"), "info");
         });
     }
 }

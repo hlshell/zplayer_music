@@ -114,7 +114,7 @@ pub fn setup(ctx: &super::Ctx) {
                 let name = std::path::Path::new(path)
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("本地视频")
+                    .unwrap_or(&crate::i18n::t("mv-local-video"))
                     .to_string();
                 player::open_local_video(&ui_drop, &client_drop, &rt_drop, path.clone(), name);
             }

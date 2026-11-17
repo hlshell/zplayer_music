@@ -262,7 +262,7 @@ pub fn setup(ctx: &Ctx) {
         let current = crate::persist::config::local_dir(&shared_pd.borrow())
             .to_string_lossy()
             .to_string();
-        let Some(picked) = tinyfiledialogs::select_folder_dialog("选择本地媒体目录", &current) else {
+        let Some(picked) = tinyfiledialogs::select_folder_dialog(&crate::i18n::t("dialog-pick-local-dir"), &current) else {
             return;
         };
         {

@@ -17,15 +17,15 @@ fn biz_code(v: &serde_json::Value) -> i64 {
 fn biz_msg(v: &serde_json::Value) -> String {
     v.get("msg").or_else(|| v.get("message")).and_then(|m| m.as_str())
         .filter(|s| !s.is_empty())
-        .unwrap_or("资源不存在或已下架").to_string()
+        .unwrap_or(&crate::i18n::t("detail-err-unavailable")).to_string()
 }
 
 /// 把网络层英文错误转成面向用户的提示（详情页不直接显示 reqwest 原文）
 fn friendly_err(msg: &str) -> String {
     if msg.starts_with("request failed:") || msg.contains("error sending request") {
-        "网络连接失败，请检查网络后重试".to_string()
+        crate::i18n::t("detail-err-network")
     } else if msg.starts_with("HTTP 5") {
-        "服务暂时不可用，请稍后重试".to_string()
+        crate::i18n::t("detail-err-server")
     } else {
         msg.to_string()
     }
@@ -75,9 +75,9 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
     ctx.app.clone_strong().on_open_daily_detail(move || {
         let Some(u) = ui_weak.upgrade() else { return; };
         let pool = crate::load::HERO_POOL.lock().unwrap().clone();
-        u.set_detail_title("每日为你精选".into());
-        u.set_detail_desc("每天更新的精选歌曲清单，点击歌曲立即播放".into());
-        u.set_detail_type("每日推荐".into());
+        u.set_detail_title(crate::i18n::t("detail-daily-title").into());
+        u.set_detail_desc(crate::i18n::t("detail-daily-desc").into());
+        u.set_detail_type(crate::i18n::t("detail-daily-type").into());
         u.set_detail_cover(u.get_hero_cover());
         u.set_detail_search("".into());
         // 每日推荐无资源收藏
@@ -232,7 +232,14 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
         }
         // 资源 id 还原：Slint int 为 i32，超过 32 位的 id 已在列表构建时登记进 ids 表
         let rid = crate::core::ids::resolve(kind, id);
-        let type_label = match kind { 0 => "歌单", 1 => "专辑", 2 => "歌手", 3 => "电台", 4 => "MV", _ => "资源" };
+        let type_label = match kind {
+            0 => crate::i18n::t("detail-kind-playlist"),
+            1 => crate::i18n::t("detail-kind-album"),
+            2 => crate::i18n::t("detail-kind-artist"),
+            3 => crate::i18n::t("detail-kind-radio"),
+            4 => "MV".to_string(),
+            _ => crate::i18n::t("detail-kind-resource"),
+        };
         u.set_detail_type(type_label.into());
         u.set_detail_visible(true);
         // 收藏标识：kind 与详情一致；歌手(kind=2)不支持收藏，隐藏爱心
@@ -252,7 +259,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
             }
         });
         u.set_detail_search("".into());
-        u.set_detail_title("加载中…".into());
+        u.set_detail_title(crate::i18n::t("detail-loading").into());
         u.set_detail_desc("".into());
         u.set_detail_songs(Rc::new(VecModel::<Song>::from(Vec::new())).into());
         u.set_detail_all_songs(Rc::new(VecModel::<Song>::from(Vec::new())).into());
@@ -267,7 +274,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                         if biz_code(&v) != 200 {
                             Err(biz_msg(&v))
                         } else if let Some(p) = v.get("playlist").filter(|x| !x.is_null()) {
-                            let title = p.get("name").and_then(|n| n.as_str()).unwrap_or("歌单").to_string();
+                            let title = p.get("name").and_then(|n| n.as_str()).unwrap_or(&crate::i18n::t("detail-kind-playlist")).to_string();
                             let desc = p.get("description").and_then(|n| n.as_str()).unwrap_or("")
                                 .chars().take(60).collect::<String>();
                             let cover = p.get("coverImgUrl").and_then(|n| n.as_str()).unwrap_or("").to_string();
@@ -288,7 +295,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                             }
                             Ok((title, desc, cover, crate::load::parse_tracks(&tracks)))
                         } else {
-                            Err("歌单数据为空".to_string())
+                            Err(crate::i18n::t("detail-err-empty-playlist"))
                         }
                     }
                     Err(e) => Err(e),
@@ -298,14 +305,14 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                         if biz_code(&v) != 200 {
                             Err(biz_msg(&v))
                         } else if let Some(al) = v.get("album").filter(|x| !x.is_null()) {
-                            let title = al.get("name").and_then(|n| n.as_str()).unwrap_or("专辑").to_string();
+                            let title = al.get("name").and_then(|n| n.as_str()).unwrap_or(&crate::i18n::t("detail-kind-album")).to_string();
                             let desc = al.get("artist").and_then(|x| x.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
                             let cover = al.get("picUrl").and_then(|n| n.as_str()).unwrap_or("").to_string();
                             let songs = v.get("songs").and_then(|t| t.as_array()).cloned().unwrap_or_default();
                             let songs = ensure_covers(&client_call, songs).await;
                             Ok((title, desc, cover, crate::load::parse_tracks(&songs)))
                         } else {
-                            Err("专辑数据为空".to_string())
+                            Err(crate::i18n::t("detail-err-empty-album"))
                         }
                     }
                     Err(e) => Err(e),
@@ -323,11 +330,11 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                             let songs_v = ensure_covers(&client_call, songs_v).await;
                             let base = crate::load::parse_tracks(&songs_v);
                             if base.is_empty() {
-                                Err("该歌手暂无可用歌曲".to_string())
+                                Err(crate::i18n::t("detail-err-no-artist-songs"))
                             } else {
                                 let title = base.first().map(|d| d.artist.to_string())
-                                    .filter(|s| !s.is_empty()).unwrap_or_else(|| "歌手".to_string());
-                                Ok((title, "热门歌曲".to_string(), String::new(), base))
+                                    .filter(|s| !s.is_empty()).unwrap_or_else(|| crate::i18n::t("detail-kind-artist"));
+                                Ok((title, crate::i18n::t("detail-hot-songs"), String::new(), base))
                             }
                         }
                     }
@@ -343,12 +350,12 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                         .unwrap_or_default();
                     drop(pool);
                     if prog.is_empty() {
-                        Err("该电台暂无节目数据，请刷新电台页后重试".to_string())
+                        Err(crate::i18n::t("detail-err-empty-radio"))
                     } else {
                         let radio_meta = prog.first().and_then(|p| p.get("radio"));
                         let title = radio_meta.and_then(|r| r.get("name")).and_then(|n| n.as_str())
                             .or_else(|| prog.first().and_then(|p| p.get("name")).and_then(|n| n.as_str()))
-                            .unwrap_or("电台").to_string();
+                            .unwrap_or(&crate::i18n::t("detail-kind-radio")).to_string();
                         let desc = radio_meta.and_then(|r| r.get("desc")).and_then(|n| n.as_str()).unwrap_or("").to_string();
                         let cover = radio_meta.and_then(|r| r.get("picUrl")).and_then(|n| n.as_str()).unwrap_or("").to_string();
                         // 该电台的节目 mainSong 即音频
@@ -369,12 +376,12 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                             let full_desc = if desc.is_empty() { artist } else if artist.is_empty() { desc } else { format!("{} · {}", artist, desc) };
                             Ok((title, full_desc, cover, Vec::new()))
                         } else {
-                            Err("MV 数据为空".to_string())
+                            Err(crate::i18n::t("detail-err-empty-mv"))
                         }
                     }
                     Err(e) => Err(e),
                 },
-                _ => Err("暂不支持该类型".to_string()),
+                _ => Err(crate::i18n::t("detail-err-unsupported")),
             };
             let (title, desc, cover_url, base) = match got {
                 Ok(x) => x,
@@ -383,7 +390,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                     let msg = friendly_err(&msg);
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(u) = ui_p.upgrade() {
-                            u.set_detail_title("加载失败".into());
+                            u.set_detail_title(crate::i18n::t("detail-load-failed").into());
                             u.set_detail_desc(msg.clone().into());
                             u.set_detail_res_kind(-1);   // 失败资源不提供收藏
                             u.set_detail_res_cover("".into());

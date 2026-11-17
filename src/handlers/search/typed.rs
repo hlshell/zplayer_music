@@ -31,11 +31,12 @@ pub fn run(
     offset: u32,
     append: bool,
 ) {
-    let (search_type, label) = match ty {
-        1 => (10, "张专辑"),
-        2 => (1000, "个歌单"),
-        3 => (1004, "个 MV"),
-        4 => (1009, "个电台"),
+    // 类型 → (接口 types, 命中条数后缀 key, 无结果文案 key)
+    let (search_type, found_key, none_key) = match ty {
+        1 => (10, "toast-found-album", "toast-none-album"),
+        2 => (1000, "toast-found-playlist", "toast-none-playlist"),
+        3 => (1004, "toast-found-mv", "toast-none-mv"),
+        4 => (1009, "toast-found-radio", "toast-none-radio"),
         _ => return,
     };
     rt.spawn(async move {
@@ -46,7 +47,7 @@ pub fn run(
             let _ = slint::invoke_from_event_loop(move || {
                 // 失败也要撤下骨架屏，否则会一直停在骨架状态
                 if let Some(u) = ui_err.upgrade() { u.set_search_loading(false); }
-                if !append { toast.show("搜索失败，请稍后重试", "error"); }
+                if !append { toast.show(&crate::i18n::t("toast-search-failed"), "error"); }
             });
             return;
         };
@@ -65,7 +66,16 @@ pub fn run(
             u.set_search_loading(false);
             if !append {
                 toast.show(
-                    &if n > 0 { format!("搜索到 {} {}", n, label) } else { format!("未找到相关{}", &label[1..]) },
+                    &if n > 0 {
+                        format!(
+                            "{}{}{}",
+                            crate::i18n::t("toast-found-prefix"),
+                            n,
+                            crate::i18n::t(found_key)
+                        )
+                    } else {
+                        crate::i18n::t(none_key)
+                    },
                     if n > 0 { "info" } else { "error" },
                 );
             }

@@ -144,7 +144,7 @@ pub fn open_local_video(
                 u.set_mv_notice("".into());
                 u.set_mv_show_search_box(false); // 本地视频不显示搜索框
                 u.set_mv_title(title_show.into());
-                u.set_mv_artist("本地视频".into());
+                u.set_mv_artist(crate::i18n::t("mv-local-video").into());
                 u.set_mv_position(0);
                 u.set_mv_buffered(0);
                 u.set_mv_playing(true);
@@ -616,7 +616,11 @@ fn retry_current_after_network_drop(
     };
     log::info!(target: "mv", "network dropped, reconnect current MV {id} ({streak}/{MAX_RETRY}), resume at {}ms", pos_us / 1000);
     MV_PENDING_SEEK_US.store(pos_us, Ordering::Relaxed);
-    let notice = Some(format!("网络中断，正在重连（第 {streak} 次）…"));
+    let notice = Some(format!(
+        "{}{streak}{}",
+        crate::i18n::t("mv-reconnecting-prefix"),
+        crate::i18n::t("mv-reconnecting-suffix")
+    ));
     open_mv_player_internal(ui.clone(), client.clone(), rt.clone(), id, title, artist, notice);
     true
 }
@@ -641,7 +645,7 @@ fn advance_on_failure(
             if let Some(u) = ui.upgrade() {
                 u.set_mv_player_visible(false);
                 crate::handlers::ToastCtx { weak: u.as_weak() }
-                    .show("MV 无法播放，已停止", "error");
+                    .show(&crate::i18n::t("toast-mv-failed"), "error");
             }
         });
         return;
@@ -657,9 +661,21 @@ fn advance_on_failure(
         )
     }).unwrap_or_default();
     let notice = if upcoming.is_empty() {
-        format!("「{failed}」无法播放，已自动跳到下一首")
+        format!(
+            "{}{}{}{}",
+            crate::i18n::t("mv-notice-quote-open"),
+            failed,
+            crate::i18n::t("mv-notice-quote-close"),
+            crate::i18n::t("mv-notice-failed-next")
+        )
     } else {
-        format!("「{failed}」无法播放，已自动切换到下一首：{upcoming}")
+        format!(
+            "{}{}{}{}{upcoming}",
+            crate::i18n::t("mv-notice-quote-open"),
+            failed,
+            crate::i18n::t("mv-notice-quote-close"),
+            crate::i18n::t("mv-notice-failed-next-named")
+        )
     };
     log::warn!(target: "mv", "notify in player: {notice}");
     play_neighbor_with_notice(ui, client, rt, true, Some(notice));
@@ -757,7 +773,7 @@ pub fn seek_to_ms(ms: i64) {
 /// 设置音量 0-100（滑条/键盘共用）。写回 UI + hint 反馈。
 pub fn set_volume_ui(ui: &slint::Weak<AppWindow>, vol: i32) {
     let v = vol.clamp(0, 100) as u32;
-    apply_volume(ui, v, format!("音量 {}%", v));
+    apply_volume(ui, v, format!("{}{v}%", crate::i18n::t("mv-volume-prefix")));
 }
 
 /// 静音切换：非零 → 0；零 → 恢复最近非零音量。
@@ -765,9 +781,9 @@ pub fn mute_toggle_ui(ui: &slint::Weak<AppWindow>) {
     let cur = MV_VOLUME.load(Ordering::Relaxed);
     if cur == 0 {
         let v = MV_LAST_VOLUME.load(Ordering::Relaxed).max(1);
-        apply_volume(ui, v, format!("音量 {}%", v));
+        apply_volume(ui, v, format!("{}{v}%", crate::i18n::t("mv-volume-prefix")));
     } else {
-        apply_volume(ui, 0, "静音".into());
+        apply_volume(ui, 0, crate::i18n::t("mv-muted"));
     }
 }
 
@@ -819,7 +835,7 @@ pub fn quality_changed(
     let playing = u.get_mv_playing();
     // 乐观更新按钮文案 + 顶部胶囊常显切换状态（失败再回滚）
     u.set_mv_quality(idx as i32);
-    u.set_mv_switch_tip(format!("正在切换到 {label}").into());
+    u.set_mv_switch_tip(format!("{}{label}", crate::i18n::t("mv-switching-prefix")).into());
     u.set_mv_switching(true);
 
     let ui_weak = ui.clone();
@@ -830,7 +846,7 @@ pub fn quality_changed(
         let stale = || MV_SWITCH_TOKEN.load(Ordering::Relaxed) != token;
         let fail = |msg: &str| {
             log::warn!(target: "mv", "quality switch to {label} failed: {msg}");
-            quality_switch_failed(&ui_weak, prev, "清晰度切换失败，保持当前清晰度");
+            quality_switch_failed(&ui_weak, prev, &crate::i18n::t("mv-quality-failed"));
         };
         // 1. 请求新码率地址（与 play_mv 一致：mv/detail 精确清晰度优先，mv_url 兜底）
         let mut picked: Option<String> = None;
@@ -921,7 +937,7 @@ pub fn quality_changed(
                 u.set_mv_quality(idx as i32);
                 u.set_mv_playing(playing);
                 u.set_mv_switching(false);
-                u.set_mv_hint(format!("已切换到 {label}").into());
+                u.set_mv_hint(format!("{}{label}", crate::i18n::t("mv-switched-prefix")).into());
             }
         });
     });

@@ -19,7 +19,10 @@ pub(crate) fn setup_like(ctx: &Ctx) {
         let cover = u.get_detail_res_cover().to_string();
         let now = liked::toggle_resource(kind, id, name, sub, cover);
         u.set_detail_liked(now);
-        toast_dlike.show(if now { "已收藏到我的最爱" } else { "已取消收藏" }, "info");
+        toast_dlike.show(
+            &crate::i18n::t(if now { "toast-liked" } else { "toast-unliked" }),
+            "info",
+        );
         if u.get_current_nav() == 7 {
             super::super::fav::fill_liked(&u);
         }

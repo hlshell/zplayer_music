@@ -52,7 +52,7 @@ pub fn setup(ctx: &Ctx) {
             if pg.lock().unwrap().render_gen != my_gen { return; }
             let filter = u.get_radio_categories().row_data(cat as usize).map(|s| s.to_string()).unwrap_or_default();
             // 「全部」(索引 0) 为通配：不过滤；其余按分类名精确匹配
-            let is_all = cat == 0 || filter.is_empty() || filter == "全部";
+            let is_all = cat == 0 || filter.is_empty() || filter == crate::i18n::t("filter-all");
             // 保留 url 供补图；已过滤元组
             let filtered: Vec<(RadioRow, slint::SharedString)> = all.iter()
                 .filter(|r| is_all || r.0.as_str() == filter.as_str())
@@ -129,7 +129,7 @@ pub fn setup(ctx: &Ctx) {
                 let id = radio.get("id").and_then(|i| i.as_i64()).unwrap_or(0);
                 if id == 0 || !seen.insert(id) { continue; }
                 let cat: slint::SharedString = radio.get("category").and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty()).unwrap_or("其他").into();
+                    .filter(|s| !s.is_empty()).unwrap_or(&crate::i18n::t("filter-other")).into();
                 let name: slint::SharedString = radio.get("name").and_then(|v| v.as_str()).unwrap_or("").into();
                 let desc: slint::SharedString = radio.get("desc").and_then(|v| v.as_str()).unwrap_or("").into();
                 let plays: slint::SharedString = fmt_plays_cat(radio.get("subCount").and_then(|v| v.as_u64()).unwrap_or(0)).into();
@@ -141,7 +141,7 @@ pub fn setup(ctx: &Ctx) {
             // 派生分类 Tab：全部 + 各分类（按条数降序）
             let mut cats: Vec<String> = cat_count.keys().cloned().collect();
             cats.sort_by_key(|c| std::cmp::Reverse(cat_count[c]));
-            let mut cats_disp: Vec<slint::SharedString> = vec![slint::SharedString::from("全部")];
+            let mut cats_disp: Vec<slint::SharedString> = vec![slint::SharedString::from(crate::i18n::t("filter-all"))];
             cats_disp.extend(cats.into_iter().map(|c| slint::SharedString::from(c)));
             let ui_c = ui_task.clone();
             let pg_c = pg.clone();
@@ -202,8 +202,8 @@ pub fn setup(ctx: &Ctx) {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(u) = ui_w.upgrade() {
                 u.set_mv_categories(Rc::new(VecModel::from(vec![
-                    slint::SharedString::from("全部MV"),
-                    slint::SharedString::from("精选MV"),
+                    slint::SharedString::from(crate::i18n::t("filter-all-mv")),
+                    slint::SharedString::from(crate::i18n::t("filter-featured-mv")),
                 ])).into());
             }
         });

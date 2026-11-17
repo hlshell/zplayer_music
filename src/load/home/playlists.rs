@@ -24,10 +24,20 @@ pub fn build_playlists(rp: &Result<Value, String>) -> Vec<PlaylistBase> {
 }
 
 fn fmt_plays(n: u64) -> SharedString {
-    let s = if n >= 100_000_000 {
-        format!("{:.0}亿", n as f64 / 100_000_000.0)
-    } else if n >= 10_000 {
-        format!("{:.1}万", n as f64 / 10_000.0)
+    let s = if crate::i18n::is_zh() {
+        if n >= 100_000_000 {
+            format!("{:.0}亿", n as f64 / 100_000_000.0)
+        } else if n >= 10_000 {
+            format!("{:.1}万", n as f64 / 10_000.0)
+        } else {
+            n.to_string()
+        }
+    } else if n >= 1_000_000_000 {
+        format!("{:.0}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
     };

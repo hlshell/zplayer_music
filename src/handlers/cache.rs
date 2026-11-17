@@ -64,7 +64,7 @@ pub fn setup(ctx: &Ctx) {
     let ui_cd = ctx.ui.clone();
     ctx.app.clone_strong().on_cover_dir_clicked(move || {
         let Some(u) = ui.upgrade() else { return; };
-        if let Some(s) = tinyfiledialogs::select_folder_dialog("选择封面缓存目录", "") {
+        if let Some(s) = tinyfiledialogs::select_folder_dialog(&crate::i18n::t("dialog-pick-cover-dir"), "") {
             shared_cd.borrow_mut().cache.cover_dir = s.clone();
             crate::persist::cache::init(&shared_cd.borrow());
             u.set_cover_dir(s.clone().into());
@@ -81,7 +81,7 @@ pub fn setup(ctx: &Ctx) {
     let ui_sd = ctx.ui.clone();
     ctx.app.clone_strong().on_song_dir_clicked(move || {
         let Some(u) = ui.upgrade() else { return; };
-        if let Some(s) = tinyfiledialogs::select_folder_dialog("选择歌曲缓存目录", "") {
+        if let Some(s) = tinyfiledialogs::select_folder_dialog(&crate::i18n::t("dialog-pick-song-dir"), "") {
             shared_sd.borrow_mut().cache.song_dir = s.clone();
             crate::persist::cache::init(&shared_sd.borrow());
             u.set_song_dir(s.clone().into());
@@ -138,7 +138,15 @@ pub fn setup(ctx: &Ctx) {
                 if let Some(u) = ui_weak.upgrade() {
                     state::set_cache_stats(&u, m, mu, l, c, p);
                     u.set_sys_clearing(false);
-                    toast_g.show(&format!("已清理 {} 个文件", n), "ok");
+                    toast_g.show(
+                        &format!(
+                            "{}{}{}",
+                            crate::i18n::t("toast-cache-cleared-prefix"),
+                            n,
+                            crate::i18n::t("toast-cache-cleared-suffix")
+                        ),
+                        "ok",
+                    );
                 }
                 // 无论窗口是否存活都解锁门闩，避免下次清理被永久挡住
                 gate_g.store(false, Ordering::SeqCst);

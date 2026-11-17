@@ -107,7 +107,7 @@ pub fn download(info: &UpdateInfo, progress: impl Fn(u64, u64)) -> Result<PathBu
         .send()
         .map_err(|e| format!("下载请求失败: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("下载失败: HTTP {}", resp.status()));
+        return Err(format!("{}{}", crate::i18n::t("update-err-download"), resp.status()));
     }
     let total = resp.content_length().unwrap_or(info.size);
     let tmp = std::env::temp_dir().join(format!(
@@ -203,13 +203,13 @@ pub fn apply(pkg: &Path) -> Result<(), String> {
     // 1) 解压到暂存目录
     if cfg!(windows) {
         let f = std::fs::File::open(pkg).map_err(|e| format!("打开更新包失败: {e}"))?;
-        let mut z = zip::ZipArchive::new(f).map_err(|e| format!("更新包解压失败: {e}"))?;
-        z.extract(&stage).map_err(|e| format!("更新包解压失败: {e}"))?;
+        let mut z = zip::ZipArchive::new(f).map_err(|e| format!("{}{e}", crate::i18n::t("update-err-extract")))?;
+        z.extract(&stage).map_err(|e| format!("{}{e}", crate::i18n::t("update-err-extract")))?;
     } else {
         let f = std::fs::File::open(pkg).map_err(|e| format!("打开更新包失败: {e}"))?;
         let gz = flate2::read::GzDecoder::new(f);
         let mut ar = tar::Archive::new(gz);
-        ar.unpack(&stage).map_err(|e| format!("更新包解压失败: {e}"))?;
+        ar.unpack(&stage).map_err(|e| format!("{}{e}", crate::i18n::t("update-err-extract")))?;
     }
 
     // 2) 找到暂存目录中的新主程序

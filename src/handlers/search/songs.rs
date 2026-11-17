@@ -118,7 +118,7 @@ pub(crate) fn setup_songs(ctx: &Ctx) {
         let m = u.get_search_results();
         let list: Vec<crate::Song> = (0..m.row_count()).filter_map(|i| m.row_data(i)).collect();
         if list.is_empty() {
-            toast_sa.show("暂无搜索结果", "info");
+            toast_sa.show(&crate::i18n::t("toast-no-result"), "info");
             return;
         }
         let q = u.get_queue();
@@ -134,9 +134,9 @@ pub(crate) fn setup_songs(ctx: &Ctx) {
         u.set_queue(Rc::new(VecModel::from(songs)).into());
         u.invoke_play_song(list[0].id);
         if added > 0 {
-            toast_sa.show(&format!("已加入 {} 首歌曲到播放列表", added), "info");
+            toast_sa.show(&format!("{}{}{}", crate::i18n::t("toast-added-prefix"), added, crate::i18n::t("toast-added-suffix")), "info");
         } else {
-            toast_sa.show("歌曲已在播放列表", "info");
+            toast_sa.show(&crate::i18n::t("toast-already-in-queue"), "info");
         }
         let urls: Vec<(String, crate::persist::cache::CoverType)> = list.iter()
             .map(|s| (s.url.to_string(), crate::persist::cache::CoverType::Song))
@@ -238,9 +238,9 @@ async fn fetch_hot_detail(client: &crate::network::netease::client::NeteaseClien
             let word = m.get("searchWord").and_then(|w| w.as_str())?;
             if word.is_empty() { return None; }
             let tag = match m.get("iconType").and_then(|t| t.as_i64()).unwrap_or(0) {
-                1 => "爆",
-                5 => "↑",
-                _ => "",
+                1 => crate::i18n::t("hot-tag"),
+                5 => "↑".to_string(),
+                _ => String::new(),
             };
             Some(crate::HotItem { word: word.into(), tag: tag.into() })
         }).collect())
@@ -326,9 +326,9 @@ fn load_songs_page(
                 let total = u.get_search_results().row_count();
                 if !append {
                     if total > 0 {
-                        toast2.show(&format!("搜索到 {} 首歌曲", total), "info");
+                        toast2.show(&format!("{}{}{}", crate::i18n::t("toast-found-prefix"), total, crate::i18n::t("toast-found-song")), "info");
                     } else {
-                        toast2.show("未找到相关歌曲", "error");
+                        toast2.show(&crate::i18n::t("toast-not-found-song"), "error");
                     }
                 }
             }

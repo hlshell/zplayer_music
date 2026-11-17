@@ -7,6 +7,7 @@
 
 use slint::ComponentHandle;
 use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
 const ZH_JSON: &str = include_str!("../../ui/assets/lang/zh.json");
 const EN_JSON: &str = include_str!("../../ui/assets/lang/en.json");
@@ -72,6 +73,9 @@ pub fn list_languages() -> Vec<(String, String)> {
 /// 按短码加载语言并写入 `Language` global。
 /// 找不到目标语言时回退中文（zh 兜底）。
 pub fn load(ui: &crate::AppWindow, code: &str) {
+    if let Ok(mut cur) = current_code_store().write() {
+        *cur = code.to_string();
+    }
     let zh: HashMap<String, String> = flatten(&serde_json::from_str(ZH_JSON).unwrap_or_default());
     let mut map = zh.clone(); // 中文兜底
     // 内置英文
@@ -87,8 +91,40 @@ pub fn load(ui: &crate::AppWindow, code: &str) {
     apply(ui, &map);
 }
 
+/// 当前生效的扁平文案表（供 Rust 侧构造 UI 文案，如 toast / 详情页标题）。
+static CURRENT: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
+
+fn current() -> &'static RwLock<HashMap<String, String>> {
+    CURRENT.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 当前语言短码（供需要按语言分支的格式化逻辑使用，如播放量单位）。
+static CURRENT_CODE: OnceLock<RwLock<String>> = OnceLock::new();
+
+fn current_code_store() -> &'static RwLock<String> {
+    CURRENT_CODE.get_or_init(|| RwLock::new("zh".to_string()))
+}
+
+/// 当前是否为中文（中文用「万/亿」，其他语言用 K/M）。
+pub fn is_zh() -> bool {
+    current_code_store().read().map(|c| c.as_str() == "zh").unwrap_or(true)
+}
+
+/// 取当前语言下的文案；key 缺失时回退 key 本身（便于暴露漏配）。
+pub fn t(key: &str) -> String {
+    current()
+        .read()
+        .ok()
+        .and_then(|m| m.get(key).cloned())
+        .unwrap_or_else(|| key.to_string())
+}
+
 /// 把扁平 key 逐一写入 Language global（key 与属性名一一对应）。
 fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
+    // 同步一份供 Rust 侧取文案（i18n::t）
+    if let Ok(mut cur) = current().write() {
+        *cur = map.clone();
+    }
     let l = ui.global::<crate::Language>();
     let g = |k: &str| -> slint::SharedString { map.get(k).cloned().unwrap_or_default().into() };
     // 通用
@@ -305,6 +341,24 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_search_result_suffix(g("search-result-suffix"));
     l.set_search_empty_title(g("search-empty-title"));
     l.set_search_empty_desc(g("search-empty-desc"));
+    l.set_search_type_song(g("search-type-song"));
+    l.set_search_type_album(g("search-type-album"));
+    l.set_search_type_playlist(g("search-type-playlist"));
+    l.set_search_type_mv(g("search-type-mv"));
+    l.set_search_type_radio(g("search-type-radio"));
+    l.set_search_searching(g("search-searching"));
+    l.set_search_none_prefix(g("search-none-prefix"));
+    l.set_search_none_desc(g("search-none-desc"));
+    l.set_search_results_suffix(g("search-results-suffix"));
+    l.set_search_unit_song(g("search-unit-song"));
+    l.set_search_unit_album(g("search-unit-album"));
+    l.set_search_unit_other(g("search-unit-other"));
+    // MV 播放器
+    l.set_mv_buffering(g("mv-buffering"));
+    l.set_mv_loading(g("mv-loading"));
+    l.set_mv_search_placeholder(g("mv-search-placeholder"));
+    l.set_mv_search_results(g("mv-search-results"));
+    l.set_mv_search_empty(g("mv-search-empty"));
     // 网格页
     l.set_page_all_albums(g("page-all-albums"));
     l.set_page_all_playlists(g("page-all-playlists"));

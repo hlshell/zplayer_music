@@ -68,10 +68,10 @@ fn parse_list(v: &serde_json::Value) -> Vec<Row> {
         let play_count = it.get("playCount").and_then(|x| x.as_u64()).unwrap_or(0);
         let mut parts: Vec<String> = Vec::new();
         if track_count > 0 {
-            parts.push(format!("{track_count}首"));
+            parts.push(format!("{track_count}{}", crate::i18n::t("toplist-tracks-suffix")));
         }
         if play_count > 0 {
-            parts.push(format!("{}播放", fmt_plays_cat(play_count)));
+            parts.push(format!("{}{}", fmt_plays_cat(play_count), crate::i18n::t("toplist-plays-suffix")));
         }
         let mut tops: [String; 3] = std::array::from_fn(|_| String::new());
         if let Some(tracks) = it.get("tracks").and_then(|x| x.as_array()) {

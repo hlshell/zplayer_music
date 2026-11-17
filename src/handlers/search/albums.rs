@@ -21,9 +21,13 @@ struct AlbumPaging {
     items: Vec<AlbumRow>,
 }
 
-/// 专辑分类：标签 + 网易云 /album/new 的 area 值（ALL/ZH/EA/KR/JP）
+/// 专辑分类：文案 key + 网易云 /album/new 的 area 值（ALL/ZH/EA/KR/JP）
 const ALBUM_AREAS: [(&str, &str); 5] = [
-    ("全部", "ALL"), ("华语", "ZH"), ("欧美", "EA"), ("韩国", "KR"), ("日本", "JP"),
+    ("filter-all", "ALL"),
+    ("region-chinese", "ZH"),
+    ("region-western", "EA"),
+    ("region-korean", "KR"),
+    ("region-japanese", "JP"),
 ];
 
 /// publishTime（毫秒时间戳）→ 年份字符串
@@ -154,7 +158,7 @@ pub(crate) fn setup_albums(ctx: &Ctx) {
 
     // 初始填充分类 Tab + 首屏（全部）
     {
-        let names: Vec<slint::SharedString> = ALBUM_AREAS.iter().map(|(label, _)| (*label).into()).collect();
+        let names: Vec<slint::SharedString> = ALBUM_AREAS.iter().map(|(key, _)| crate::i18n::t(key).into()).collect();
         let weak0 = ctx.ui.clone();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(u) = weak0.upgrade() {

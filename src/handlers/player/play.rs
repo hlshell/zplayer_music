@@ -154,7 +154,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
             crate::platform::audio::begin_switch();
             u.set_progress(0.0);
             u.set_playing(true);
-            toast.show(&format!("正在播放：{}", name), "info");
+            toast.show(&format!("{}{}", crate::i18n::t("toast-now-playing"), name), "info");
             let uid = id as u32 as i64;
             queue::record_last_song(&shared_ps, &u, uid);
             // 记录最近播放（封面 URL 用 url 字段）
@@ -210,7 +210,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
         let Some(u) = ui_weak.upgrade() else { return; };
         let pool = crate::load::HERO_POOL.lock().unwrap().clone();
         if pool.is_empty() {
-            toast_hero.show("暂无可加入的歌曲", "info");
+            toast_hero.show(&crate::i18n::t("toast-nothing-to-add"), "info");
             return;
         }
         let q = u.get_queue();
@@ -239,9 +239,9 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
             u.invoke_play_song(first.id);
         }
         if added > 0 {
-            toast_hero.show(&format!("已加入 {} 首歌曲到播放列表", added), "info");
+            toast_hero.show(&format!("{}{}{}", crate::i18n::t("toast-added-prefix"), added, crate::i18n::t("toast-added-suffix")), "info");
         } else {
-            toast_hero.show("歌曲已在播放列表", "info");
+            toast_hero.show(&crate::i18n::t("toast-already-in-queue"), "info");
         }
         // 后台补齐新增歌曲封面（磁盘缓存优先），完成后逐行刷新队列
         let ui_p = ui_weak.clone();
@@ -274,7 +274,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
         let Some(u) = ui_weak.upgrade() else { return; };
         let m = u.get_detail_songs();
         if m.row_count() == 0 {
-            toast_dpa.show("暂无可播放的歌曲", "info");
+            toast_dpa.show(&crate::i18n::t("toast-nothing-to-play"), "info");
             return;
         }
         let q = u.get_queue();
@@ -293,9 +293,9 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
         u.set_queue(Rc::new(VecModel::from(songs)).into());
         if first_id != 0 { u.invoke_play_song(first_id); }
         if added > 0 {
-            toast_dpa.show(&format!("已加入 {} 首歌曲到播放列表", added), "info");
+            toast_dpa.show(&format!("{}{}{}", crate::i18n::t("toast-added-prefix"), added, crate::i18n::t("toast-added-suffix")), "info");
         } else {
-            toast_dpa.show("歌曲已在播放列表", "info");
+            toast_dpa.show(&crate::i18n::t("toast-already-in-queue"), "info");
         }
     });
 
@@ -348,7 +348,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
         {
             crate::platform::audio::begin_switch();
             u.set_playing(true);
-            toast_cb.show(&format!("续播：{}", last_name), "info");
+            toast_cb.show(&format!("{}{}", crate::i18n::t("toast-resume"), last_name), "info");
             resolver_cb(last_id, last_name, last_artist, last_dur, last_progress);
         } else if cur.duration_sec > 0.0 {
             crate::platform::audio::begin_switch();

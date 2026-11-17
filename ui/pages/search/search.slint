@@ -171,12 +171,14 @@ export component SearchPage inherits Rectangle {
         : search-type == 3 ? mv-results.length
         : search-type == 4 ? radio-results.length
         : results.length;
-    property <string> type-name: search-type == 1 ? "专辑"
-        : search-type == 2 ? "歌单"
-        : search-type == 3 ? "MV"
-        : search-type == 4 ? "电台"
-        : "单曲";
-    property <string> type-unit: search-type == 0 ? " 首" : search-type == 1 ? " 张" : " 个";
+    property <string> type-name: search-type == 1 ? Language.search-type-album
+        : search-type == 2 ? Language.search-type-playlist
+        : search-type == 3 ? Language.search-type-mv
+        : search-type == 4 ? Language.search-type-radio
+        : Language.search-type-song;
+    property <string> type-unit: search-type == 0 ? Language.search-unit-song
+        : search-type == 1 ? Language.search-unit-album
+        : Language.search-unit-other;
 
     // ==================== 搜索主页：热搜列表 + 搜索历史 ====================
     if (!root.searched) : ScrollView {
@@ -360,7 +362,7 @@ export component SearchPage inherits Rectangle {
             spacing: 8px;
             alignment: center;
             Text {
-                text: root.type-name + "搜索结果";
+                text: root.type-name + Language.search-results-suffix;
                 color: Theme.palette.primary;
                 font-size: 12.5px; font-weight: 600;
             }
@@ -376,7 +378,7 @@ export component SearchPage inherits Rectangle {
                 font-size: 13px;
             }
             Text {
-                text: root.loading ? "搜索中…" : root.type-count + root.type-unit;
+                text: root.loading ? Language.search-searching : root.type-count + root.type-unit;
                 color: Theme.palette.text-faint;
                 font-size: 12px;
             }
@@ -390,7 +392,7 @@ export component SearchPage inherits Rectangle {
         padding-left: 26px;
         padding-right: 26px;
         alignment: start;
-        for name[idx] in ["单曲", "专辑", "歌单", "MV", "电台"] : Rectangle {
+        for name[idx] in [Language.search-type-song, Language.search-type-album, Language.search-type-playlist, Language.search-type-mv, Language.search-type-radio] : Rectangle {
             height: 28px;
             border-radius: 14px;
             border-width: 1px;
@@ -567,13 +569,13 @@ export component SearchPage inherits Rectangle {
                 alignment: center;
                 spacing: 6px;
                 Text {
-                    text: "没有找到相关" + root.type-name;
+                    text: Language.search-none-prefix + root.type-name;
                     color: Theme.palette.text-secondary;
                     font-size: 14px;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "换个关键词或切换类型试试";
+                    text: Language.search-none-desc;
                     color: Theme.palette.text-faint;
                     font-size: 12px;
                     horizontal-alignment: center;

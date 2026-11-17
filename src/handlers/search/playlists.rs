@@ -169,7 +169,7 @@ pub(crate) fn setup_playlists(ctx: &Ctx) {
             // 取分类名与「是否每日推荐」需在 UI 线程读
             let is_daily = idx == 0;
             let cat_name = if is_daily {
-                "每日推荐".to_string()
+                crate::i18n::t("category-daily")
             } else {
                 ui_weak.upgrade()
                     .and_then(|u| u.get_playlist_categories().row_data(idx as usize).map(|s| s.to_string()))
@@ -229,7 +229,7 @@ pub(crate) fn setup_playlists(ctx: &Ctx) {
                 u.set_playlists_loading_more(true);
                 let is_daily = cat == 0;
                 let cat_name = if is_daily {
-                    "每日推荐".to_string()
+                    crate::i18n::t("category-daily")
                 } else {
                     u.get_playlist_categories().row_data(cat as usize).map(|s| s.to_string()).unwrap_or_default()
                 };

@@ -231,7 +231,7 @@ pub fn setup(ctx: &Ctx) {
         if uid == 0 { return; }
         // 已收藏 → toggle 即删除（name/sub/cover 仅收藏分支使用，此处传空）
         liked::toggle_resource(kind, uid, String::new(), String::new(), String::new());
-        toast_un.show("已取消收藏", "info");
+        toast_un.show(&crate::i18n::t("toast-unliked"), "info");
         fill_liked(&u);
         // 详情页若正开着同一资源，同步头部爱心状态
         if u.get_detail_res_kind() == kind && u.get_detail_res_id() == id {
@@ -259,7 +259,7 @@ pub fn setup(ctx: &Ctx) {
         let Some(u) = ui_weak.upgrade() else { return; };
         recent::clear();
         fill_recent(&u);
-        toast_cl.show("已清空最近播放", "info");
+        toast_cl.show(&crate::i18n::t("toast-recent-cleared"), "info");
     });
 
     // ---- 最近播放：分类切换（歌曲/MV）。数据已预填，仅同步 tab 状态 ----

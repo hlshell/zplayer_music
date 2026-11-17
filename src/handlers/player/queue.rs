@@ -14,7 +14,7 @@ pub(crate) fn setup_queue(ctx: &Ctx) {
     ctx.app.clone_strong().on_clear_queue(move || {
         let Some(u) = ui_weak.upgrade() else { return; };
         u.set_queue(Rc::new(VecModel::default()).into());
-        toast_cb.show("已清空播放列表", "info");
+        toast_cb.show(&crate::i18n::t("toast-queue-cleared"), "info");
     });
 
     let ui_weak = ctx.ui.clone();
@@ -41,7 +41,7 @@ pub(crate) fn setup_queue(ctx: &Ctx) {
             }
         }
         if let Some(name) = removed {
-            toast_cb.show(&format!("已移除：{}", name), "info");
+            toast_cb.show(&format!("{}{}", crate::i18n::t("toast-removed-prefix"), name), "info");
         }
     });
 }

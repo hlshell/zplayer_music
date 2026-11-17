@@ -116,9 +116,9 @@ pub fn make_resolver(ctx: &Ctx) -> Resolver {
                         let _ = u.set_playing(false);
                         let _ = u.set_playing_loading(false);
                         if n >= 5 {
-                            toast_f.show("连续多首无法播放，已停止", "warn");
+                            toast_f.show(&crate::i18n::t("toast-play-stop"), "warn");
                         } else {
-                            toast_f.show("该曲无法播放，已自动跳过", "warn");
+                            toast_f.show(&crate::i18n::t("toast-play-skip"), "warn");
                             // 复用已注册的下一首回调（内部按播放模式取目标 + 同一 resolver 播放）
                             let _ = u.invoke_next_song();
                         }

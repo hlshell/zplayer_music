@@ -260,7 +260,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 crate::platform::audio::set_output_device(&target);
             }
             let idx = devs.iter().position(|d| *d == target).unwrap_or(0);
-            let devs_ss: Vec<slint::SharedString> = devs.iter().map(|s| s.clone().into()).collect();
+            let def = crate::i18n::t("device-default");
+            let devs_ss: Vec<slint::SharedString> = devs
+                .iter()
+                .map(|s| if s == "默认设备" { def.clone() } else { s.clone() }.into())
+                .collect();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(u) = audio_ui.upgrade() {
                     u.set_output_devices(slint::ModelRc::from(devs_ss.as_slice()));
@@ -298,7 +302,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_realip_addr(cfg.network.realip_addr.clone().into());
     ui.set_cache_enabled(cfg.cache.enabled);
     ui.set_cache_limit_text(
-        (if cfg.app.cache_limit_mb == 0 { "不限制".to_string() } else { cfg.app.cache_limit_mb.to_string() }).into(),
+        (if cfg.app.cache_limit_mb == 0 { crate::i18n::t("cache-unlimited") } else { cfg.app.cache_limit_mb.to_string() }).into(),
     );
     ui.set_evict_index(cfg.cache.evict_strategy);
     // 缓存目录显示：用户设置的统一根目录（歌曲/封面/歌词子目录）
@@ -388,7 +392,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let v = crate::network::service::playlist_catalogue(&client_cb).await;
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(u) = ui_weak.upgrade() {
-                    let mut names: Vec<slint::SharedString> = vec!["每日推荐".into()];
+                    let mut names: Vec<slint::SharedString> = vec![crate::i18n::t("category-daily").into()];
                     if let Ok(val) = v {
                         // catlist 返回 sub（子分类）与 categories（父分类），都含 name；取任一
                         let list = val.get("sub").and_then(|s| s.as_array())

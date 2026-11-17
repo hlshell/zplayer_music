@@ -131,12 +131,22 @@ pub fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
     Rc::new(VecModel::from(items)).into()
 }
 
-/// 播放量格式化（歌单网格角标）：亿/万/原数，对齐 home 板块 fmt_plays。
+/// 播放量格式化（歌单网格角标）：中文亿/万，其他语言 M/K。
 pub(crate) fn fmt_plays_cat(n: u64) -> String {
-    if n >= 100_000_000 {
-        format!("{:.0}亿", n as f64 / 100_000_000.0)
-    } else if n >= 10_000 {
-        format!("{:.1}万", n as f64 / 10_000.0)
+    if crate::i18n::is_zh() {
+        if n >= 100_000_000 {
+            format!("{:.0}亿", n as f64 / 100_000_000.0)
+        } else if n >= 10_000 {
+            format!("{:.1}万", n as f64 / 10_000.0)
+        } else {
+            n.to_string()
+        }
+    } else if n >= 1_000_000_000 {
+        format!("{:.0}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
     }
