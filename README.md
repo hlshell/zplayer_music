@@ -58,10 +58,10 @@
 
 - **首页发现**：每日精选（渐变 Hero + 5 首）、精选歌单、热歌榜、热门歌单、歌手、专辑、新歌速递
 - **搜索**：歌曲 / 歌单 / 专辑多类型搜索，带搜索建议
-- **播放**：rodio 真实音频驱动（进度、音量、播放/暂停、上/下一首），网易云主源 + 多音源（咪咕/酷我/酷狗/QQ/Joox 等）自动兜底
-- **MV 播放**：内嵌 FFmpeg 解码器（软解 + 音频同步）
+- **播放**：rodio 真实音频驱动（进度、音量、播放/暂停、上/下一首），网易云主源 + 多音源自动兜底（咪咕 / 酷我 / 酷狗 / QQ / Joox / SoundCloud；桌面端另支持洛雪 `lx` 脚本音源）
+- **MV 播放**：FFmpeg 静态内嵌于单个可执行文件（软解 + 音频同步），macOS 额外启用 VideoToolbox 硬件解码
 - **我的音乐**：我喜欢、最近播放、本地音乐（文件夹扫描 + 标签解析 + 拖拽导入）
-- **设置**：网络代理、缓存目录、开机自启、语言切换（中/英）
+- **设置**：主题模式（浅色/深色/跟随系统）、主题色、界面字体、歌词布局、关闭行为、全局快捷键、网络代理与 RealIP、缓存目录/上限/淘汰策略与一键清理、开机自启、中英文切换、版本更新检查、捐赠支持
 - **桌面集成**：自定义无边框窗口（边缘缩放、标题栏拖拽、位置记忆）、系统托盘、Windows Toast 通知
 
 ## 本地构建
@@ -115,7 +115,7 @@ sudo apt-get install -y pkg-config clang libclang-dev \
   libasound2-dev libfontconfig1-dev libdbus-1-dev \
   libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
   libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
-  libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev libswscale-dev libswresample-dev
+  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
 
 cargo build --release   # 产物：target/release/zplayer-music
 ```
@@ -157,8 +157,8 @@ python -m http.server -d www 8080
 推送形如 `v*` 的 tag 即可触发 GitHub Actions 自动构建全部平台并创建 Release：
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.2.5
+git push origin v0.2.5
 ```
 
 流水线产出：Windows x64 / Linux x64 / macOS arm64 / macOS x64 桌面发行版 + Web 静态包。也可在 Actions 页面手动触发（输入版本号）。
@@ -167,7 +167,7 @@ git push origin v0.2.4
 
 ```
 ├── Cargo.toml / build.rs   # 依赖与构建脚本（desktop/web/mobile 三维 feature）
-├── build.ps1               # Windows 本地发布构建（含 FFmpeg DLL 部署）
+├── build.ps1               # Windows 本地发布构建（静态链接 FFmpeg，产出单 exe）
 ├── .github/workflows/      # CI：tag 触发多平台自动构建发布
 ├── LICENSE                 # 使用许可（仅学习交流，禁止商用）
 ├── docs/
@@ -177,9 +177,9 @@ git push origin v0.2.4
 ├── src/
 │   ├── main.rs             # 入口：无边框窗口、启动动画、全局装配
 │   ├── core/               # 播放队列、歌词、日志、MV 播放器（FFmpeg 解码）
-│   ├── network/            # netease（网易云 weapi）+ sources（多音源兜底）
+│   ├── network/            # netease（网易云 weapi）+ sources（多音源兜底，含洛雪脚本）
 │   ├── load/               # 首页发现页数据加载（填充 Slint 模型）
-│   ├── handlers/           # UI 事件接线：播放/搜索/浏览/收藏/本地/MV/设置
+│   ├── handlers/           # UI 事件接线：播放/搜索/浏览/收藏/本地/MV/榜单/快捷键/设置
 │   ├── persist/            # 配置/缓存/历史/收藏持久化
 │   ├── platform/           # 平台门面：音频输出/存储/托盘/自启/文件拖拽
 │   ├── i18n/               # 中英文语言包加载
