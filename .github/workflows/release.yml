@@ -353,9 +353,55 @@ jobs:
           path: zplayer-music-web.zip
           retention-days: 1
 
+  # ==================== Web 冒烟测试（跑在 build-web 产物之上，验证 wasm 能渲染 canvas） ====================
+  test-web-smoke:
+    needs: [check-skip, build-web]
+    if: needs.check-skip.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 下载 build-web 产物并解压
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-web
+          path: dist-zip
+      - run: unzip -oq dist-zip/zplayer-music-web.zip -d dist && ls -la dist
+
+      - name: 缓存 Playwright Chromium（避免每次下载 ~150MB）
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v159-headless-shell
+
+      - name: 安装 Playwright 并下载 Chromium headless shell
+        run: |
+          npm install --no-audit --no-fund -C scripts/web-test playwright@1.49.0
+          npx --yes playwright install chromium --with-deps || npx --yes playwright install chromium
+
+      - name: 启动静态服务器
+        run: |
+          node scripts/web-test/server.cjs dist 8899 > /tmp/web-test-server.log 2>&1 &
+          echo $! > /tmp/web-test-server.pid
+          sleep 2
+          curl -fsS http://127.0.0.1:8899/ -o /dev/null && echo "server OK" || { echo "server 未响应"; cat /tmp/web-test-server.log; exit 1; }
+
+      - name: 执行 Web 冒烟测试
+        run: |
+          set +e
+          WEB_TEST_URL=http://127.0.0.1:8899 node scripts/web-test/smoke.spec.mjs
+          RC=$?
+          kill "$(cat /tmp/web-test-server.pid)" 2>/dev/null || true
+          exit $RC
+
   # ==================== 汇总发布 ====================
   release:
-    needs: [check-skip, build-windows, build-linux, build-macos, build-web]
+    needs: [check-skip, build-windows, build-linux, build-macos, build-web, test-web-smoke]
     if: needs.check-skip.outputs.skip != 'true'
     runs-on: ubuntu-latest
     # 仓库默认 GITHUB_TOKEN 为只读（default_workflow_permissions=read），

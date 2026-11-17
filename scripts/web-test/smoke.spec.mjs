@@ -19,6 +19,8 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 const consoleErrors = [];
 const pageErrors = [];
+const gdResponses = [];   // gdstudio JSONP 响应：{url, status}
+const coverResponses = []; // music.126.net 封面图响应：{url, status}
 
 page.on("console", (msg) => {
   if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -26,6 +28,15 @@ page.on("console", (msg) => {
 page.on("pageerror", (err) => pageErrors.push(String(err)));
 page.on("requestfailed", (req) => {
   consoleErrors.push(`requestfailed: ${req.url()} → ${req.failure()?.errorText || "unknown"}`);
+});
+// 追踪 gdstudio（JSONP <script>）与封面图 CDN 的响应状态，用于断言数据真的到了
+page.on("response", (resp) => {
+  const u = resp.url();
+  if (u.includes("music-api.gdstudio.xyz")) {
+    gdResponses.push({ url: u, status: resp.status() });
+  } else if (u.includes("music.126.net") || u.includes("p1.music.126") || u.includes("p2.music.126")) {
+    coverResponses.push({ url: u, status: resp.status() });
+  }
 });
 
 let initErrorMsg = null;
@@ -72,28 +83,40 @@ if (canvasSize) {
   report("canvas 尺寸", false, "canvas 未找到");
 }
 
+// 等待首页数据加载：gdstudio JSONP 至少 1 个 200 响应（证明数据通道打通）
+// 首页启动会并发拉 5 个歌单详情 + search("热门")，正常应在数秒内返回。
+const dataWaitStart = Date.now();
+while (gdResponses.filter((r) => r.status === 200).length === 0 && Date.now() - dataWaitStart < 12000) {
+  await new Promise((r) => setTimeout(r, 300));
+}
+const gdOk = gdResponses.filter((r) => r.status === 200).length;
+const gdFail = gdResponses.filter((r) => r.status >= 400 || r.status === 0).length;
+report(
+  "gdstudio JSONP 数据",
+  gdOk > 0,
+  gdOk > 0
+    ? `${gdOk} 个成功响应（失败 ${gdFail}）`
+    : `无成功响应；共收到 ${gdResponses.length} 个，失败 ${gdFail}`
+);
+
+// 封面图加载：证明 search → pic → 126.net 全链路打通（软断言，封面失败不阻塞主流程）
+const coverOk = coverResponses.filter((r) => r.status === 200).length;
+if (coverOk > 0) {
+  report("封面图加载", true, `${coverOk} 张封面图成功加载`);
+} else {
+  console.log(`  ⚠️  封面图未加载到（${coverResponses.length} 次请求），可能首页数据未完整返回`);
+}
+
 // DOM 上的初始化失败提示
 report("DOM 初始化失败提示", !initErrorMsg, initErrorMsg ?? "无");
 
-// Console 错误：过滤控制流信号 + 已知的 CORS/网络失败（Web 端暂时不支持，单独修复）
+// Console 错误：JSONP 已消除 CORS，因此 CORS/ERR_FAILED 现在算真实错误
 const realConsoleErrors = consoleErrors.filter((e) => {
   if (e.includes("Using exceptions for control flow")) return false;
   if (e.includes("AbortError")) return false;
-  if (e.includes("CORS policy")) return false;
-  if (e.includes("music-api.gdstudio.xyz")) return false;
-  if (e.includes("requestfailed:")) return false;
-  // Chromium CORS block 还会单独打一条裸 "Failed to load resource: net::ERR_FAILED"
-  // 我们的静态服务器/本地 wasm 都能正常加载，所以裸 ERR_FAILED 只可能来自 CORS block
-  if (e.includes("net::ERR_FAILED") || e === "Failed to load resource: net::ERR_FAILED") return false;
   return true;
 });
-const corsWarnings = consoleErrors.filter(
-  (e) => e.includes("music-api.gdstudio.xyz") || e.includes("CORS policy")
-);
 report("console error", realConsoleErrors.length === 0, realConsoleErrors.join(" | ") || "无");
-if (corsWarnings.length > 0) {
-  console.log(`  ⚠️  有 ${corsWarnings.length} 条 CORS 警告（Web 端网易云 API 被浏览器阻止，不影响渲染验证）`);
-}
 
 // pageerror（未捕获异常）
 report("pageerror", pageErrors.length === 0, pageErrors.join(" | ") || "无");

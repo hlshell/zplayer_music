@@ -49,3 +49,9 @@ Desktop.ini
 
 # 本地 cargo 环境（机器特定路径，不入库；模板见 README）
 .cargo/config.toml
+
+# Playwright / 本地 Web 测试工具
+scripts/web-test/node_modules/
+scripts/web-test/dist/
+playwright-report/
+test-results/

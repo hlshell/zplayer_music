@@ -311,7 +311,47 @@ async fn fetch_text_inner(url: &str, mut attempt: u32) -> Option<String> {
     }
 }
 
+/// 通过 <script> 标签的 JSONP 通道请求 gdstudio。
+/// 浏览器 fetch 被 CORS 拦截，但 <script> 天然跨域；gdmusic 已实测支持 ?callback=xxx。
+/// helper 由 web/index.html 在 wasm 加载前注入 window.__zplayer_jsonp(url) -> Promise<data>。
+async fn jsonp_fetch(url: &str) -> Option<(u16, Option<String>)> {
+    let window = web_sys::window()?;
+    let obj: &js_sys::Object = window.unchecked_ref();
+    let fn_val = js_sys::Reflect::get(obj, &"__zplayer_jsonp".into()).ok()?;
+    let func: &js_sys::Function = fn_val.dyn_ref()?;
+    let promise_val = func.call1(&JsValue::NULL, &url.into()).ok()?;
+    let promise: js_sys::Promise = promise_val.dyn_into().ok()?;
+    let result = JsFuture::from(promise).await.ok()?;
+    // JSONP 回调拿到 JS 对象，序列化为 JSON 字符串复用下游 serde_json 解析
+    let json = js_sys::JSON::stringify(&result).ok()?.as_string()?;
+    Some((200, Some(json)))
+}
+
+/// 走本地同源代理（server.cjs 的 /proxy 端点）转发 gdstudio 请求。
+/// 服务端直连目标，彻底绕开浏览器 CORS / ORB 限制，且返回原始 JSON 供 serde 解析。
+/// 无代理端点时返回 404，由调用方回退 JSONP。
+async fn proxy_fetch(url: &str) -> Option<(u16, Option<String>)> {
+    let window = web_sys::window()?;
+    // 相对路径：浏览器自动解析到当前源（与 server.cjs /proxy 同源）
+    let proxy_url = format!("/proxy?url={}", js_sys::encode_uri_component(url));
+    let promise = window.fetch_with_str(&proxy_url);
+    let resp: web_sys::Response = JsFuture::from(promise).await.ok()?.dyn_into().ok()?;
+    let status = resp.status();
+    if status != 200 {
+        return Some((status, None));
+    }
+    let text = JsFuture::from(resp.text().ok()?).await.ok()?;
+    Some((status, text.as_string()))
+}
+
 async fn do_fetch_text(url: &str) -> Option<(u16, Option<String>)> {
+    // gdstudio：优先走本地代理（测试/自托管，无 CORS/ORB），404/失败回退 JSONP（静态托管）
+    if url.contains("music-api.gdstudio.xyz") {
+        match proxy_fetch(url).await {
+            Some((404, _)) | None => return jsonp_fetch(url).await,
+            Some(r) => return Some(r),
+        }
+    }
     let window = web_sys::window()?;
     let promise = window.fetch_with_str(url);
     let resp: web_sys::Response = JsFuture::from(promise).await.ok()?.dyn_into().ok()?;

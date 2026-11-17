@@ -20,6 +20,33 @@
 <body>
   <canvas id="canvas"></canvas>
   <noscript>此应用需要启用 JavaScript 才能运行。</noscript>
+  <script>
+    // JSONP：用于绕过 music-api.gdstudio.xyz 的 CORS 限制（浏览器 fetch 被拦，
+    // 但 <script> 标签天然跨域）。gdmusic 已实测支持 ?callback=xxx 返回 fn({json})。
+    // 调用方（wasm）通过 window.__zplayer_jsonp(url) 拿到 Promise<data>。
+    window.__zplayer_jsonp = function (url) {
+      return new Promise(function (resolve, reject) {
+        var cbName = '__zpcb_' + Date.now() + '_' + Math.floor(Math.random() * 1e9);
+        var timer = null;
+        var script = null;
+
+        function cleanup() {
+          if (timer) { clearTimeout(timer); timer = null; }
+          if (script && script.parentNode) { script.parentNode.removeChild(script); }
+          try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+        }
+
+        window[cbName] = function (data) { resolve(data); cleanup(); };
+
+        script = document.createElement('script');
+        script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + cbName;
+        script.onerror = function () { reject(new Error('jsonp_network')); cleanup(); };
+        document.head.appendChild(script);
+
+        timer = setTimeout(function () { reject(new Error('jsonp_timeout')); cleanup(); }, 15000);
+      });
+    };
+  </script>
   <script type="module">
     import init from "./zplayer-music.js?v=20261025F";
     init()

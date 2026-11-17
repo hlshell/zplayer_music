@@ -4,7 +4,7 @@
 //      node run.js /tmp/my-dist   (指定已有 dist 目录，跳过构建/绑定)
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -57,7 +57,7 @@ if (needBuild) {
   // 拷贝 index.html
   const html = readFileSync(join(REPO_ROOT, "web", "index.html"));
   const htmlPath = join(DIST_DIR, "index.html");
-  require("node:fs").writeFileSync(htmlPath, html);
+  writeFileSync(htmlPath, html);
   console.log(`index.html → ${htmlPath}`);
 } else {
   console.log(`\n===== 1-2/3 跳过（dist 已存在）=====`);
