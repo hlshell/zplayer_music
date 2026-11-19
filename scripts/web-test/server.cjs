@@ -29,6 +29,39 @@ const TYPES = {
   ".ttf": "font/ttf",
 };
 
+// 带重试的上游请求：503/429（限流）或网络错误时最多重试 2 次，退避 500ms/1000ms。
+// gdstudio 实测偶发限流，服务端重试可显著降低客户端可见失败率。
+function doProxyRequest(lib, opts, maxRetries, cb) {
+  let attempt = 0;
+  function tryOnce() {
+    const upstream = lib.request(opts, (upRes) => {
+      const chunks = [];
+      upRes.on("data", (c) => chunks.push(c));
+      upRes.on("end", () => {
+        const status = upRes.statusCode || 200;
+        const buf = Buffer.concat(chunks);
+        if ((status === 503 || status === 429) && attempt < maxRetries) {
+          attempt++;
+          setTimeout(tryOnce, 500 * attempt);
+          return;
+        }
+        cb(null, { status, buf, ct: upRes.headers["content-type"] || "application/octet-stream" });
+      });
+    });
+    upstream.on("error", () => {
+      if (attempt < maxRetries) {
+        attempt++;
+        setTimeout(tryOnce, 500 * attempt);
+      } else {
+        cb(new Error("upstream failed after retries"));
+      }
+    });
+    upstream.setTimeout(20000, () => upstream.destroy(new Error("timeout")));
+    upstream.end();
+  }
+  tryOnce();
+}
+
 // 转发目标 URL 的代理：服务端直连，彻底绕开浏览器 CORS / ORB 限制。
 // 用法：GET /proxy?url=<encodeURIComponent(target)>
 function proxyHandler(req, res) {
@@ -61,28 +94,19 @@ function proxyHandler(req, res) {
     path: parsed.pathname + parsed.search,
     headers: { "User-Agent": "Mozilla/5.0 ZPlayer-WebTest/1.0" },
   };
-  const upstream = lib.request(opts, (upRes) => {
-    const chunks = [];
-    upRes.on("data", (c) => chunks.push(c));
-    upRes.on("end", () => {
-      const buf = Buffer.concat(chunks);
-      const ct = upRes.headers["content-type"] || "application/octet-stream";
-      res.writeHead(upRes.statusCode || 200, {
-        "Content-Type": ct,
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-store",
-      });
-      res.end(buf);
+  doProxyRequest(lib, opts, 2, (err, result) => {
+    if (err) {
+      res.writeHead(502, { "Access-Control-Allow-Origin": "*" });
+      res.end("proxy error: " + err.message);
+      return;
+    }
+    res.writeHead(result.status, {
+      "Content-Type": result.ct,
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "no-store",
     });
+    res.end(result.buf);
   });
-  upstream.on("error", (e) => {
-    res.writeHead(502, { "Access-Control-Allow-Origin": "*" });
-    res.end("proxy error: " + e.message);
-  });
-  upstream.setTimeout(20000, () => {
-    upstream.destroy(new Error("timeout"));
-  });
-  upstream.end();
 }
 
 const server = http.createServer((req, res) => {

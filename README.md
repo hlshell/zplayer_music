@@ -34,6 +34,8 @@
 | HarmonyOS | — | 🔜 待开发 |
 
 > 移动端说明：Android 端只考虑 `arm64-v8a`（不发布 armeabi-v7a / x86）；iOS 端最低系统版本要求 iOS 18；HarmonyOS 适配计划中。
+>
+> Web 端说明：核心播放/搜索/歌单/收藏/最近播放可用；部分设置项（缓存/代理/输出设备/开机自启等）与专辑/电台/MV/榜单详情页受限于 gdmusic API 端点，走空态或待补充。
 
 ## 下载
 
@@ -152,6 +154,13 @@ cp web/index.html www/
 python -m http.server -d www 8080
 ```
 
+> **Web 数据通道**：Web 端音源 `music-api.gdstudio.xyz` 被浏览器 CORS 拦截。
+> `src/web/gd.rs` 的 `do_fetch_text` 优先走同源 `/proxy?url=...` 端点（服务端直连，彻底绕开 CORS 与 ORB），
+> 无代理端点（返回 404）时回退 JSONP（`web/index.html` 注入的 `window.__zplayer_jsonp`）。
+> 生产部署建议提供 `/proxy` 转发端点（可参考零依赖的 [server.cjs](scripts/web-test/server.cjs)，静态文件 + 代理一体化）；
+> 纯静态托管（如 GitHub Pages）下回退 JSONP，个别大响应端点可能受浏览器 ORB（Opaque Response Blocking）限制。
+> 客户端对上游 5xx/429 限流已内置重试退避（最多 2 次），失败走空态兜底。
+
 ## 发布流程（CI）
 
 推送形如 `v*` 的 tag 即可触发 GitHub Actions 自动构建全部平台并创建 Release：
@@ -162,6 +171,34 @@ git push origin v0.2.5
 ```
 
 流水线产出：Windows x64 / Linux x64 / macOS arm64 / macOS x64 桌面发行版 + Web 静态包。也可在 Actions 页面手动触发（输入版本号）。
+
+## 自动化测试
+
+### Web 端冒烟测试（Playwright）
+
+`scripts/web-test/` 下是一套零框架依赖的 Web 冒烟测试，验证 wasm 能加载、canvas 能渲染、数据通道全链路打通：
+
+| 断言 | 说明 |
+| --- | --- |
+| canvas 出现 | wasm init 完成，Slint 渲染管线启动 |
+| canvas 尺寸 | 缓冲区尺寸正确（非 HTML 默认 300×150） |
+| 封面图加载 | search → pic → 代理 → music.126.net 全链路打通 |
+| gdstudio 数据 | 音源数据通道有成功响应 |
+| DOM 初始化失败提示 | 无 wasm 初始化错误 |
+| console error | 无应用错误（过滤 winit 控制流信号与上游 503/429 限流） |
+| pageerror | 无未捕获异常 |
+| canvas 实际渲染 | WebGL framebuffer 非白像素占比 > 5% |
+
+本地运行（需先完成 wasm 构建到 `scripts/web-test/dist/`）：
+
+```powershell
+cd scripts/web-test
+npm install       # 唯一依赖 playwright@1.49
+npx playwright install chromium
+node smoke.spec.mjs   # 或用 run.js 一键构建+测试
+```
+
+CI 中 `test-web-smoke` job 跑在 `build-web` 产物之上，`release` 发布任务依赖它通过——Web 冒烟不通过则阻断发布。
 
 ## 项目结构
 
@@ -191,6 +228,7 @@ git push origin v0.2.5
 │   ├── components/         # 标题栏/播放栏/进度条/启动页/数据模型
 │   ├── pages/              # 首页/搜索/歌单/专辑/榜单/MV/电台/我喜欢/最近/本地/设置
 │   └── assets/             # 图标、语言包、捐赠二维码
+├── scripts/web-test/       # Web 冒烟测试（Playwright）+ 零依赖静态服务器/代理端点
 └── web/index.html          # Web 部署入口页
 ```
 
@@ -210,7 +248,7 @@ ZPlayer Music 完全免费且开源：没有广告、没有会员，所有功能
 | 语言 | Rust（edition 2024） |
 | 音频 | rodio + cpal（桌面）；WebAudio（Web） |
 | MV 解码 | FFmpeg（ffmpeg-next 9，三平台发行版均静态链接进单个可执行文件） |
-| 网络 | reqwest（rustls，桌面）/ web-sys fetch（Web） |
+| 网络 | reqwest（rustls，桌面）/ web-sys fetch + 同源代理 + JSONP 兜底（Web，绕开 CORS/ORB） |
 | 数据源 | 网易云 weapi（aes-cbc 加密）+ 咪咕/酷我/酷狗/QQ/Joox/SoundCloud 兜底 |
 
 ## 许可

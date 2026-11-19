@@ -53,8 +53,10 @@ page.on("domcontentloaded", () => {
 });
 
 const tStart = Date.now();
+// 用 domcontentloaded 而非 networkidle：首页会持续懒加载封面图/数据，
+// networkidle 可能永远达不到（500ms 无网络活动），导致 goto 超时。
 try {
-  await page.goto(URL, { waitUntil: "networkidle", timeout: TIMEOUT_MS });
+  await page.goto(URL, { waitUntil: "domcontentloaded", timeout: TIMEOUT_MS });
 } catch (e) {
   report("page.goto", false, `超时或网络错误: ${e.message}`);
   await browser.close();
@@ -70,7 +72,38 @@ try {
   report("canvas 出现", false, "15s 内未出现 canvas 元素");
 }
 
-// 取 canvas 尺寸
+// 等待首页数据全链路加载：封面图（music.126.net）至少 1 个 200 响应，
+// 证明 search → pic → 代理 → 126.net 全链路打通。最多等 15s。
+const dataWaitStart = Date.now();
+while (
+  coverResponses.filter((r) => r.status === 200).length === 0 &&
+  Date.now() - dataWaitStart < 15000
+) {
+  await new Promise((r) => setTimeout(r, 300));
+}
+const coverOk = coverResponses.filter((r) => r.status === 200).length;
+const coverFail = coverResponses.filter((r) => r.status >= 400 || r.status === 0).length;
+report(
+  "封面图加载",
+  coverOk > 0,
+  coverOk > 0
+    ? `${coverOk} 张封面图成功加载（失败 ${coverFail}）`
+    : `未加载到封面图；共 ${coverResponses.length} 次请求，失败 ${coverFail}`
+);
+
+// gdstudio 数据通道（封面图加载的前置，附加统计）
+const gdOk = gdResponses.filter((r) => r.status === 200).length;
+const gdFail = gdResponses.filter((r) => r.status >= 400 || r.status === 0).length;
+report(
+  "gdstudio 数据",
+  gdOk > 0,
+  gdOk > 0
+    ? `${gdOk} 个成功响应（失败 ${gdFail}）`
+    : `无成功响应；共 ${gdResponses.length} 个，失败 ${gdFail}`
+);
+
+// 取 canvas 尺寸（放在数据加载之后：Slint 需在渲染管线启动后才设置 canvas 缓冲区尺寸，
+// 刚出现时可能还是 HTML 默认 300x150，此时已是最终尺寸）
 const canvasSize = await page.evaluate(() => {
   const c = document.querySelector("canvas");
   if (!c) return null;
@@ -83,37 +116,15 @@ if (canvasSize) {
   report("canvas 尺寸", false, "canvas 未找到");
 }
 
-// 等待首页数据加载：gdstudio JSONP 至少 1 个 200 响应（证明数据通道打通）
-// 首页启动会并发拉 5 个歌单详情 + search("热门")，正常应在数秒内返回。
-const dataWaitStart = Date.now();
-while (gdResponses.filter((r) => r.status === 200).length === 0 && Date.now() - dataWaitStart < 12000) {
-  await new Promise((r) => setTimeout(r, 300));
-}
-const gdOk = gdResponses.filter((r) => r.status === 200).length;
-const gdFail = gdResponses.filter((r) => r.status >= 400 || r.status === 0).length;
-report(
-  "gdstudio JSONP 数据",
-  gdOk > 0,
-  gdOk > 0
-    ? `${gdOk} 个成功响应（失败 ${gdFail}）`
-    : `无成功响应；共收到 ${gdResponses.length} 个，失败 ${gdFail}`
-);
-
-// 封面图加载：证明 search → pic → 126.net 全链路打通（软断言，封面失败不阻塞主流程）
-const coverOk = coverResponses.filter((r) => r.status === 200).length;
-if (coverOk > 0) {
-  report("封面图加载", true, `${coverOk} 张封面图成功加载`);
-} else {
-  console.log(`  ⚠️  封面图未加载到（${coverResponses.length} 次请求），可能首页数据未完整返回`);
-}
-
 // DOM 上的初始化失败提示
 report("DOM 初始化失败提示", !initErrorMsg, initErrorMsg ?? "无");
 
-// Console 错误：JSONP 已消除 CORS，因此 CORS/ERR_FAILED 现在算真实错误
+// Console 错误：过滤已知的非应用错误
 const realConsoleErrors = consoleErrors.filter((e) => {
-  if (e.includes("Using exceptions for control flow")) return false;
+  if (e.includes("Using exceptions for control flow")) return false; // winit 控制流信号
   if (e.includes("AbortError")) return false;
+  // 上游 gdstudio 限流（503/429）：fetch_text_inner 已重试 + 空态兜底，不算应用错误
+  if (e.includes("status of 503") || e.includes("status of 429")) return false;
   return true;
 });
 report("console error", realConsoleErrors.length === 0, realConsoleErrors.join(" | ") || "无");
