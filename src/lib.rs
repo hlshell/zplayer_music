@@ -46,3 +46,5 @@ pub fn boot_elapsed_ms() -> u128 {
 
 #[cfg(feature = "mobile")]
 pub mod mobile;
+
+pub mod ui;
