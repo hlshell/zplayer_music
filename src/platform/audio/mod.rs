@@ -21,5 +21,10 @@ mod web;
 #[cfg(feature = "web")]
 pub use web::*;
 
-// 后续（#33 mobile）：
-// #[cfg(feature = "mobile")] mod mobile;  pub use mobile::*;
+// 移动端复用 rodio（与桌面同源），设备枚举/切换由系统媒体路由替代
+#[cfg(feature = "mobile")]
+mod common_rodio;
+#[cfg(feature = "mobile")]
+mod mobile;
+#[cfg(feature = "mobile")]
+pub use mobile::*;

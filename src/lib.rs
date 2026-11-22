@@ -29,6 +29,7 @@ pub use platform::audio as player;
 // 移动端阶段 1：仅存储门面（config/cache 经它读写）
 #[cfg(feature = "mobile")]
 mod platform {
+    pub mod audio;
     pub mod storage;
 }
 
