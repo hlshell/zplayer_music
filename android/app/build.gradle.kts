@@ -52,6 +52,13 @@ val cargoNdkBuild by tasks.registering(Exec::class) {
     )
     environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
     environment("ANDROID_HOME", android.sdkDirectory.absolutePath)
+    // Slint 的 i-slint-backend-android-activity build.rs（依赖 android-build crate）在
+    // 未指定平台时会取 SDK platforms/ 下“最高版本”目录并要求其含 android.jar；CI runner
+    // 预装了 android-37.2-beta3 等预览目录但无 android.jar，导致 panic
+    // “No Android platforms found”。这里显式锁定与 compileSdk 一致的 android-35 与
+    // build-tools 版本，避免依赖目录扫描结果。
+    environment("ANDROID_PLATFORM", "android-35")
+    environment("ANDROID_BUILD_TOOLS_VERSION", "35.0.0")
     // 增量判定：Rust 源码、UI、构建脚本或 Cargo.toml 变更才重跑
     inputs.dir(repoRoot.resolve("src"))
     inputs.dir(repoRoot.resolve("ui"))
