@@ -29,13 +29,16 @@ pub use crate::core::song_util::{from, model, parse_tracks, to, SongBase};
 #[derive(Clone)] pub(crate) struct PlaylistBase { id: i32, name: SharedString, plays: SharedString, from: slint::Color, to: slint::Color, url: String }
 #[derive(Clone)] pub(crate) struct ArtistBase { id: i32, name: SharedString, initial: SharedString, from: slint::Color, to: slint::Color, url: String }
 #[derive(Clone)] pub(crate) struct AlbumBase { id: i32, name: SharedString, artist: SharedString, year: SharedString, from: slint::Color, to: slint::Color, url: String }
-#[derive(Clone)] pub(crate) struct NewSongBase { id: i32, name: SharedString, artist: SharedString, url: String }
 
 /// Hero 详情页/播放全部共用的歌曲池：榜单全量 tracks（含封面 URL）。
 /// 在 load_initial 中填充；on_hero_play_all / on_open_daily_detail 读取。
 /// 内部用 Arc 包裹：读取方拿到的是 Arc 快照（仅原子加引用计数），
 /// 避免点歌/开详情等高频路径整池深拷贝（几十首 SharedString）。
 pub static HERO_POOL: std::sync::LazyLock<Mutex<Arc<Vec<SongBase>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(Arc::new(Vec::new())));
+
+/// 首页新歌速递歌曲池：右键播放/下一首播放与行点击播放的元数据源。
+pub static NEW_SONG_POOL: std::sync::LazyLock<Mutex<Arc<Vec<SongBase>>>> =
     std::sync::LazyLock::new(|| Mutex::new(Arc::new(Vec::new())));
 
 /// 榜单歌单封面 URL（Hero 卡/详情页头部背景，走封面缓存）。
@@ -207,6 +210,7 @@ async fn apply_home_data(
     let artists = artists::build_artists(&Ok(ta.clone()));
     let albums = albums::build_albums(&Ok(na.clone()));
     let newsongs = newsongs::build_newsongs(&Ok(ns.clone()));
+    *NEW_SONG_POOL.lock().unwrap() = Arc::new(newsongs.clone());
 
     // 当前曲目恢复目标：优先上次播放歌曲（队列中匹配），否则队列第一首。
     // 封面分两批：第一批全部占位（不阻塞 UI 线程），第二批批量取图（磁盘缓存优先）后补图。

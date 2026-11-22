@@ -11,4 +11,4 @@ pub use home::{
     to, warm_rows, SongBase,
 };
 #[allow(unused_imports)]
-pub use home::{HERO_COVER_URL, HERO_POOL};
+pub use home::{HERO_COVER_URL, HERO_POOL, NEW_SONG_POOL};

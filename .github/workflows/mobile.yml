@@ -41,7 +41,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ubuntu-latest 预装 Android SDK；显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
+      # ubuntu-latest 预装 Android SDK，但 sdkmanager 不在默认 PATH；显式探测其位置，
+      # 加入 PATH 并暴露 ANDROID_HOME/ANDROID_SDK_ROOT，供后续 sdkmanager / gradle 步骤使用。
+      - name: 配置 Android SDK 路径
+        run: |
+          for c in "$ANDROID_SDK_ROOT" "$ANDROID_HOME" "/usr/local/lib/android/sdk"; do
+            if [ -n "$c" ] && [ -x "$c/cmdline-tools/latest/bin/sdkmanager" ]; then SDK_ROOT="$c"; break; fi
+          done
+          if [ -z "${SDK_ROOT:-}" ]; then echo "::error::未找到 Android SDK sdkmanager"; exit 1; fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      # 显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
       - name: 接受 Android SDK 许可证并安装 NDK
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
@@ -141,7 +154,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ubuntu-latest 预装 Android SDK；显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
+      # ubuntu-latest 预装 Android SDK，但 sdkmanager 不在默认 PATH；显式探测其位置，
+      # 加入 PATH 并暴露 ANDROID_HOME/ANDROID_SDK_ROOT，供后续 sdkmanager / gradle 步骤使用。
+      - name: 配置 Android SDK 路径
+        run: |
+          for c in "$ANDROID_SDK_ROOT" "$ANDROID_HOME" "/usr/local/lib/android/sdk"; do
+            if [ -n "$c" ] && [ -x "$c/cmdline-tools/latest/bin/sdkmanager" ]; then SDK_ROOT="$c"; break; fi
+          done
+          if [ -z "${SDK_ROOT:-}" ]; then echo "::error::未找到 Android SDK sdkmanager"; exit 1; fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      # 显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
       - name: 接受 Android SDK 许可证并安装 NDK
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
