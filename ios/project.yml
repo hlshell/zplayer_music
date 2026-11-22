@@ -26,7 +26,7 @@ targets:
         # 直接引用仓库内的 Info.plist，避免 XcodeGen 按 properties 重写该文件
         INFOPLIST_FILE: Info.plist
     postCompileScripts:
-      - script: "\"$SRCROOT/build_rust.sh\""
+      - script: "bash \"$SRCROOT/build_rust.sh\""
         name: Build Rust Binary
         outputFiles:
           - $TARGET_BUILD_DIR/$EXECUTABLE_PATH

@@ -24,7 +24,7 @@ jobs:
   check-android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -36,15 +36,16 @@ jobs:
       - name: 安装宿主依赖（cpal/ALSA）
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
-      - name: 安装 NDK 27.0.12077973（与 app/build.gradle.kts 一致）
-        run: sdkmanager "ndk;27.0.12077973"
+      # ubuntu-latest 预装 Android SDK；显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
+      - name: 接受 Android SDK 许可证并安装 NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "ndk;27.0.12077973"
 
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk --locked
@@ -74,7 +75,7 @@ jobs:
   check-ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -127,7 +128,7 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -135,17 +136,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
-      - name: 安装 NDK 与 cargo-ndk
+      # ubuntu-latest 预装 Android SDK；显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
+      - name: 接受 Android SDK 许可证并安装 NDK
         run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "ndk;27.0.12077973"
-          cargo install cargo-ndk --locked
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk --locked
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -194,7 +197,7 @@ jobs:
       IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
       IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
