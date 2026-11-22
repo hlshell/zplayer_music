@@ -107,7 +107,6 @@ semver = { version = "1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # 桌面/mobile 共享的网络与异步运行时（web 不拉）
-reqwest = { version = "0.12", features = ["json", "cookies", "rustls-tls", "socks", "blocking"] }
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
 # 配置/缓存目录（web 用 IndexedDB，不拉 dirs）
 dirs = "5"
@@ -117,6 +116,18 @@ dirs = "5"
 # cpal 依赖 web-sys 仅在其 wasm 后端；desktop 编译不拉 web-sys。
 rodio = { version = "0.19", optional = true }
 cpal = { version = "0.15", optional = true }
+
+# 桌面端：reqwest 保留 default-tls（系统原生 TLS：Windows SChannel /
+#   macOS SecureTransport / Linux openssl），行为与历史一致；额外带 rustls-tls。
+[target.'cfg(all(not(target_arch = "wasm32"), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+reqwest = { version = "0.12", features = ["json", "cookies", "rustls-tls", "socks", "blocking"] }
+
+# 移动端（android/ios）：关闭 reqwest 的 default-tls，否则 Android 交叉编译会拉
+#   native-tls → openssl-sys，在 TARGET=aarch64-linux-android 下找不到 Android 版
+#   OpenSSL 而构建失败（run 45019526025）。仅用 rustls-tls，功能等价且无原生依赖。
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls", "socks", "blocking"] }
+
 # MV 播放器（内嵌自 rs-wgpu-video-player/player-core，本地 cpal 0.15 版）
 # FFmpeg 9 核心组件仅 4 个（avutil 隐含）：
 #   codec / format / software-resampling / software-scaling
