@@ -9,6 +9,18 @@ description = "ZPlayer Music 播放器的 Slint demo（紫色主题，对齐现�
 [package.metadata.winres]
 FileDescription = "ZPlayer Music"
 ProductName = "ZPlayer Music"
+
+[lib]
+name = "zplayer_music"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+# bin 入口仅 desktop / web 使用（fn main 受 desktop feature 门控）；
+# 移动端（Android/iOS）构建 lib 目标（cdylib/staticlib），命令需带 --lib。
+[[bin]]
+name = "zplayer-music"
+path = "src/main.rs"
+
 [features]
 default = ["desktop"]
 desktop = ["dep:rodio", "dep:cpal", "dep:tinyfiledialogs", "dep:winapi", "dep:simplelog", "dep:rquickjs", "dep:unm_engine", "dep:unm_types", "dep:unm_engine_kuwo", "dep:unm_api_utils", "dep:unm_engine_migu", "dep:unm_engine_kugou", "dep:thiserror", "dep:zip", "dep:tar", "dep:flate2", "dep:semver"]

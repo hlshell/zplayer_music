@@ -3,6 +3,9 @@
 // wasm 构建无 main：由 cfg(wasm32) 的 web_main 提供 wasm_bindgen(start) 入口
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
+// desktop / web(wasm32) 入口都需要生成的 UI 类型（web 构建为 --no-default-features
+// --features web，不含 desktop feature，故必须显式覆盖 web 与 wasm32）
+#[cfg(any(feature = "desktop", feature = "web", target_arch = "wasm32"))]
 slint::include_modules!();
 
 // ---- 从 src-tauri 迁移的后端纯 Rust 核心 ----
@@ -83,7 +86,8 @@ pub fn boot_elapsed_ms() -> u128 {
     BOOT_T0.get_or_init(std::time::Instant::now).elapsed().as_millis()
 }
 
-// ---- 桌面/mobile 入口（web 最小闭环不编译，见下方 cfg(wasm) 段）----
+// ---- 桌面入口（desktop feature；web 最小闭环见下方 cfg(wasm) 段）----
+#[cfg(feature = "desktop")]
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), slint::PlatformError> {
     // 启动性能打点：各阶段累计耗时写日志，定位启动慢的阶段（低频输出，保留无碍）

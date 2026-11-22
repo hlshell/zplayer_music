@@ -5,6 +5,8 @@ fn main() {
     // 统一从 CARGO_CFG_TARGET_ARCH / CARGO_CFG_TARGET_OS 读取真实编译目标。
     let target_arch_env = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_os_env = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    // 目标 ABI（msvc / gnu）：link-arg 里的 `xxx.lib` 文件名仅 MSVC 链接器可用
+    let target_env_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let is_mobile = std::env::var("CARGO_FEATURE_MOBILE").is_ok()
         || target_os_env == "android"
         || target_os_env == "ios";
@@ -43,6 +45,13 @@ fn main() {
     if target_arch_env != "wasm32" && target_os_env != "android" && target_os_env != "ios" {
         println!("cargo:rustc-link-lib=mfuuid");
         println!("cargo:rustc-link-lib=strmiids");
+        // lib 与 bin 同包共存时，bin 经 --extern 引入 lib rlib 会把这些库排到 FFmpeg
+        // 静态库之前；link.exe 单趟解析导致 mfenc.o 的 IID_* 未解析，故补一份末尾 link-arg。
+        // 仅 MSVC 目标：`.lib` 文件名在 GNU 目标（crt 静态库为 lib*.a）下不可用。
+        if target_env_env == "msvc" {
+            println!("cargo:rustc-link-arg=mfuuid.lib");
+            println!("cargo:rustc-link-arg=strmiids.lib");
+        }
     }
 
     // ---- Linux / macOS：静态链接 FFmpeg 时补足链接器参数 ----
