@@ -1,10 +1,20 @@
 fn main() {
     // 使用 Fluent 组件样式
     let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
+    // build script 按 host 编译，cfg 判断的是 host 而非真实目标；
+    // 统一从 CARGO_CFG_TARGET_ARCH / CARGO_CFG_TARGET_OS 读取真实编译目标。
+    let target_arch_env = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let target_os_env = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let is_mobile = std::env::var("CARGO_FEATURE_MOBILE").is_ok()
+        || target_os_env == "android"
+        || target_os_env == "ios";
     // web(wasm32)：编译 appwindow-web.slint wrapper（同一套 UI 骨架 + 额外编译期嵌入 SimHei
-    // 中文字体，re-export AppWindow）；其余目标编译 appwindow.slint（系统字体，不嵌 9.7MB 字体）
-    let ui_file = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+    // 中文字体，re-export AppWindow）；移动端编译 ui/mobile/appwindow-mobile.slint；
+    // 其余目标编译 appwindow.slint（系统字体，不嵌 9.7MB 字体）
+    let ui_file = if target_arch_env == "wasm32" {
         "ui/appwindow-web.slint"
+    } else if is_mobile {
+        "ui/mobile/appwindow-mobile.slint"
     } else {
         "ui/appwindow.slint"
     };
@@ -16,7 +26,7 @@ fn main() {
     // 注意：build script 按 host 编译，cfg(target_os="windows") 在 Windows host 上恒真；
     // 需再用 CARGO_CFG_TARGET_ARCH 判断真实编译目标，wasm(web) 不嵌入 winres 资源。
     #[cfg(target_os = "windows")]
-    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
+    if target_arch_env != "wasm32" && target_os_env != "android" && target_os_env != "ios" {
         let mut res = winres::WindowsResource::new();
         res.set_icon("ui/assets/app.ico");
         res.set("FileDescription", "ZPlayer Music");
@@ -30,7 +40,7 @@ fn main() {
     // Windows：FFmpeg 静态库（vcpkg 的 .lib）里 mediacodec 部分引用了 Media Foundation
     // 的 IID 符号，需显式链接 mfuuid（IID_IMFTransform 等）与 strmiids（IID_ICodecAPI）。
     #[cfg(target_os = "windows")]
-    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
+    if target_arch_env != "wasm32" && target_os_env != "android" && target_os_env != "ios" {
         println!("cargo:rustc-link-lib=mfuuid");
         println!("cargo:rustc-link-lib=strmiids");
     }
@@ -38,10 +48,11 @@ fn main() {
     // ---- Linux / macOS：静态链接 FFmpeg 时补足链接器参数 ----
     // build script 按 host 编译，必须用 CARGO_CFG_TARGET_OS 判断真实目标平台，
     // 否则在 Linux runner 上交叉编译 wasm32(web) 时会误加 ELF 链接参数。
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    if target_arch != "wasm32" {
-        match target_os.as_str() {
+    // FFmpeg 静态库是桌面需求，移动端（android/ios）不链。
+    let target_os = target_os_env.as_str();
+    let target_arch = target_arch_env.as_str();
+    if target_arch != "wasm32" && target_os != "android" && target_os != "ios" {
+        match target_os {
             // GNU ld 对静态库顺序敏感（依赖者必须在使用者之后），而 ffmpeg-sys-next
             // 输出的 -l 顺序不保证成立；用 --start-group 循环解析，重复链接静态库无副作用。
             "linux" => {
