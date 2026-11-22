@@ -61,9 +61,8 @@ mod i18n;
 // web(wasm32) 业务层：gdmusic 数据通道 + 按业务拆分的回调接线（web_main 编排 setup_all）
 #[cfg(target_arch = "wasm32")]
 mod web;
-// 移动端入口（Android NativeActivity / iOS 宿主）；桌面不编译
-#[cfg(feature = "mobile")]
-mod mobile;
+// 移动端入口（Android NativeActivity / iOS 宿主）由 lib 的 mobile 模块提供；
+// bin 在 mobile 下不编译 load/network 等业务模块，直接经 lib crate 路径调用。
 
 use slint::ComponentHandle;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
@@ -687,6 +686,12 @@ fn main() -> Result<(), slint::PlatformError> {
     r
 }
 
+// ---- 移动端入口（Android 由 android_main 提供，不编译此 main；iOS 与桌面 preview 使用）----
+#[cfg(all(feature = "mobile", not(target_os = "android")))]
+fn main() {
+    zplayer_music::mobile::entry::run_mobile_main();
+}
+
 // =====================================================================
 //  web（wasm32）最小闭环入口：gdmusic 解析 + HTMLAudio 播放 + 最小 UI。
 //  仅当 target_arch = wasm32（GitHub Pages / Cloudflare Pages 静态托管）编译；
@@ -744,12 +749,6 @@ mod web_main {
             use wasm_bindgen::JsCast;
             if let Some(win) = web_sys::window() {
                 let w = win.inner_width().ok().and_then(|x| x.as_f64()).unwrap_or(1280.0) as u32;
-// ---- 移动端入口（Android 由 android_main 提供，不编译此 main；iOS 与桌面 preview 使用）----
-#[cfg(all(feature = "mobile", not(target_os = "android")))]
-fn main() {
-    crate::mobile::entry::run_mobile_main();
-}
-
                 let h = win.inner_height().ok().and_then(|x| x.as_f64()).unwrap_or(800.0) as u32;
                 let _ = ui.window().set_size(LogicalSize::new(w as f32, h as f32));
 

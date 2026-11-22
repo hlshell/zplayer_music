@@ -16,8 +16,8 @@
 slint::include_modules!();
 
 // 桌面/web 业务模块。移动端阶段 3 编译 core/network/persist/i18n 切片
-// （load/handlers 强耦合桌面 UI，仍不纳入）；core 内的 UI 耦合项（queue）与
-// 桌面能力项（logger 实体）在各模块内部按 feature 门控。
+// （load 依赖的 UI 属性已对齐移动 AppWindow，纳入编译；handlers 强耦合桌面 UI，仍不纳入）；
+// core 内的 UI 耦合项（queue）与桌面能力项（logger 实体）在各模块内部按 feature 门控。
 #[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 mod core;
 #[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
@@ -54,7 +54,8 @@ mod persist {
 mod network;
 #[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 pub use network::{netease, service, sources};
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
+// 首页数据加载：移动端复用桌面同一实现（UI 属性已在移动 AppWindow 对齐）
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 mod load;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod handlers;

@@ -10,6 +10,8 @@ import { NavBottomBar, NavRail, NavSidebar } from "components/nav.slint";
 import { MiniPlayer } from "components/mini-player.slint";
 import { PlayBar, PlayBarButton } from "components/playbar.slint";
 import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
+// 首页/队列数据模型（与桌面共用同一份 struct 定义，Rust 侧 load 直接填充）
+import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../components/models.slint";
 
 // 一级页面占位内容（本阶段只做壳，不接数据）
 component PagePlaceholder inherits Rectangle {
@@ -51,13 +53,16 @@ component PagePlaceholder inherits Rectangle {
 component NavPage inherits Rectangle {
     in property <int> nav: 0;
     in property <string> form-hint: "";
+    // 首页数据到达状态（本阶段用简单文本确认数据接通）
+    in property <bool> loading: false;
+    in property <int> hot-count: 0;
     background: transparent;
 
     function page-title() -> string {
         return root.nav == 0 ? "首页" : (root.nav == 1 ? "搜索" : "设置");
     }
     function page-subtitle() -> string {
-        return root.nav == 0 ? "推荐歌单与热门歌曲将在后续阶段接入"
+        return root.nav == 0 ? "热门歌曲与歌单数据已接通，列表 UI 后续完善"
              : root.nav == 1 ? "单曲 / 专辑 / 歌单搜索入口占位"
              : "深浅色、主题色、语言、音质与缓存设置占位";
     }
@@ -67,7 +72,9 @@ component NavPage inherits Rectangle {
         height: 100%;
         title: root.page-title();
         subtitle: root.page-subtitle();
-        hint: root.form-hint;
+        hint: root.nav == 0
+            ? (root.loading ? "数据加载中…" : "已加载 " + root.hot-count + " 首热歌")
+            : root.form-hint;
     }
 }
 
@@ -151,6 +158,21 @@ export component AppWindow inherits Window {
     in-out property <int> play-mode: 0;
     in-out property <float> progress: 0.0;
 
+    // ===== 首页/队列真实数据（由 crate::load 填充，命名与桌面 AppWindow 一致）=====
+    in-out property <[HotSong]> hot-songs;
+    in-out property <[Playlist]> recommend-playlists;
+    in-out property <[Playlist]> playlists-all;
+    in-out property <[HeroSong]> hero-songs;
+    in-out property <image> hero-cover;
+    in-out property <int> hero-count: 0;
+    in-out property <[Artist]> artists;
+    in-out property <[Album]> albums;
+    in-out property <[NewSong]> new-songs;
+    in-out property <[Song]> queue;
+    in-out property <Song> current-song;
+    in-out property <bool> liked: false;
+    in-out property <bool> loading: false;
+
     // ===== 窗口尺寸：由内置 width/height 驱动 =====
     in-out property <length> window-width: root.width;
     in-out property <length> window-height: root.height;
@@ -203,6 +225,8 @@ export component AppWindow inherits Window {
                 height: 100%;
                 nav: root.current-nav;
                 form-hint: "手机竖屏 · 底部三栏导航";
+                loading: root.loading;
+                hot-count: root.hot-songs.length;
             }
         }
 
@@ -253,6 +277,8 @@ export component AppWindow inherits Window {
                     height: 100%;
                     nav: root.current-nav;
                     form-hint: "手机横屏 · 左侧窄导航栏";
+                    loading: root.loading;
+                    hot-count: root.hot-songs.length;
                 }
             }
 
@@ -350,6 +376,8 @@ export component AppWindow inherits Window {
                         height: 100%;
                         nav: root.current-nav;
                         form-hint: "平板 · 左侧完整侧栏（宽单列）";
+                        loading: root.loading;
+                        hot-count: root.hot-songs.length;
                     }
                 }
             }
