@@ -1,0 +1,137 @@
+// ============================================================================
+//  playbar.slint — 平板底部播放栏：完整进度条 + 播放模式/上一首/播放/下一首
+//  PlayBarButton 同时供播放层复用，避免重复实现按钮热区与选中样式。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+
+export component PlayBarButton inherits Rectangle {
+    in property <image> icon;
+    in property <color> icon-color: Theme.palette.icon;
+    in property <length> size: MobileTheme.touch-target;
+    in property <bool> accent: false;
+    callback clicked;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: root.accent
+        ? Theme.palette.primary
+        : (ta.has-hover ? Theme.palette.hover : transparent);
+
+    Image {
+        source: root.icon;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.accent ? 22px : 18px;
+        height: root.accent ? 22px : 18px;
+        colorize: root.accent ? Theme.palette.icon-white : root.icon-color;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component PlayBar inherits Rectangle {
+    in property <string> title: "未在播放";
+    in property <string> subtitle: "选择歌曲开始播放";
+    in property <float> progress: 0.0;
+    in-out property <bool> playing: false;
+    // 播放模式：0=循环播放 1=单曲循环 2=随机播放
+    in-out property <int> play-mode: 0;
+    callback prev();
+    callback toggle();
+    callback next();
+    callback mode();
+
+    height: 88px + MobileTheme.safe-bottom;
+    background: MobileTheme.nav-bg;
+
+    // 顶部完整进度条
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 4px;
+        background: Theme.palette.scroll-track;
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width * min(1.0, max(0.0, root.progress));
+            height: 100%;
+            background: Theme.palette.secondary;
+        }
+    }
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 16px;
+        padding-top: 10px;
+        padding-bottom: MobileTheme.safe-bottom + 8px;
+        padding-left: MobileTheme.safe-left + 20px;
+        padding-right: MobileTheme.safe-right + 20px;
+        cross-axis-alignment: center;
+
+        // 封面占位
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            clip: true;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: rgba(255, 255, 255, 0.22);
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.title;
+                color: Theme.palette.text;
+                font-size: 15px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.subtitle;
+                color: Theme.palette.text-faint;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+
+        PlayBarButton {
+            size: 44px;
+            icon: @image-url("../../assets/icons/repeat-gray.svg");
+            icon-color: root.play-mode == 0 ? Theme.palette.icon : Theme.palette.primary;
+            clicked => { root.mode(); }
+        }
+        PlayBarButton {
+            icon: @image-url("../../assets/icons/prev-gray.svg");
+            clicked => { root.prev(); }
+        }
+        PlayBarButton {
+            size: 52px;
+            accent: true;
+            icon: root.playing
+                ? @image-url("../../assets/icons/pause-white.svg")
+                : @image-url("../../assets/icons/play-white.svg");
+            clicked => { root.toggle(); }
+        }
+        PlayBarButton {
+            icon: @image-url("../../assets/icons/next-gray.svg");
+            clicked => { root.next(); }
+        }
+    }
+}

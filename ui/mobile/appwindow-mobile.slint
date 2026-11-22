@@ -1,19 +1,525 @@
-// 阶段 1 占位窗口：验证移动端构建链与入口可达。阶段 2 将替换为完整移动 UI。
+// ============================================================================
+//  移动端 AppWindow：三种形态共用一组页面状态（current-nav / detail-open / player-open）
+//  形态判定与 src/ui/layout.rs 一致：最短边 >= 600 → 平板；否则宽 > 高 → 横屏；否则竖屏。
+//  竖屏：底部导航 + 迷你播放条；横屏：左侧 72px 窄栏 + 迷你播放条；
+//  平板：224px 侧栏 + 内容区（宽 >= 840 双栏）+ 底部播放栏。
+// ============================================================================
+import { Theme } from "../theme.slint";
+import { MobileTheme } from "theme.slint";
+import { NavBottomBar, NavRail, NavSidebar } from "components/nav.slint";
+import { MiniPlayer } from "components/mini-player.slint";
+import { PlayBar, PlayBarButton } from "components/playbar.slint";
+import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
+
+// 一级页面占位内容（本阶段只做壳，不接数据）
+component PagePlaceholder inherits Rectangle {
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    in property <string> hint: "";
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        alignment: center;
+        spacing: 10px;
+
+        Text {
+            text: root.title;
+            color: MobileTheme.text;
+            font-size: 22px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.subtitle;
+            color: MobileTheme.text-secondary;
+            font-size: 14px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.hint;
+            color: MobileTheme.text-faint;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// 按 current-nav 切换的三个一级页面（文案随 nav 计算，避免元素级 if/else 链）
+component NavPage inherits Rectangle {
+    in property <int> nav: 0;
+    in property <string> form-hint: "";
+    background: transparent;
+
+    function page-title() -> string {
+        return root.nav == 0 ? "首页" : (root.nav == 1 ? "搜索" : "设置");
+    }
+    function page-subtitle() -> string {
+        return root.nav == 0 ? "推荐歌单与热门歌曲将在后续阶段接入"
+             : root.nav == 1 ? "单曲 / 专辑 / 歌单搜索入口占位"
+             : "深浅色、主题色、语言、音质与缓存设置占位";
+    }
+
+    PagePlaceholder {
+        width: 100%;
+        height: 100%;
+        title: root.page-title();
+        subtitle: root.page-subtitle();
+        hint: root.form-hint;
+    }
+}
+
+// 平板双栏左侧列表占位（骨架行）
+component ListPlaceholder inherits Rectangle {
+    in property <string> title: "列表";
+    callback row-clicked();
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        padding: 12px;
+
+        Text {
+            text: root.title;
+            color: MobileTheme.text;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        for i in [0, 1, 2, 3, 4, 5] : Rectangle {
+            height: 56px;
+            border-radius: 12px;
+            background: Theme.palette.surface;
+
+            HorizontalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 10px;
+                padding-left: 10px;
+                padding-right: 10px;
+                cross-axis-alignment: center;
+
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 8px;
+                    background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+                    opacity: 0.7;
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 4px;
+                    alignment: center;
+
+                    Text {
+                        text: "列表项 " + (i + 1);
+                        color: MobileTheme.text;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "详情占位";
+                        color: MobileTheme.text-faint;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            row-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.row-clicked(); }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "ZPlayer Music";
     width: 390px;
     height: 844px;
-    background: #111318;
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: "ZPlayer Music - mobile shell";
-        color: #e8eaed;
-        font-size: 18px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    background: MobileTheme.page-bg;
+
+    // ===== 会话状态（旋转/改尺寸只重组布局，不重置）=====
+    in-out property <int> current-nav: 0;      // 0 首页 / 1 搜索 / 2 设置
+    in-out property <bool> detail-open: false;
+    in-out property <bool> player-open: false;
+    in-out property <bool> playing: false;
+    in-out property <int> play-mode: 0;
+    in-out property <float> progress: 0.0;
+
+    // ===== 窗口尺寸：由内置 width/height 驱动 =====
+    in-out property <length> window-width: root.width;
+    in-out property <length> window-height: root.height;
+
+    // ===== 安全区：原生宿主注入 =====
+    in-out property <length> safe-top: 0px;
+    in-out property <length> safe-bottom: 0px;
+    in-out property <length> safe-left: 0px;
+    in-out property <length> safe-right: 0px;
+
+    // 形态：0 竖屏 / 1 横屏 / 2 平板（阈值与 layout.rs 一致）
+    property <int> layout-kind: min(root.window-width, root.window-height) >= MobileTheme.tablet-min-side
+        ? 2
+        : (root.window-width > root.window-height ? 1 : 0);
+
+    // 平板双栏：内容可用宽度 >= 840dp（与 layout.rs::should_use_two_column 一致）
+    property <bool> use-two-column: root.layout-kind == 2
+        && (root.window-width - MobileTheme.sidebar-width - root.safe-left) >= MobileTheme.two-column-threshold;
+
+    function page-title(nav: int) -> string {
+        return nav == 0 ? "首页" : (nav == 1 ? "搜索" : "设置");
+    }
+
+    init => {
+        // 深浅色沿用 Theme.dark（由 Rust 按用户配置写入），此处不强行覆盖
+        MobileTheme.layout-kind = root.layout-kind;
+        MobileTheme.safe-top = root.safe-top;
+        MobileTheme.safe-bottom = root.safe-bottom;
+        MobileTheme.safe-left = root.safe-left;
+        MobileTheme.safe-right = root.safe-right;
+    }
+
+    changed layout-kind => { MobileTheme.layout-kind = root.layout-kind; }
+    changed safe-top => { MobileTheme.safe-top = root.safe-top; }
+    changed safe-bottom => { MobileTheme.safe-bottom = root.safe-bottom; }
+    changed safe-left => { MobileTheme.safe-left = root.safe-left; }
+    changed safe-right => { MobileTheme.safe-right = root.safe-right; }
+
+    // ===== 手机竖屏：底部导航 + 迷你播放条 =====
+    if (root.layout-kind == 0) : VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            NavPage {
+                width: 100%;
+                height: 100%;
+                nav: root.current-nav;
+                form-hint: "手机竖屏 · 底部三栏导航";
+            }
+        }
+
+        // 浮动迷你播放条
+        Rectangle {
+            height: 80px;
+            HorizontalLayout {
+                width: 100%;
+                height: 100%;
+                padding: 8px;
+                MiniPlayer {
+                    title: "未在播放";
+                    subtitle: "点击打开播放页";
+                    playing: root.playing;
+                    progress: root.progress;
+                    clicked => { root.player-open = true; }
+                    toggled => { root.playing = !root.playing; }
+                }
+            }
+        }
+
+        NavBottomBar {
+            current <=> root.current-nav;
+            selected(idx) => { root.current-nav = idx; }
+        }
+    }
+
+    // ===== 手机横屏：左侧 72px 窄导航栏 + 内容区底部迷你播放条（spec §4）=====
+    if (root.layout-kind == 1) : HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        NavRail {
+            current <=> root.current-nav;
+            selected(idx) => { root.current-nav = idx; }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0;
+
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+                NavPage {
+                    width: 100%;
+                    height: 100%;
+                    nav: root.current-nav;
+                    form-hint: "手机横屏 · 左侧窄导航栏";
+                }
+            }
+
+            Rectangle {
+                height: 72px;
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding: 4px;
+                    padding-right: root.safe-right + 4px;
+                    MiniPlayer {
+                        title: "未在播放";
+                        subtitle: "点击打开播放页";
+                        playing: root.playing;
+                        progress: root.progress;
+                        clicked => { root.player-open = true; }
+                        toggled => { root.playing = !root.playing; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== 平板：完整左侧栏 + 内容区（宽 >= 840 双栏）+ 底部播放栏 =====
+    if (root.layout-kind == 2) : HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        NavSidebar {
+            current <=> root.current-nav;
+            selected(idx) => { root.current-nav = idx; }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0;
+
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+
+                if (root.use-two-column) : HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: 16px;
+                    padding-top: root.safe-top + 12px;
+                    padding-bottom: 12px;
+                    padding-left: 16px;
+                    padding-right: root.safe-right + 16px;
+
+                    ListPlaceholder {
+                        width: 320px;
+                        height: 100%;
+                        title: root.page-title(root.current-nav) + "列表";
+                        row-clicked => { root.detail-open = true; }
+                    }
+
+                    Rectangle {
+                        width: 1px;
+                        height: 100%;
+                        background: MobileTheme.divider;
+                    }
+
+                    GlassRectangle {
+                        horizontal-stretch: 1;
+                        height: 100%;
+                        border-radius: 20px;
+                        color: MobileTheme.surface;
+                        blur-radius: MobileTheme.surface-blur-radius;
+                        border-width: 1px;
+                        highlight-alpha: MobileTheme.highlight-alpha;
+
+                        PagePlaceholder {
+                            width: 100%;
+                            height: 100%;
+                            title: root.detail-open ? "歌曲详情占位" : "未选择内容";
+                            subtitle: root.detail-open
+                                ? "详情页将在后续阶段接入"
+                                : "点击左侧列表项查看详情占位";
+                            hint: "平板双栏 · 左列表右详情";
+                        }
+                    }
+                }
+                if (!root.use-two-column) : VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding-top: root.safe-top + 12px;
+                    padding-bottom: 12px;
+                    padding-left: 16px;
+                    padding-right: root.safe-right + 16px;
+
+                    NavPage {
+                        width: 100%;
+                        height: 100%;
+                        nav: root.current-nav;
+                        form-hint: "平板 · 左侧完整侧栏（宽单列）";
+                    }
+                }
+            }
+
+            PlayBar {
+                title: "未在播放";
+                subtitle: "平板底部播放栏占位";
+                playing: root.playing;
+                progress: root.progress;
+                play-mode: root.play-mode;
+                toggle => { root.playing = !root.playing; }
+                mode => { root.play-mode = Math.mod(root.play-mode + 1, 3); }
+            }
+        }
+    }
+
+    // ===== 播放层覆盖（全屏占位）=====
+    if (root.player-open) : Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        background: MobileTheme.page-bg;
+
+        CoverBackdrop {
+            width: 100%;
+            height: 100%;
+            cover-color: MobileTheme.primary;
+        }
+
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            spacing: 0;
+            padding-top: root.safe-top + 8px;
+            padding-bottom: root.safe-bottom + 12px;
+            padding-left: root.safe-left + 20px;
+            padding-right: root.safe-right + 20px;
+
+            // 顶栏：标题 + 关闭
+            HorizontalLayout {
+                height: 48px;
+                spacing: 8px;
+                cross-axis-alignment: center;
+
+                Text {
+                    text: "正在播放";
+                    horizontal-stretch: 1;
+                    color: MobileTheme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 24px;
+                    background: close-ta.has-hover ? Theme.palette.hover : rgba(255, 255, 255, 0.10);
+
+                    Image {
+                        source: @image-url("../assets/icons/arrow-big-down-lines.svg");
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 20px;
+                        height: 20px;
+                        colorize: MobileTheme.text;
+                    }
+                    close-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.player-open = false; }
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            // 封面占位：同时受可用宽高约束，横屏不会把控制区挤出屏幕
+            Rectangle {
+                width: min(min(root.window-width * 0.62, root.window-height * 0.30), 240px);
+                height: self.width;
+                border-radius: 24px;
+                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+            }
+
+            Rectangle { height: 16px; }
+
+            Text {
+                text: "歌曲标题";
+                color: MobileTheme.text;
+                font-size: 20px;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "歌手 · 专辑";
+                color: MobileTheme.text-secondary;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            // 进度条（占位，只展示不拖动）
+            Rectangle {
+                height: 4px;
+                border-radius: 2px;
+                background: rgba(255, 255, 255, 0.18);
+
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: parent.width * min(1.0, max(0.0, root.progress));
+                    height: 100%;
+                    border-radius: 2px;
+                    background: MobileTheme.secondary;
+                }
+            }
+            Rectangle { height: 6px; }
+            HorizontalLayout {
+                height: 14px;
+                Text { text: "0:00"; color: MobileTheme.text-faint; font-size: 10px; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "3:45"; color: MobileTheme.text-faint; font-size: 10px; }
+            }
+
+            Rectangle { height: 14px; }
+
+            // 控制区玻璃面板
+            GlassRectangle {
+                height: 88px;
+                border-radius: 26px;
+                color: MobileTheme.surface-bg;
+                blur-radius: MobileTheme.surface-blur-radius;
+                border-width: 1px;
+                highlight-alpha: MobileTheme.highlight-alpha;
+
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: 12px;
+                    padding: 12px;
+
+                    PlayBarButton {
+                        size: 44px;
+                        icon: @image-url("../assets/icons/repeat-gray.svg");
+                        icon-color: root.play-mode == 0 ? MobileTheme.icon : MobileTheme.primary;
+                        clicked => { root.play-mode = Math.mod(root.play-mode + 1, 3); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    PlayBarButton {
+                        icon: @image-url("../assets/icons/prev-gray.svg");
+                        icon-color: MobileTheme.icon;
+                    }
+                    PlayBarButton {
+                        size: 52px;
+                        accent: true;
+                        icon: root.playing
+                            ? @image-url("../assets/icons/pause-white.svg")
+                            : @image-url("../assets/icons/play-white.svg");
+                        clicked => { root.playing = !root.playing; }
+                    }
+                    PlayBarButton {
+                        icon: @image-url("../assets/icons/next-gray.svg");
+                        icon-color: MobileTheme.icon;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
     }
 }
 
-// 供移动入口与计划中的命名使用；同一组件两个导出名，避免桌面共享模块引用 AppWindow 时失败。
+// 供移动入口与计划中的命名使用；同一组件两个导出名，避免共享模块引用 AppWindow 时失败。
 export component AppWindowMobile inherits AppWindow { }

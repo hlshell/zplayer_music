@@ -1,0 +1,305 @@
+// ============================================================================
+//  nav.slint — 一级导航的三种呈现，共用同一份「当前项」状态
+//  NavBottomBar：手机竖屏三栏底部导航（高度含安全区底部）
+//  NavRail：手机横屏左侧 72px 窄栏（图标 + 小字，对应 spec §4）
+//  NavSidebar：平板左侧 224px 完整侧栏（图标 + 文字）
+//  三项固定为 首页 / 搜索 / 设置，点击回调 selected(idx)。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+
+component NavCell inherits Rectangle {
+    in property <image> icon;
+    in property <string> label: "";
+    in property <bool> active: false;
+    // true = 图标与文字横排（平板侧栏）；false = 图标在上文字在下（底部导航/窄栏）
+    in property <bool> horizontal: false;
+    in property <length> label-size: 12px;
+    callback clicked;
+
+    min-width: MobileTheme.touch-target;
+    min-height: MobileTheme.touch-target;
+    border-radius: 12px;
+    background: root.active
+        ? Theme.palette.active
+        : (ta.has-hover ? Theme.palette.hover : transparent);
+
+    if (root.horizontal) : HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-left: 14px;
+        padding-right: 12px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 20px;
+            height: 20px;
+            colorize: root.active ? Theme.palette.primary : Theme.palette.icon;
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.palette.text : Theme.palette.text-secondary;
+            font-size: root.label-size;
+            font-weight: root.active ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    if (!root.horizontal) : VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 2px;
+        alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 22px;
+            height: 22px;
+            colorize: root.active ? Theme.palette.primary : Theme.palette.icon;
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.palette.primary : Theme.palette.text-faint;
+            font-size: root.label-size;
+            font-weight: root.active ? 600 : 400;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    // 选中指示条：侧栏为左侧竖条，底部/窄栏为顶部小横条
+    if (root.active && root.horizontal) : Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: 3px;
+        height: 22px;
+        border-radius: 1.5px;
+        background: Theme.palette.primary;
+    }
+    if (root.active && !root.horizontal) : Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 0;
+        width: 20px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: Theme.palette.primary;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component NavBottomBar inherits Rectangle {
+    in-out property <int> current: 0;
+    in property <[string]> labels: ["首页", "搜索", "设置"];
+    callback selected(int);
+
+    height: MobileTheme.bottom-bar-height + MobileTheme.safe-bottom;
+    background: MobileTheme.nav-bg;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 4px;
+        padding-top: 4px;
+        padding-bottom: MobileTheme.safe-bottom + 4px;
+        padding-left: MobileTheme.safe-left + 8px;
+        padding-right: MobileTheme.safe-right + 8px;
+
+        NavCell {
+            icon: @image-url("../../assets/icons/home-gray.svg");
+            label: root.labels[0];
+            active: root.current == 0;
+            horizontal-stretch: 1;
+            clicked => { root.current = 0; root.selected(0); }
+        }
+        NavCell {
+            icon: @image-url("../../assets/icons/search-gray.svg");
+            label: root.labels[1];
+            active: root.current == 1;
+            horizontal-stretch: 1;
+            clicked => { root.current = 1; root.selected(1); }
+        }
+        NavCell {
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[2];
+            active: root.current == 2;
+            horizontal-stretch: 1;
+            clicked => { root.current = 2; root.selected(2); }
+        }
+    }
+
+    // 顶部细分割线
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 1px;
+        background: MobileTheme.divider;
+    }
+}
+
+export component NavRail inherits Rectangle {
+    in-out property <int> current: 0;
+    in property <[string]> labels: ["首页", "搜索", "设置"];
+    callback selected(int);
+
+    width: MobileTheme.rail-width + MobileTheme.safe-left;
+    height: 100%;
+    background: MobileTheme.nav-bg;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        padding-top: MobileTheme.safe-top + 12px;
+        padding-bottom: MobileTheme.safe-bottom + 12px;
+        padding-left: MobileTheme.safe-left + 6px;
+        padding-right: 6px;
+
+        NavCell {
+            height: 64px;
+            icon: @image-url("../../assets/icons/home-gray.svg");
+            label: root.labels[0];
+            active: root.current == 0;
+            label-size: 10px;
+            clicked => { root.current = 0; root.selected(0); }
+        }
+        NavCell {
+            height: 64px;
+            icon: @image-url("../../assets/icons/search-gray.svg");
+            label: root.labels[1];
+            active: root.current == 1;
+            label-size: 10px;
+            clicked => { root.current = 1; root.selected(1); }
+        }
+        NavCell {
+            height: 64px;
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[2];
+            active: root.current == 2;
+            label-size: 10px;
+            clicked => { root.current = 2; root.selected(2); }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+
+    // 右侧分割线
+    Rectangle {
+        x: parent.width - self.width;
+        y: 0;
+        width: 1px;
+        height: 100%;
+        background: MobileTheme.divider;
+    }
+}
+
+export component NavSidebar inherits Rectangle {
+    in-out property <int> current: 0;
+    in property <[string]> labels: ["首页", "搜索", "设置"];
+    callback selected(int);
+
+    width: MobileTheme.sidebar-width + MobileTheme.safe-left;
+    height: 100%;
+    background: MobileTheme.nav-bg;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 6px;
+        padding-top: MobileTheme.safe-top + 20px;
+        padding-bottom: MobileTheme.safe-bottom + 16px;
+        padding-left: MobileTheme.safe-left + 12px;
+        padding-right: 12px;
+
+        // 品牌头
+        HorizontalLayout {
+            height: 48px;
+            spacing: 10px;
+            padding-left: 6px;
+            padding-right: 6px;
+            cross-axis-alignment: center;
+
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 12px;
+                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+                Text {
+                    text: "Z";
+                    color: Theme.palette.icon-white;
+                    font-size: 16px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: "ZPlayer Music";
+                color: MobileTheme.text;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        Rectangle { height: 1px; background: MobileTheme.divider; }
+
+        NavCell {
+            height: MobileTheme.touch-target;
+            horizontal: true;
+            label-size: 14px;
+            icon: @image-url("../../assets/icons/home-gray.svg");
+            label: root.labels[0];
+            active: root.current == 0;
+            clicked => { root.current = 0; root.selected(0); }
+        }
+        NavCell {
+            height: MobileTheme.touch-target;
+            horizontal: true;
+            label-size: 14px;
+            icon: @image-url("../../assets/icons/search-gray.svg");
+            label: root.labels[1];
+            active: root.current == 1;
+            clicked => { root.current = 1; root.selected(1); }
+        }
+        NavCell {
+            height: MobileTheme.touch-target;
+            horizontal: true;
+            label-size: 14px;
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[2];
+            active: root.current == 2;
+            clicked => { root.current = 2; root.selected(2); }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            height: 16px;
+            padding-left: 8px;
+
+            Text {
+                text: "移动端预览";
+                color: MobileTheme.text-faint;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // 右侧分割线
+    Rectangle {
+        x: parent.width - self.width;
+        y: 0;
+        width: 1px;
+        height: 100%;
+        background: MobileTheme.divider;
+    }
+}

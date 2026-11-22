@@ -1,0 +1,69 @@
+// ============================================================================
+//  glass.slint — 移动端表面材质
+//  Slint 没有图层模糊：玻璃用「半透明底色 + 顶部高光渐变 + 细描边 + 柔和投影」静态降级，
+//  blur-radius 作为投影扩散半径使用，保证 token 一致、后续可整体替换。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+// 玻璃面板：不继承 Rectangle，避免与内置 color / border-width 冲突，
+// 由内部 Rectangle 承担实际绘制。
+export component GlassRectangle {
+    in property <color> color: rgba(255, 255, 255, 0.10);
+    in property <length> blur-radius: 18px;
+    in property <length> border-width: 1px;
+    in property <length> border-radius: 18px;
+    in property <float> highlight-alpha: 0.18;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: root.color;
+        border-width: root.border-width;
+        border-color: rgba(255, 255, 255, min(1.0, max(0.0, root.highlight-alpha + 0.06)));
+        border-radius: root.border-radius;
+        drop-shadow-blur: root.blur-radius;
+        drop-shadow-color: rgba(0, 0, 0, 0.22);
+        drop-shadow-offset-y: 4px;
+        clip: true;
+
+        // 顶部高光：静态渐变代替实时模糊带来的受光感
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 45%;
+            background: @linear-gradient(180deg, rgba(255, 255, 255, root.highlight-alpha) 0%, rgba(255, 255, 255, 0.0) 100%);
+        }
+
+        // 使用方声明的子元素（高光之下，保证内容可读）
+        @children
+    }
+}
+
+// 封面环境背景：取封面色做渐变主色，叠两团低透明环境光（封面取色失败时退化为主题主色）
+export component CoverBackdrop inherits Rectangle {
+    in property <color> cover-color: #6c5ce7;
+
+    background: @linear-gradient(165deg, root.cover-color 0%, Theme.palette.window-bg 82%);
+
+    Rectangle {
+        x: 0px - parent.width * 0.20;
+        y: 0px - parent.height * 0.25;
+        width: parent.width * 0.90;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @linear-gradient(140deg,
+            rgba(root.cover-color.red, root.cover-color.green, root.cover-color.blue, 0.30) 0%,
+            rgba(root.cover-color.red, root.cover-color.green, root.cover-color.blue, 0.0) 70%);
+    }
+    Rectangle {
+        x: parent.width * 0.45;
+        y: parent.height * 0.55;
+        width: parent.width * 0.80;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @linear-gradient(320deg,
+            rgba(root.cover-color.red, root.cover-color.green, root.cover-color.blue, 0.22) 0%,
+            rgba(root.cover-color.red, root.cover-color.green, root.cover-color.blue, 0.0) 72%);
+    }
+}

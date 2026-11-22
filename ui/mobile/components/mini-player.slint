@@ -1,0 +1,110 @@
+// ============================================================================
+//  mini-player.slint — 手机（竖屏/横屏）迷你播放条，常驻在底部导航/内容区上方
+//  封面占位 + 标题/副标题 + 播放按钮 + 细进度条；点击整条打开播放层。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+
+export component MiniPlayer inherits Rectangle {
+    in property <string> title: "未在播放";
+    in property <string> subtitle: "点击打开播放页";
+    in-out property <bool> playing: false;
+    in property <float> progress: 0.0;
+    callback clicked();
+    callback toggled();
+
+    height: 64px;
+    border-radius: 18px;
+    background: Theme.palette.surface;
+
+    // 整条热区先声明，后声明的播放按钮热区优先，避免点按钮同时打开播放层
+    body-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 10px;
+        padding-left: 8px;
+        padding-right: 8px;
+        cross-axis-alignment: center;
+
+        // 封面占位（无图片资源，用主题渐变代替）
+        Rectangle {
+            width: 46px;
+            height: 46px;
+            border-radius: 10px;
+            clip: true;
+            background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: rgba(255, 255, 255, 0.22);
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.title;
+                color: Theme.palette.text;
+                font-size: 14px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.subtitle;
+                color: Theme.palette.text-faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: Theme.palette.primary;
+
+            Image {
+                source: root.playing
+                    ? @image-url("../../assets/icons/pause-white.svg")
+                    : @image-url("../../assets/icons/play-white.svg");
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 18px;
+                height: 18px;
+                colorize: Theme.palette.icon-white;
+            }
+
+            play-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggled(); }
+            }
+        }
+    }
+
+    // 细进度条（占位，只展示不拖动）
+    Rectangle {
+        x: 10px;
+        y: parent.height - 3px;
+        width: parent.width - 20px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: Theme.palette.scroll-track;
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width * min(1.0, max(0.0, root.progress));
+            height: 100%;
+            border-radius: 1.5px;
+            background: Theme.palette.secondary;
+        }
+    }
+}
