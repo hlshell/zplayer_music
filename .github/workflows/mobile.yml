@@ -23,6 +23,8 @@ jobs:
   # ==================== Android：布局单测 + Debug APK ====================
   check-android:
     runs-on: ubuntu-latest
+    env:
+      FFMPEG_VERSION: '7.1.1'
     steps:
       - uses: actions/checkout@v5
 
@@ -34,15 +36,46 @@ jobs:
 
       # cargo test 在宿主机（x86_64-linux）编译整个 Slint/winit 依赖图，
       # 需要 fontconfig / GL / 窗口系统等开发库；清单与 release.yml 的 Linux 构建一致。
-      - name: 安装宿主依赖（Slint/winit/fontconfig/ALSA）
+      # nasm / xz-utils：源码编译 FFmpeg 静态库所需（见下一步）。
+      - name: 安装宿主依赖（Slint/winit/fontconfig/ALSA + FFmpeg 构建工具）
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential pkg-config clang libclang-dev \
+            build-essential pkg-config clang libclang-dev nasm xz-utils \
             libasound2-dev libfontconfig1-dev libdbus-1-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev
+
+      # cargo test 在 x86_64-linux 宿主编译依赖图：ffmpeg-next 是非 optional 的 target
+      # 门控依赖（Linux 命中，android/ios 排除），宿主链接因此需要 FFmpeg。apt 自带的
+      # FFmpeg 6.1 与 ffmpeg-next 9.x API/符号不匹配，故与 release.yml 一致，从源码
+      # 编译 7.1.1 静态库，并通过 FFMPEG_DIR 让 ffmpeg-sys-next 跳过 pkg-config。
+      # 产物缓存到 /opt/ffmpeg-static，后续运行命中缓存可秒过。
+      - name: 缓存 FFmpeg 静态库
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/ffmpeg-static
+          key: ffmpeg-static-linux-x64-${{ env.FFMPEG_VERSION }}-v1
+
+      - name: 编译 FFmpeg 静态库（供 cargo test 宿主链接）
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          cd "/tmp/ffmpeg-${FFMPEG_VERSION}"
+          # --disable-autodetect：不探测任何外部库，杜绝 jack/openal/lilv/mp3lame
+          #   等可选后端被带进链接（release.yml 同款防污染）；--disable-zlib/iconv 去非必要动态依赖
+          ./configure \
+            --prefix=/opt/ffmpeg-static \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-debug \
+            --disable-autodetect --disable-iconv --disable-zlib \
+            --enable-pic
+          make -j"$(nproc)"
+          make install
 
       - uses: actions/setup-java@v5
         with:
@@ -71,9 +104,15 @@ jobs:
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      # 布局分类器单测在移动 feature 下即可运行（不链接桌面 FFmpeg）
+      # 布局分类器单测在 mobile feature 下运行；但宿主 Linux 编译依赖图仍会拉入
+      # ffmpeg-next，故通过 FFMPEG_DIR 指向上面编译的静态库，并显式给 bindgen 指 libclang。
       - name: Rust 单测（mobile feature）
-        run: cargo test --no-default-features --features mobile --lib --tests
+        env:
+          FFMPEG_DIR: /opt/ffmpeg-static
+        run: |
+          export LIBCLANG_PATH="$(find /usr/lib -maxdepth 4 -name 'libclang.so*' -print -quit | xargs -r dirname)"
+          export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/include -I/usr/include/x86_64-linux-gnu"
+          cargo test --no-default-features --features mobile --lib --tests
 
       - uses: gradle/actions/setup-gradle@v4
         with:
