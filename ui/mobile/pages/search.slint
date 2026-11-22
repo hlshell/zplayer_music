@@ -4,9 +4,9 @@
 //  数据与状态全部由 AppWindow 属性驱动，交互通过 callbacks 交给 Rust 接线。
 // ============================================================================
 import { ScrollView } from "std-widgets.slint";
-import { Theme } from "../../theme.slint";
+import { Theme } from "../../shared/theme.slint";
 import { MobileTheme } from "../theme.slint";
-import { Song, Playlist, Album } from "../../components/models.slint";
+import { Song, Playlist, Album } from "../../shared/models.slint";
 import { SongRow } from "../components/song-row.slint";
 
 export component SearchPage inherits Rectangle {

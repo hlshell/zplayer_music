@@ -4,7 +4,7 @@
 //  竖屏：底部导航 + 迷你播放条；横屏：左侧 72px 窄栏 + 迷你播放条；
 //  平板：224px 侧栏 + 内容区（宽 >= 840 双栏）+ 底部播放栏。
 // ============================================================================
-import { Theme } from "../theme.slint";
+import { Theme } from "../shared/theme.slint";
 import { MobileTheme } from "theme.slint";
 // 平台/封面取色 token：Rust 侧需 global::<crate::MobileTheme>() 写入，须在编译根显式 re-export
 export { MobileTheme } from "theme.slint";
@@ -13,7 +13,7 @@ import { MiniPlayer } from "components/mini-player.slint";
 import { PlayBar, PlayBarButton } from "components/playbar.slint";
 import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
 // 首页/队列数据模型（与桌面共用同一份 struct 定义，Rust 侧 load 直接填充）
-import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../components/models.slint";
+import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../shared/models.slint";
 import { HomePage } from "pages/home.slint";
 import { SearchPage } from "pages/search.slint";
 import { DetailPage } from "pages/detail.slint";

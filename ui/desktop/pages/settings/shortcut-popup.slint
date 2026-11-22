@@ -1,0 +1,184 @@
+// ============================================================================
+//  pages/settings/shortcut-popup.slint — 快捷键配置弹窗
+//  每行一个动作 + 当前组合键；点击组合键进入捕获态，按下新按键即提交（Esc 取消捕获）。
+//  键位规范化 / 冲突校验 / 持久化都在 Rust 侧（handlers/shortcut.rs），
+//  组件只负责展示与把原始按键（文本 + 修饰键）上报。
+// ============================================================================
+import { Theme } from "../../../shared/theme.slint";
+import { Language } from "../../../shared/language.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component ShortcutPopup inherits Rectangle {
+    in property <[string]> labels: [];
+    in property <[string]> combos: [];
+    // 正在捕获的行索引（-1 = 无）；由本组件点击进入，Rust 提交成功后置回 -1
+    in-out property <int> capturing: -1;
+    callback captured(int, string, bool, bool, bool);
+    callback reset();
+    callback closed();
+
+    width: 420px;
+    // 标题 22 + 提示 16 + 行 36*n + 行距 2*(n-1) + 底部按钮 34 + 间距/内边距
+    property <length> natural-height: 20px + 22px + 8px + 16px + 12px
+        + (root.labels.length * 36px)
+        + (root.labels.length > 1 ? (root.labels.length - 1) * 2px : 0px)
+        + 14px + 34px + 20px;
+    // 可用高度由调用方传入（组件根元素不能访问 parent）：
+    // 窗口偏矮时收缩，列表区域改为滚动，避免底部按钮被裁掉
+    in property <length> avail-height: 1000000px;
+    height: Math.max(200px, Math.min(root.natural-height, root.avail-height));
+    border-radius: 14px;
+    background: Theme.palette.surface-solid;
+    drop-shadow-blur: 10px; drop-shadow-color: rgba(0, 0, 0, 0.30); drop-shadow-offset-y: 4px;
+    border-width: 1px; border-color: Theme.palette.divider;
+
+    // 弹窗创建后稍延迟一帧抢焦点（与 MV 播放器同一手法：立即 focus() 可能落空）
+    focus-timer := Timer {
+        interval: 60ms;
+        running: false;
+        triggered => { self.running = false; fs.focus(); }
+    }
+    init => { focus-timer.running = true; }
+
+    fs := FocusScope {
+        x: 0; y: 0; width: 0; height: 0;
+        capture-key-pressed(ev) => {
+            if (root.capturing >= 0) {
+                if (ev.text == Key.Escape) {
+                    root.capturing = -1;
+                } else {
+                    root.captured(root.capturing, ev.text, ev.modifiers.control, ev.modifiers.alt, ev.modifiers.shift);
+                }
+                return accept;
+            }
+            if (ev.text == Key.Escape) {
+                root.closed();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0;
+        padding-left: 20px; padding-right: 20px;
+        padding-top: 20px; padding-bottom: 20px;
+
+        Text {
+            text: Language.shortcut-title;
+            color: Theme.palette.text;
+            font-size: 14.5px;
+            font-weight: 600;
+            height: 22px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: Language.shortcut-hint;
+            color: Theme.palette.text-faint;
+            font-size: 11.5px;
+            height: 16px;
+            vertical-alignment: center;
+        }
+        Rectangle { height: 12px; }
+
+        // 动作列表：窗口偏矮时在这里滚动（ScrollView 吸收剩余高度）
+        ScrollView {
+            vertical-stretch: 1;
+            horizontal-scrollbar-policy: always-off;
+            VerticalLayout {
+                spacing: 2px;
+                for lbl[idx] in root.labels : Rectangle {
+                    height: 36px;
+                    border-radius: 9px;
+                    background: (root.capturing == idx || row-ta.has-hover)
+                        ? Theme.palette.hover : transparent;
+                    border-width: 1px;
+                    border-color: root.capturing == idx ? Theme.palette.primary : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 8px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+
+                        Text {
+                            text: lbl;
+                            color: Theme.palette.text;
+                            font-size: 12.5px;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Rectangle {
+                            width: 118px;
+                            height: 22px;
+                            border-radius: 6px;
+                            background: root.capturing == idx ? Theme.palette.primary : Theme.palette.hover;
+                            Text {
+                                width: 100%; height: 100%;
+                                text: root.capturing == idx ? Language.shortcut-press : root.combos[idx];
+                                color: root.capturing == idx ? Theme.palette.icon-white : Theme.palette.text-secondary;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    row-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.capturing = root.capturing == idx ? -1 : idx;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: 14px; }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Rectangle {
+                width: 110px;
+                height: 34px;
+                border-radius: 9px;
+                border-width: 1px;
+                border-color: Theme.palette.divider;
+                background: reset-ta.has-hover ? Theme.palette.hover : transparent;
+                Text {
+                    width: 100%; height: 100%;
+                    text: Language.shortcut-reset;
+                    color: Theme.palette.text-secondary;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                reset-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.reset(); }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 86px;
+                height: 34px;
+                border-radius: 9px;
+                background: Theme.palette.primary;
+                Text {
+                    width: 100%; height: 100%;
+                    text: Language.common-close;
+                    color: Theme.palette.icon-white;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                close-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.closed(); }
+                }
+            }
+        }
+    }
+}

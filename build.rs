@@ -14,11 +14,11 @@ fn main() {
     // 中文字体，re-export AppWindow）；移动端编译 ui/mobile/appwindow-mobile.slint；
     // 其余目标编译 appwindow.slint（系统字体，不嵌 9.7MB 字体）
     let ui_file = if target_arch_env == "wasm32" {
-        "ui/appwindow-web.slint"
+        "ui/desktop/appwindow.web.slint"
     } else if is_mobile {
         "ui/mobile/appwindow-mobile.slint"
     } else {
-        "ui/appwindow.slint"
+        "ui/desktop/appwindow.slint"
     };
     slint_build::compile_with_config(ui_file, config)
         .expect("Slint UI 编译失败，请检查 appwindow.slint 语法");

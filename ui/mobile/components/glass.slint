@@ -3,7 +3,7 @@
 //  Slint 没有图层模糊：玻璃用「半透明底色 + 顶部高光渐变 + 细描边 + 柔和投影」静态降级，
 //  blur-radius 作为投影扩散半径使用，保证 token 一致、后续可整体替换。
 // ============================================================================
-import { Theme } from "../../theme.slint";
+import { Theme } from "../../shared/theme.slint";
 import { MobileTheme } from "../theme.slint";
 
 // 玻璃/Material 面板：不继承 Rectangle，避免与内置 color / border-width 冲突，
