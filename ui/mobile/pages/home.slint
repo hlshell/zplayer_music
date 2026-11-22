@@ -21,7 +21,7 @@ component HeroRow inherits Rectangle {
     in property <string> artist: "";
     callback clicked();
 
-    height: 26px;
+    height: 44px;
     border-radius: 8px;
     background: ta.has-hover ? rgba(255, 255, 255, 0.14) : transparent;
 
@@ -99,7 +99,7 @@ export component HomePage inherits Rectangle {
 
             // ===== Hero：每日为你精选 =====
             Rectangle {
-                height: 160px;
+                height: 216px;
                 border-radius: 20px;
                 clip: true;
                 background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
