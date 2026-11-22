@@ -32,9 +32,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # 移动 feature 在宿主上编译时 cpal 需要 ALSA 头文件
-      - name: 安装宿主依赖（cpal/ALSA）
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      # cargo test 在宿主机（x86_64-linux）编译整个 Slint/winit 依赖图，
+      # 需要 fontconfig / GL / 窗口系统等开发库；清单与 release.yml 的 Linux 构建一致。
+      - name: 安装宿主依赖（Slint/winit/fontconfig/ALSA）
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev \
+            libasound2-dev libfontconfig1-dev libdbus-1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev
 
       - uses: actions/setup-java@v5
         with:
@@ -148,6 +156,17 @@ jobs:
           targets: aarch64-linux-android
 
       - uses: Swatinem/rust-cache@v2
+
+      # 与 check-android 一致：cargo-ndk 交叉编译前的宿主侧构建需要 fontconfig 等 GUI 库
+      - name: 安装宿主依赖（Slint/winit/fontconfig/ALSA）
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev \
+            libasound2-dev libfontconfig1-dev libdbus-1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev
 
       - uses: actions/setup-java@v5
         with:
