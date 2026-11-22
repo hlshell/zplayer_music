@@ -9,6 +9,11 @@ export global MobileTheme {
     // 形态：0 竖屏 / 1 横屏 / 2 平板（顺序与 src/ui/layout.rs 的 LayoutKind 一致）
     in-out property <int> layout-kind: 0;
 
+    // 运行平台：0 桌面预览 / 1 Android / 2 iOS（由 src/mobile/entry.rs 按编译目标写入）
+    in-out property <int> platform: 0;
+    // Android Material：不透明表面 + 无高光；iOS/预览保持玻璃
+    in-out property <bool> is-material: platform == 1;
+
     // 安全区 inset：由原生宿主写入，AppWindow 负责转发到本 global
     in-out property <length> safe-top: 0px;
     in-out property <length> safe-bottom: 0px;
@@ -47,6 +52,11 @@ export global MobileTheme {
     in-out property <color> icon: Theme.palette.icon;
     in-out property <color> active: Theme.palette.active;
     in-out property <color> hover: Theme.palette.hover;
-    // 导航/播放条半透明表面：配合高光渐变模拟玻璃质感
-    in-out property <color> nav-bg: Theme.dark ? rgba(18, 17, 24, 0.82) : rgba(255, 255, 255, 0.86);
+    // 导航/播放条表面：Android 用近乎不透明的 Material 表面，iOS/预览保留半透明玻璃
+    in-out property <color> nav-bg: platform == 1
+        ? (Theme.dark ? rgba(31, 28, 42, 0.98) : rgba(255, 255, 255, 0.98))
+        : (Theme.dark ? rgba(18, 17, 24, 0.82) : rgba(255, 255, 255, 0.86));
+
+    // 当前歌曲封面主色（播放层环境背景）：由 Rust 侧取色后写入，取色失败时为主题色
+    in-out property <color> cover-color: #6c5ce7;
 }

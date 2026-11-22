@@ -89,6 +89,15 @@ fn run_ui(cfg: crate::persist::config::AppConfig) {
         eprintln!("[mobile] 创建 UI 失败: {e}");
         panic!("创建移动端 UI 失败: {e}");
     });
+    // 平台注入：0 桌面预览 / 1 Android（Material）/ 2 iOS（玻璃）
+    let platform = if cfg!(target_os = "android") {
+        1
+    } else if cfg!(target_os = "ios") {
+        2
+    } else {
+        0
+    };
+    ui.global::<crate::MobileTheme>().set_platform(platform);
     // 运行时在 UI 创建后初始化；数据加载与回调接线共用同一个运行时
     match init_runtime() {
         Some(handle) => start_home_load(&ui, cfg, handle),

@@ -4,11 +4,17 @@
 //  blur-radius 作为投影扩散半径使用，保证 token 一致、后续可整体替换。
 // ============================================================================
 import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
 
-// 玻璃面板：不继承 Rectangle，避免与内置 color / border-width 冲突，
+// 玻璃/Material 面板：不继承 Rectangle，避免与内置 color / border-width 冲突，
 // 由内部 Rectangle 承担实际绘制。
+// iOS/预览：半透明底色 + 顶部高光 + 细描边 + 投影；
+// Android：默认不透明 material-surface，无高光/描边，改用 1dp 级别柔和投影。
+// 使用方显式传入 color 时按其值绘制（可为半透明），仅材质装饰随平台切换。
 export component GlassRectangle {
-    in property <color> color: rgba(255, 255, 255, 0.10);
+    in property <color> color: MobileTheme.is-material
+        ? MobileTheme.material-surface
+        : MobileTheme.surface-bg;
     in property <length> blur-radius: 18px;
     in property <length> border-width: 1px;
     in property <length> border-radius: 18px;
@@ -18,20 +24,27 @@ export component GlassRectangle {
         width: 100%;
         height: 100%;
         background: root.color;
-        border-width: root.border-width;
-        border-color: rgba(255, 255, 255, min(1.0, max(0.0, root.highlight-alpha + 0.06)));
+        border-width: MobileTheme.is-material ? 0px : root.border-width;
+        border-color: MobileTheme.is-material
+            ? transparent
+            : rgba(255, 255, 255, min(1.0, max(0.0, root.highlight-alpha + 0.06)));
         border-radius: root.border-radius;
-        drop-shadow-blur: root.blur-radius;
-        drop-shadow-color: rgba(0, 0, 0, 0.22);
-        drop-shadow-offset-y: 4px;
+        drop-shadow-blur: MobileTheme.is-material
+            ? MobileTheme.material-elevation * 2
+            : root.blur-radius;
+        drop-shadow-color: MobileTheme.is-material
+            ? rgba(0, 0, 0, 0.18)
+            : rgba(0, 0, 0, 0.22);
+        drop-shadow-offset-y: MobileTheme.is-material ? 2px : 4px;
         clip: true;
 
-        // 顶部高光：静态渐变代替实时模糊带来的受光感
+        // 顶部高光：静态渐变代替实时模糊带来的受光感（Material 无高光）
         Rectangle {
             x: 0;
             y: 0;
             width: 100%;
             height: 45%;
+            visible: !MobileTheme.is-material;
             background: @linear-gradient(180deg, rgba(255, 255, 255, root.highlight-alpha) 0%, rgba(255, 255, 255, 0.0) 100%);
         }
 
@@ -42,7 +55,7 @@ export component GlassRectangle {
 
 // 封面环境背景：取封面色做渐变主色，叠两团低透明环境光（封面取色失败时退化为主题主色）
 export component CoverBackdrop inherits Rectangle {
-    in property <color> cover-color: #6c5ce7;
+    in property <color> cover-color: MobileTheme.cover-color;
 
     background: @linear-gradient(165deg, root.cover-color 0%, Theme.palette.window-bg 82%);
 

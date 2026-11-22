@@ -84,10 +84,12 @@ export component HomePage inherits Rectangle {
         VerticalLayout {
             width: 100%;
             spacing: 18px;
-            padding-left: 16px;
-            padding-right: 16px;
-            padding-top: 12px;
-            padding-bottom: 24px;
+            // 侧栏/窄栏已把安全区计入自身宽度，仅竖屏内容区自行让出左右安全区
+            padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
+            padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
+            // 平板内容区顶部安全区由 AppWindow 容器补足
+            padding-top: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-top) + 12px;
+            padding-bottom: MobileTheme.safe-bottom + 24px;
 
             if (root.loading) : Text {
                 text: "数据加载中…";

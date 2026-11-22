@@ -10,6 +10,7 @@ use crate::persist::config::AppConfig;
 use crate::platform::audio as player;
 use slint::{ComponentHandle, Model};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -38,6 +39,8 @@ pub struct MobileCtx {
     pub song_seq: Arc<AtomicU64>,
     /// 用户配置快照（设置页修改后写盘；与桌面共用同一份 config.toml）
     pub cfg: RefCell<AppConfig>,
+    /// 封面主色缓存（按 song.id）：避免每次切歌重复解码采样
+    pub cover_colors: RefCell<HashMap<i32, slint::Color>>,
 }
 
 /// 缓存占用字节 → 人类可读文本（KB / MB / GB）。
@@ -122,6 +125,64 @@ fn song_from_base(b: &crate::load::SongBase) -> crate::Song {
         url: cover_url.into(),
         liked: crate::persist::liked::is_liked(b.id as u32 as i64),
     }
+}
+
+/// 取色失败时的回退主色（顺序与设置页主题色一致）。
+const FALLBACK_COVER_COLORS: [u32; 4] = [0x6c5ce7, 0x0ea371, 0xea580c, 0x3b82f6];
+
+/// 封面主色：按 song.id 缓存；无图/解码失败回退当前主题色，保证播放层背景始终有色。
+fn cover_color_of(ui: &crate::AppWindow, ctx: &MobileCtx, song: &crate::Song) -> slint::Color {
+    if let Some(c) = ctx.cover_colors.borrow().get(&song.id).copied() {
+        return c;
+    }
+    let color = cover_color_from_image(&crate::load::cover_now(&song.url)).unwrap_or_else(|| {
+        let idx = ui.get_theme_color_index().clamp(0, 3) as usize;
+        let rgb = FALLBACK_COVER_COLORS[idx];
+        slint::Color::from_rgb_u8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+    });
+    ctx.cover_colors.borrow_mut().insert(song.id, color);
+    color
+}
+
+/// 8 像素步长采样平均：跳过半透明与近黑/近白像素，过暗时按比例提亮到 96 以上。
+fn cover_color_from_image(img: &slint::Image) -> Option<slint::Color> {
+    if img.size().width == 0 {
+        return None;
+    }
+    let buf = img.to_rgba8()?;
+    let (w, h) = (buf.width() as usize, buf.height() as usize);
+    let step = 8usize;
+    let (mut n, mut sr, mut sg, mut sb) = (0u64, 0u64, 0u64, 0u64);
+    let mut y = 0usize;
+    while y < h {
+        let mut x = 0usize;
+        while x < w {
+            let p = buf.as_slice()[y * w + x];
+            if p.a >= 128 {
+                let (r, g, b) = (p.r as u32, p.g as u32, p.b as u32);
+                if !(r < 18 && g < 18 && b < 18) && !(r > 240 && g > 240 && b > 240) {
+                    n += 1;
+                    sr += r as u64;
+                    sg += g as u64;
+                    sb += b as u64;
+                }
+            }
+            x += step;
+        }
+        y += step;
+    }
+    if n == 0 {
+        return None;
+    }
+    let (mut r, mut g, mut b) = ((sr / n) as f32, (sg / n) as f32, (sb / n) as f32);
+    let peak = r.max(g).max(b);
+    if peak < 64.0 && peak > 0.0 {
+        let k = 96.0 / peak;
+        r = (r * k).min(255.0);
+        g = (g * k).min(255.0);
+        b = (b * k).min(255.0);
+    }
+    Some(slint::Color::from_rgb_u8(r as u8, g as u8, b as u8))
 }
 
 /// 业务码校验：响应顶层 code 非 200 视为失败。
@@ -510,6 +571,9 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
     ctx.cur.set(idx.unwrap_or(0));
 
     ui.set_current_song(song.clone());
+    // 播放层环境背景：取封面主色（取色失败回退主题色）
+    let cover_color = cover_color_of(&ui, ctx, &song);
+    ui.set_cover_color(cover_color);
     ui.set_progress(0.0);
     ui.set_playing(true);
 
@@ -731,6 +795,7 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         play_seq: Arc::new(AtomicU64::new(0)),
         song_seq: Arc::new(AtomicU64::new(0)),
         cfg: RefCell::new(cfg),
+        cover_colors: RefCell::new(HashMap::new()),
     });
 
     // ---- 首页点歌（详情页点歌：队列不含该曲时用详情列表整体替换队列）----

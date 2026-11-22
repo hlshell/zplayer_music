@@ -6,6 +6,8 @@
 // ============================================================================
 import { Theme } from "../theme.slint";
 import { MobileTheme } from "theme.slint";
+// 平台/封面取色 token：Rust 侧需 global::<crate::MobileTheme>() 写入，须在编译根显式 re-export
+export { MobileTheme } from "theme.slint";
 import { NavBottomBar, NavRail, NavSidebar } from "components/nav.slint";
 import { MiniPlayer } from "components/mini-player.slint";
 import { PlayBar, PlayBarButton } from "components/playbar.slint";
@@ -186,6 +188,8 @@ export component AppWindow inherits Window {
     in-out property <[NewSong]> new-songs;
     in-out property <[Song]> queue;
     in-out property <Song> current-song;
+    // 当前歌曲封面主色（由 src/mobile/handlers.rs 取色写入，播放层环境背景使用）
+    in-out property <color> cover-color: #6c5ce7;
     // 当前歌曲歌词（由 src/mobile/handlers.rs 解析 LRC 后填充）
     in-out property <[LyricRow]> lyrics;
     in-out property <bool> liked: false;
@@ -220,11 +224,11 @@ export component AppWindow inherits Window {
     in-out property <length> window-width: root.width;
     in-out property <length> window-height: root.height;
 
-    // ===== 安全区：原生宿主注入 =====
-    in-out property <length> safe-top: 0px;
-    in-out property <length> safe-bottom: 0px;
-    in-out property <length> safe-left: 0px;
-    in-out property <length> safe-right: 0px;
+    // ===== 安全区：Window 内置 safe-area-insets 由原生宿主注入（Android WindowInsets / iOS safeAreaInsets）=====
+    in-out property <length> safe-top: root.safe-area-insets.top;
+    in-out property <length> safe-bottom: root.safe-area-insets.bottom;
+    in-out property <length> safe-left: root.safe-area-insets.left;
+    in-out property <length> safe-right: root.safe-area-insets.right;
 
     // 形态：0 竖屏 / 1 横屏 / 2 平板（阈值与 layout.rs 一致）
     property <int> layout-kind: min(root.window-width, root.window-height) >= MobileTheme.tablet-min-side
@@ -241,6 +245,7 @@ export component AppWindow inherits Window {
         MobileTheme.safe-bottom = root.safe-bottom;
         MobileTheme.safe-left = root.safe-left;
         MobileTheme.safe-right = root.safe-right;
+        MobileTheme.cover-color = root.cover-color;
     }
 
     changed layout-kind => { MobileTheme.layout-kind = root.layout-kind; }
@@ -248,6 +253,7 @@ export component AppWindow inherits Window {
     changed safe-bottom => { MobileTheme.safe-bottom = root.safe-bottom; }
     changed safe-left => { MobileTheme.safe-left = root.safe-left; }
     changed safe-right => { MobileTheme.safe-right = root.safe-right; }
+    changed cover-color => { MobileTheme.cover-color = root.cover-color; }
 
     // ===== 手机竖屏：底部导航 + 迷你播放条 =====
     if (root.layout-kind == 0) : VerticalLayout {
@@ -400,13 +406,15 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // 横屏迷你播放条贴屏幕底部：高度与内边距让出底部安全区
             Rectangle {
-                height: 72px;
+                height: 72px + root.safe-bottom;
                 HorizontalLayout {
                     width: 100%;
                     height: 100%;
                     padding: 4px;
                     padding-right: root.safe-right + 4px;
+                    padding-bottom: root.safe-bottom + 4px;
                     MiniPlayer {
                         title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
                         subtitle: root.current-song.name == "" ? "点击打开播放页" : root.current-song.artist;
