@@ -1,6 +1,6 @@
 //! 语言加载（i18n）：内置 `ui/assets/lang/zh.json`、`en.json`（编译期嵌入）为兜底，
 //! 扫描**二进制同目录 `lang/*.json`** 作为用户扩展；按当前语言短码合并后写入
-//! `Language` global（扁平 key → 属性，见 ui/language.slint）。
+//! `Language` global（扁平 key → 属性，见 ui/shared/language.slint）。
 //!
 //! 合并规则：中文 zh 为默认兜底 → 目标语言（内置或用户扩展）覆盖同 key → 缺失 key 回退中文。
 //! 用户扩展语言显示名取自 json 顶层可选 `meta.name`，缺省用大写短码。

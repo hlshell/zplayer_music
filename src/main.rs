@@ -714,7 +714,7 @@ mod web_main {
         console_error_panic_hook::set_once();
         // 存储门面（web=localStorage，zplayer/ 前缀）：settings 模块持久化依赖
         crate::platform::storage::init(std::path::PathBuf::new());
-        // 同一套 appwindow.slint 骨架（wasm 编译 appwindow-web.slint，编译期嵌入 SimHei）：
+        // 同一套 appwindow.slint 骨架（wasm 编译 appwindow.web.slint，编译期嵌入 SimHei）：
         // 运行时显式设默认字体（wasm 无系统字体，否则中文空白）
         let ui = crate::AppWindow::new().expect("创建 web UI 失败");
         ui.set_is_web(true);

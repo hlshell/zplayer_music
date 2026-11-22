@@ -1,5 +1,5 @@
 //! 系统托盘（Windows/macOS/Linux）：常驻图标（启动即创建）+ 左键单击显隐切换 +
-//! 右键 Slint 自绘菜单（ui/components/tray-menu.slint，独立置顶透明窗口）。
+//! 右键 Slint 自绘菜单（ui/desktop/components/tray-menu.slint，独立置顶透明窗口）。
 //! 事件接收用独立阻塞线程（全局 channel 的 recv 阻塞等待，零轮询开销），
 //! 命中后 invoke_from_event_loop 转发 UI 线程处理（Slint 属性/回调仅限 UI 线程）。
 //!

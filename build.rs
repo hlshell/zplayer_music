@@ -10,7 +10,7 @@ fn main() {
     let is_mobile = std::env::var("CARGO_FEATURE_MOBILE").is_ok()
         || target_os_env == "android"
         || target_os_env == "ios";
-    // web(wasm32)：编译 appwindow-web.slint wrapper（同一套 UI 骨架 + 额外编译期嵌入 SimHei
+    // web(wasm32)：编译 appwindow.web.slint wrapper（同一套 UI 骨架 + 额外编译期嵌入 SimHei
     // 中文字体，re-export AppWindow）；移动端编译 ui/mobile/appwindow-mobile.slint；
     // 其余目标编译 appwindow.slint（系统字体，不嵌 9.7MB 字体）
     let ui_file = if target_arch_env == "wasm32" {
