@@ -15,8 +15,8 @@ name = "zplayer_music"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
-# bin 入口仅 desktop / web 使用（fn main 受 desktop feature 门控）；
-# 移动端（Android/iOS）构建 lib 目标（cdylib/staticlib），命令需带 --lib。
+# 桌面/Web 使用 bin 入口（fn main 受 desktop feature 门控）；
+# Android 构建 lib（cdylib，需 --lib），iOS 构建 bin（winit 需要可执行文件）。
 [[bin]]
 name = "zplayer-music"
 path = "src/main.rs"

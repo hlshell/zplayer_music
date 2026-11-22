@@ -1,0 +1,33 @@
+name: ZPlayer
+options:
+  bundleIdPrefix: com.music
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+# iOS 宿主工程：无 Swift 源码，UI 完全由 Rust/Slint 提供。
+# Rust 侧普通 fn main()（winit 内部调用 UIApplicationMain），
+# 由 postCompileScripts 调 build_rust.sh 构建并拷贝可执行文件到产物目录。
+targets:
+  ZPlayer:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.music.zplayer
+        PRODUCT_NAME: ZPlayer
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        # 构建脚本需要调用 cargo，必须关闭脚本沙盒
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # CI 无签名；真机调试可在本地覆盖
+        CODE_SIGNING_ALLOWED: NO
+        # 直接引用仓库内的 Info.plist，避免 XcodeGen 按 properties 重写该文件
+        INFOPLIST_FILE: Info.plist
+    postCompileScripts:
+      - script: "\"$SRCROOT/build_rust.sh\""
+        name: Build Rust Binary
+        outputFiles:
+          - $TARGET_BUILD_DIR/$EXECUTABLE_PATH
+        basedOnDependencyAnalysis: false
