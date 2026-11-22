@@ -1,0 +1,255 @@
+// ============================================================================
+//  search.slint — 移动端搜索页
+//  顶部搜索框 + 类型 chips（单曲/歌单/专辑）+ 结果列表；
+//  数据与状态全部由 AppWindow 属性驱动，交互通过 callbacks 交给 Rust 接线。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+import { Song, Playlist, Album } from "../../components/models.slint";
+import { SongRow } from "../components/song-row.slint";
+
+export component SearchPage inherits Rectangle {
+    in property <[Song]> results;
+    in property <[Playlist]> playlists;
+    in property <[Album]> albums;
+    // 关键词为 in-out：TextInput 双向绑定后可直接回写
+    in-out property <string> keyword: "";
+    in property <int> search-type: 0;
+    in property <bool> loading: false;
+    in property <string> error: "";
+
+    callback submitted(string, int);
+    callback type-changed(int);
+    callback song-played(int);
+    callback playlist-opened(int);
+    callback album-opened(int);
+
+    // 当前类型下结果为空（空关键词时不算"没有找到"，避免初始页误报）
+    property <bool> no-result: root.search-type == 0
+        ? root.results.length == 0
+        : (root.search-type == 1 ? root.playlists.length == 0 : root.albums.length == 0);
+
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-top: 12px;
+        padding-left: 16px;
+        padding-right: 16px;
+
+        // ===== 搜索框行：输入框 + 搜索按钮 =====
+        HorizontalLayout {
+            height: 48px;
+            spacing: 8px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 48px;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: search-input.has-focus ? MobileTheme.primary : MobileTheme.divider;
+                background: MobileTheme.surface;
+
+                // 占位提示：TextInput 无内置 placeholder，用条件 Text 叠加
+                if (root.keyword == "") : Text {
+                    x: 14px;
+                    y: 0;
+                    width: parent.width - 28px;
+                    height: 100%;
+                    text: "搜索歌曲 / 歌单 / 专辑";
+                    color: MobileTheme.text-faint;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                search-input := TextInput {
+                    x: 14px;
+                    width: parent.width - 28px;
+                    height: 100%;
+                    vertical-alignment: center;
+                    text: root.keyword;
+                    color: MobileTheme.text;
+                    font-size: 14px;
+                    single-line: true;
+                    edited => { root.keyword = self.text; }
+                    accepted => { root.submitted(root.keyword, root.search-type); }
+                }
+            }
+
+            Rectangle {
+                width: 64px;
+                height: 48px;
+                border-radius: 12px;
+                background: search-btn.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: "搜索";
+                    color: Theme.palette.icon-white;
+                    font-size: 14px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                search-btn := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.submitted(root.keyword, root.search-type); }
+                }
+            }
+        }
+
+        // ===== 类型 chips =====
+        HorizontalLayout {
+            height: 40px;
+            spacing: 8px;
+
+            for name[idx] in ["单曲", "歌单", "专辑"] : Rectangle {
+                horizontal-stretch: 1;
+                height: 40px;
+                border-radius: 20px;
+                background: idx == root.search-type ? MobileTheme.primary : MobileTheme.surface;
+
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: name;
+                    color: idx == root.search-type ? Theme.palette.icon-white : MobileTheme.text-secondary;
+                    font-size: 13px;
+                    font-weight: idx == root.search-type ? 600 : 400;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                chip-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.type-changed(idx); }
+                }
+            }
+        }
+
+        // ===== 结果区 =====
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            ScrollView {
+                width: 100%;
+                height: 100%;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    width: 100%;
+                    spacing: 4px;
+                    padding-bottom: 24px;
+
+                    if (root.loading) : Text {
+                        text: "搜索中…";
+                        color: MobileTheme.text-faint;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                    }
+
+                    if (!root.loading && root.error != "") : Rectangle {
+                        height: 96px;
+                        border-radius: 14px;
+                        background: MobileTheme.surface;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            spacing: 10px;
+                            alignment: center;
+
+                            Text {
+                                text: root.error;
+                                color: MobileTheme.text-secondary;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                            }
+
+                            Rectangle {
+                                width: 96px;
+                                height: 40px;
+                                border-radius: 20px;
+                                background: retry-ta.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+
+                                Text {
+                                    width: 100%;
+                                    height: 100%;
+                                    text: "重试";
+                                    color: Theme.palette.icon-white;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                retry-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.submitted(root.keyword, root.search-type); }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!root.loading && root.error == "" && root.no-result && root.keyword != "") : Text {
+                        text: "没有找到相关结果";
+                        color: MobileTheme.text-faint;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        height: 64px;
+                        vertical-alignment: center;
+                    }
+
+                    // 单曲
+                    if (root.search-type == 0) : VerticalLayout {
+                        for s[i] in root.results : SongRow {
+                            index: i;
+                            rank: "";
+                            title: s.name;
+                            subtitle: s.artist;
+                            cover: s.cover;
+                            from: Theme.palette.primary;
+                            to: Theme.palette.secondary;
+                            clicked => { root.song-played(s.id); }
+                        }
+                    }
+
+                    // 歌单
+                    if (root.search-type == 1) : VerticalLayout {
+                        for p[i] in root.playlists : SongRow {
+                            index: i;
+                            rank: "";
+                            title: p.name;
+                            subtitle: p.plays;
+                            cover: p.cover;
+                            from: p.from;
+                            to: p.to;
+                            clicked => { root.playlist-opened(p.id); }
+                        }
+                    }
+
+                    // 专辑
+                    if (root.search-type == 2) : VerticalLayout {
+                        for a[i] in root.albums : SongRow {
+                            index: i;
+                            rank: "";
+                            title: a.name;
+                            subtitle: a.year == "" ? a.artist : (a.artist + " · " + a.year);
+                            cover: a.cover;
+                            from: a.from;
+                            to: a.to;
+                            clicked => { root.album-opened(a.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -9,6 +9,7 @@ use crate::platform::audio as player;
 use slint::{ComponentHandle, Model};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// 移动端 UI 回调共享上下文。
@@ -22,6 +23,11 @@ pub struct MobileCtx {
     pub cur: Cell<usize>,
     /// 播放模式 0=列表循环 1=单曲循环 2=顺序循环
     pub mode: Cell<i32>,
+    /// 搜索请求序号：每次发起搜索自增。响应回到 UI 线程后先比对序号，过期响应直接丢弃。
+    /// 用 `Arc<AtomicU64>` 而非 `Cell`：回投到事件循环的闭包必须 Send，不能捕获 Rc/Cell。
+    pub search_seq: Arc<AtomicU64>,
+    /// 最近一次有效搜索关键词（切换类型时复用）
+    pub search_kw: RefCell<String>,
 }
 
 /// 读取 UI 侧 queue 模型为 Vec（仅 UI 线程使用）。
@@ -63,6 +69,18 @@ fn resolve_from_pools(id: i32) -> Option<crate::Song> {
     ns.as_ref().map(song_from_base)
 }
 
+/// 在 UI 模型里按 id 找歌（搜索结果/详情列表等非队列来源）。
+fn find_in_model(m: &slint::ModelRc<crate::Song>, id: i32) -> Option<crate::Song> {
+    for i in 0..m.row_count() {
+        if let Some(s) = m.row_data(i) {
+            if s.id == id {
+                return Some(s);
+            }
+        }
+    }
+    None
+}
+
 fn song_from_base(b: &crate::load::SongBase) -> crate::Song {
     let cover_url = b.url.clone();
     crate::Song {
@@ -78,6 +96,217 @@ fn song_from_base(b: &crate::load::SongBase) -> crate::Song {
     }
 }
 
+/// 搜索结果中间态（仅含 Send 数据；slint::Image 只能在 UI 线程构造）。
+enum SearchHits {
+    Songs(Vec<crate::load::SongBase>),
+    Playlists(Vec<PlaylistHit>),
+    Albums(Vec<AlbumHit>),
+}
+
+struct PlaylistHit {
+    id: i32,
+    name: slint::SharedString,
+    plays: slint::SharedString,
+    url: String,
+}
+
+struct AlbumHit {
+    id: i32,
+    name: slint::SharedString,
+    artist: slint::SharedString,
+    year: slint::SharedString,
+    url: String,
+}
+
+/// publishTime（毫秒时间戳）→ 年份字符串；缺失/非法留空。
+fn ms_to_year(ms: i64) -> slint::SharedString {
+    if ms <= 0 {
+        return slint::SharedString::default();
+    }
+    ((1970.0 + (ms / 1000 / 86400) as f64 / 365.25) as i64).to_string().into()
+}
+
+/// 后台线程解析响应：只产出 Send 结构，不碰 slint::Image。
+fn parse_hits(v: &serde_json::Value, ty: i32) -> SearchHits {
+    match ty {
+        0 => {
+            let arr = v
+                .pointer("/result/songs")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
+            SearchHits::Songs(crate::load::parse_tracks(&arr))
+        }
+        1 => {
+            let arr = v
+                .pointer("/result/playlists")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
+            SearchHits::Playlists(
+                arr.iter()
+                    .map(|p| PlaylistHit {
+                        id: p.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+                        name: p.get("name").and_then(|x| x.as_str()).unwrap_or("").into(),
+                        plays: crate::core::song_util::fmt_plays_cat(
+                            p.get("playCount").and_then(|x| x.as_u64()).unwrap_or(0),
+                        )
+                        .into(),
+                        url: p
+                            .get("coverImgUrl")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    })
+                    .collect(),
+            )
+        }
+        _ => {
+            let arr = v
+                .pointer("/result/albums")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
+            SearchHits::Albums(
+                arr.iter()
+                    .map(|a| AlbumHit {
+                        id: a.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+                        name: a.get("name").and_then(|x| x.as_str()).unwrap_or("").into(),
+                        artist: a
+                            .get("artist")
+                            .and_then(|x| x.get("name"))
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .into(),
+                        year: a
+                            .get("publishTime")
+                            .and_then(|x| x.as_i64())
+                            .map(ms_to_year)
+                            .unwrap_or_default(),
+                        url: a
+                            .get("picUrl")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    })
+                    .collect(),
+            )
+        }
+    }
+}
+
+/// UI 线程落库：封面/渐变在此构造（slint::Image 非 Send）。
+fn apply_hits(ui: &crate::AppWindow, hits: SearchHits) {
+    match hits {
+        SearchHits::Songs(items) => {
+            let rows: Vec<crate::Song> = items
+                .iter()
+                .map(|b| crate::Song {
+                    id: b.id,
+                    name: b.name.clone(),
+                    artist: b.artist.clone(),
+                    album: b.album.clone(),
+                    cover: crate::load::cover_now(&b.url),
+                    duration: b.duration.clone(),
+                    duration_sec: b.duration_sec,
+                    url: b.url.clone().into(),
+                    liked: crate::persist::liked::is_liked(b.id as u32 as i64),
+                })
+                .collect();
+            ui.set_search_songs(crate::load::model(rows));
+        }
+        SearchHits::Playlists(items) => {
+            let rows: Vec<crate::Playlist> = items
+                .iter()
+                .enumerate()
+                .map(|(i, p)| crate::Playlist {
+                    id: p.id,
+                    name: p.name.clone(),
+                    plays: p.plays.clone(),
+                    cover: crate::load::cover_now(&p.url),
+                    from: crate::load::from(i),
+                    to: crate::load::to(i),
+                })
+                .collect();
+            ui.set_search_playlists(crate::load::model(rows));
+        }
+        SearchHits::Albums(items) => {
+            let rows: Vec<crate::Album> = items
+                .iter()
+                .enumerate()
+                .map(|(i, a)| crate::Album {
+                    id: a.id,
+                    name: a.name.clone(),
+                    artist: a.artist.clone(),
+                    year: a.year.clone(),
+                    cover: crate::load::cover_now(&a.url),
+                    from: crate::load::from(i),
+                    to: crate::load::to(i),
+                })
+                .collect();
+            ui.set_search_albums(crate::load::model(rows));
+        }
+    }
+}
+
+/// 发起一次搜索：序号自增 → 置加载态 → 后台请求 → UI 线程按序号防串回填。
+fn start_search(ctx: &Rc<MobileCtx>, keyword: &str, ty: i32) {
+    let Some(ui) = ctx.ui.upgrade() else { return; };
+    let kw = keyword.trim().to_string();
+
+    // 空关键词：清空结果并作废在途请求（序号自增让旧响应失效）
+    if kw.is_empty() {
+        ctx.search_seq.fetch_add(1, Ordering::SeqCst);
+        ctx.search_kw.borrow_mut().clear();
+        ui.set_search_songs(crate::load::model(Vec::new()));
+        ui.set_search_playlists(crate::load::model(Vec::new()));
+        ui.set_search_albums(crate::load::model(Vec::new()));
+        ui.set_search_loading(false);
+        ui.set_search_error("".into());
+        ui.set_search_keyword("".into());
+        return;
+    }
+
+    let seq = ctx.search_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    *ctx.search_kw.borrow_mut() = kw.clone();
+
+    ui.set_search_type(ty);
+    ui.set_search_keyword(kw.as_str().into());
+    ui.set_search_loading(true);
+    ui.set_search_error("".into());
+
+    let client = ctx.client.clone();
+    let ui_weak = ctx.ui.clone();
+    let seq_now = ctx.search_seq.clone();
+    ctx.rt.spawn(async move {
+        // 本地类型 → 网易云搜索类型：0 单曲=1 / 1 歌单=1000 / 2 专辑=10
+        let api_ty = match ty {
+            0 => 1,
+            1 => 1000,
+            _ => 10,
+        };
+        let result = crate::network::service::search(&client, &kw, api_ty, 30, 0).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(u) = ui_weak.upgrade() else { return; };
+            // 序号防串：期间已有新搜索发起（或已清空）则丢弃本次响应
+            if seq_now.load(Ordering::SeqCst) != seq {
+                return;
+            }
+            match result {
+                Ok(v) => {
+                    apply_hits(&u, parse_hits(&v, ty));
+                    u.set_search_error("".into());
+                }
+                Err(e) => {
+                    log::warn!("[mobile] 搜索失败: keyword={kw} err={e}");
+                    u.set_search_error("搜索失败，请重试".into());
+                }
+            }
+            u.set_search_loading(false);
+        });
+    });
+}
+
 /// 播放指定歌曲：解析元数据 → 同步队列 → 更新 UI → 后台取音频并播放。
 fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
     let Some(ui) = ctx.ui.upgrade() else { return; };
@@ -87,7 +316,8 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
     let mut song = if let Some(i) = idx {
         q[i].clone()
     } else {
-        match resolve_from_pools(id) {
+        // 队列未命中：首页池 → 搜索结果列表（搜索页行点击播放）
+        match resolve_from_pools(id).or_else(|| find_in_model(&ui.get_search_songs(), id)) {
             Some(s) => s,
             None => {
                 eprintln!("[mobile] 未找到歌曲元数据: id={id}");
@@ -190,6 +420,8 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         queue: RefCell::new(read_ui_queue(ui)),
         cur: Cell::new(0),
         mode: Cell::new(0),
+        search_seq: Arc::new(AtomicU64::new(0)),
+        search_kw: RefCell::new(String::new()),
     });
 
     // ---- 首页点歌 ----
@@ -199,6 +431,27 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
     // 歌单打开：详情页尚未接入，暂仅记录
     ui.on_playlist_opened(move |id| {
         log::info!("[mobile] 打开歌单: id={id}");
+    });
+
+    // ---- 搜索 ----
+    let c = ctx.clone();
+    ui.on_search_submitted(move |keyword, ty| start_search(&c, keyword.as_str(), ty));
+
+    let c = ctx.clone();
+    ui.on_search_type_changed(move |ty| {
+        if let Some(u) = c.ui.upgrade() {
+            u.set_search_type(ty);
+        }
+        // 保留旧结果直到新结果到达（期间 loading=true）
+        let kw = c.search_kw.borrow().clone();
+        if !kw.is_empty() {
+            start_search(&c, &kw, ty);
+        }
+    });
+
+    // 专辑打开：详情页在后续任务接入，暂仅记录
+    ui.on_album_opened(move |id| {
+        log::info!("[mobile] 打开专辑: id={id}");
     });
 
     // ---- 播放控制 ----

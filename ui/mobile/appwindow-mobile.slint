@@ -13,6 +13,7 @@ import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
 // 首页/队列数据模型（与桌面共用同一份 struct 定义，Rust 侧 load 直接填充）
 import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../components/models.slint";
 import { HomePage } from "pages/home.slint";
+import { SearchPage } from "pages/search.slint";
 
 // 一级页面占位内容（搜索/设置尚未接入）
 component PagePlaceholder inherits Rectangle {
@@ -50,7 +51,7 @@ component PagePlaceholder inherits Rectangle {
     }
 }
 
-// 内容区：nav==0 渲染真实首页，其余一级页面暂用占位。
+// 内容区：nav==0 渲染真实首页，nav==1 渲染搜索页，其余一级页面暂用占位。
 // 三种形态（竖屏/横屏/平板单列）共用同一份内容与数据属性。
 component ContentArea inherits Rectangle {
     in property <int> nav: 0;
@@ -61,8 +62,19 @@ component ContentArea inherits Rectangle {
     in property <[HeroSong]> hero-songs;
     in property <image> hero-cover;
     in property <int> hero-count: 0;
+    // 搜索页数据与状态
+    in property <[Song]> search-songs;
+    in property <[Playlist]> search-playlists;
+    in property <[Album]> search-albums;
+    in property <string> search-keyword;
+    in property <int> search-type: 0;
+    in property <bool> search-loading: false;
+    in property <string> search-error;
     callback song-played(int);
     callback playlist-opened(int);
+    callback album-opened(int);
+    callback search-submitted(string, int);
+    callback search-type-changed(int);
 
     background: transparent;
 
@@ -79,12 +91,21 @@ component ContentArea inherits Rectangle {
         song-played(id) => { root.song-played(id); }
         playlist-opened(id) => { root.playlist-opened(id); }
     }
-    if (root.nav == 1) : PagePlaceholder {
+    if (root.nav == 1) : SearchPage {
         width: 100%;
         height: 100%;
-        title: "搜索";
-        subtitle: "搜索页即将接入";
-        hint: "";
+        results: root.search-songs;
+        playlists: root.search-playlists;
+        albums: root.search-albums;
+        keyword: root.search-keyword;
+        search-type: root.search-type;
+        loading: root.search-loading;
+        error: root.search-error;
+        submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
+        type-changed(ty) => { root.search-type-changed(ty); }
+        song-played(id) => { root.song-played(id); }
+        playlist-opened(id) => { root.playlist-opened(id); }
+        album-opened(id) => { root.album-opened(id); }
     }
     if (root.nav == 2) : PagePlaceholder {
         width: 100%;
@@ -113,9 +134,12 @@ export component AppWindow inherits Window {
     in-out property <bool> dark <=> Theme.dark;
     in-out property <int> theme-color-index <=> Theme.theme-color-index;
 
-    // ===== 首页/播放回调（由 src/mobile/handlers.rs 接线）=====
+    // ===== 首页/搜索/播放回调（由 src/mobile/handlers.rs 接线）=====
     callback song-played(int);
     callback playlist-opened(int);
+    callback album-opened(int);
+    callback search-submitted(string, int);
+    callback search-type-changed(int);
     callback player-toggle();
     callback player-prev();
     callback player-next();
@@ -135,6 +159,15 @@ export component AppWindow inherits Window {
     in-out property <Song> current-song;
     in-out property <bool> liked: false;
     in-out property <bool> loading: false;
+
+    // ===== 搜索页数据与状态（由 src/mobile/handlers.rs 填充）=====
+    in-out property <[Song]> search-songs;
+    in-out property <[Playlist]> search-playlists;
+    in-out property <[Album]> search-albums;
+    in-out property <string> search-keyword: "";
+    in-out property <int> search-type: 0;
+    in-out property <bool> search-loading: false;
+    in-out property <string> search-error: "";
 
     // ===== 窗口尺寸：由内置 width/height 驱动 =====
     in-out property <length> window-width: root.width;
@@ -186,8 +219,18 @@ export component AppWindow inherits Window {
                 hero-songs: root.hero-songs;
                 hero-cover: root.hero-cover;
                 hero-count: root.hero-count;
+                search-songs: root.search-songs;
+                search-playlists: root.search-playlists;
+                search-albums: root.search-albums;
+                search-keyword: root.search-keyword;
+                search-type: root.search-type;
+                search-loading: root.search-loading;
+                search-error: root.search-error;
                 song-played(id) => { root.song-played(id); }
                 playlist-opened(id) => { root.playlist-opened(id); }
+                album-opened(id) => { root.album-opened(id); }
+                search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
+                search-type-changed(ty) => { root.search-type-changed(ty); }
             }
         }
 
@@ -244,8 +287,18 @@ export component AppWindow inherits Window {
                     hero-songs: root.hero-songs;
                     hero-cover: root.hero-cover;
                     hero-count: root.hero-count;
+                    search-songs: root.search-songs;
+                    search-playlists: root.search-playlists;
+                    search-albums: root.search-albums;
+                    search-keyword: root.search-keyword;
+                    search-type: root.search-type;
+                    search-loading: root.search-loading;
+                    search-error: root.search-error;
                     song-played(id) => { root.song-played(id); }
                     playlist-opened(id) => { root.playlist-opened(id); }
+                    album-opened(id) => { root.album-opened(id); }
+                    search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
+                    search-type-changed(ty) => { root.search-type-changed(ty); }
                 }
             }
 
@@ -307,8 +360,18 @@ export component AppWindow inherits Window {
                         hero-songs: root.hero-songs;
                         hero-cover: root.hero-cover;
                         hero-count: root.hero-count;
+                        search-songs: root.search-songs;
+                        search-playlists: root.search-playlists;
+                        search-albums: root.search-albums;
+                        search-keyword: root.search-keyword;
+                        search-type: root.search-type;
+                        search-loading: root.search-loading;
+                        search-error: root.search-error;
                         song-played(id) => { root.song-played(id); }
                         playlist-opened(id) => { root.playlist-opened(id); }
+                        album-opened(id) => { root.album-opened(id); }
+                        search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
+                        search-type-changed(ty) => { root.search-type-changed(ty); }
                     }
                 }
             }
