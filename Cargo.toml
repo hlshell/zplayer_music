@@ -30,10 +30,6 @@ web = []
 mobile = ["slint/backend-android-activity-06", "dep:rodio", "dep:cpal"]
 
 [dependencies]
-# slint 恢复原始全局配置（desktop 稳定基线，skia 渲染器已有缓存；feature 传递改法会触发 skia-bindings
-# 重新下载 skia 预编译二进制，当前网络不通 → 回滚）。web 无反应并非 skia：slint 在 wasm32 端本就 cfg 排除
-# skia、用 femtovg 软件渲染，真问题是 web 渲染尺寸与中文字体，另行修复。
-slint = { version = "1.18.1", features = ["unstable-winit-030"] }
 raw-window-handle = "0.6"
 
 # ---- 后端（从 src-tauri 迁移的纯 Rust 核心）----
@@ -104,6 +100,20 @@ zip = { version = "2.4", default-features = false, features = ["deflate"], optio
 tar = { version = "0.4", optional = true }
 flate2 = { version = "1", optional = true }
 semver = { version = "1", optional = true }
+
+# slint 按 target 拆分声明（其余 target 仍用默认 features + unstable-winit-030）。
+# 原因：slint 的 unstable-winit-030 在 i-slint-backend-selector 里是硬依赖
+#   unstable-winit-030 = ["i-slint-backend-winit"]（无 ?），会把 winit 后端强制拉进
+#   Android 构建；而 selector 的 renderer-* 转发在 Android 上是弱依赖
+#   （i-slint-backend-winit?/renderer-*），依赖被硬拉入时这些渲染器 feature 不生效，
+#   导致 i-slint-backend-winit 在 Android 上 compile_error!("Please select a feature
+#   to build with the winit backend")。Android 不需要 winit（src 里 winit_030 的用法
+#   全在 not(feature = "mobile") 下），故 Android 不启用该 feature。
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { version = "1.18.1", features = ["unstable-winit-030"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18.1" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # 桌面/mobile 共享的网络与异步运行时（web 不拉）
