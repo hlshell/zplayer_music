@@ -10,8 +10,8 @@ pub mod logger {
     pub fn init() {}
     pub fn mark_clean_exit() {}
 }
-// 歌词模型直接构造桌面 UI 生成的 LyricLine/LyricWord 结构，移动端 UI 未导出
-#[cfg(feature = "desktop")]
+// 歌词：parse_lrc / LYRICS 为纯逻辑，移动端复用；模型构造函数依赖桌面 UI 类型，模块内门控
+#[cfg(any(feature = "desktop", feature = "mobile"))]
 pub mod lyrics;
 // 队列逻辑直接操作桌面端 AppWindow 的队列/当前歌曲属性，移动端 UI 无对应属性
 #[cfg(feature = "desktop")]

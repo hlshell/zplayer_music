@@ -16,6 +16,7 @@ import { HomePage } from "pages/home.slint";
 import { SearchPage } from "pages/search.slint";
 import { DetailPage } from "pages/detail.slint";
 import { SettingsPage } from "pages/settings.slint";
+import { PlayerPage, LyricRow } from "pages/player.slint";
 
 // 内容区：nav==0 渲染首页，nav==1 渲染搜索页，nav==2 渲染设置页。
 // 三种形态（竖屏/横屏/平板单列）共用同一份内容与数据属性。
@@ -162,6 +163,8 @@ export component AppWindow inherits Window {
     callback player-prev();
     callback player-next();
     callback player-mode();
+    callback player-seek(float);
+    callback queue-played(int);
     callback detail-back();
     callback detail-play-all();
     callback dark-changed(bool);
@@ -183,6 +186,8 @@ export component AppWindow inherits Window {
     in-out property <[NewSong]> new-songs;
     in-out property <[Song]> queue;
     in-out property <Song> current-song;
+    // 当前歌曲歌词（由 src/mobile/handlers.rs 解析 LRC 后填充）
+    in-out property <[LyricRow]> lyrics;
     in-out property <bool> liked: false;
     in-out property <bool> loading: false;
 
@@ -507,173 +512,27 @@ export component AppWindow inherits Window {
         }
     }
 
-    // ===== 播放层覆盖（全屏占位）=====
-    if (root.player-open) : Rectangle {
+    // ===== 播放层：竖屏全屏 / 横屏·平板双栏（seek / 歌词 / 队列）=====
+    if (root.player-open) : PlayerPage {
         x: 0;
         y: 0;
         width: 100%;
         height: 100%;
-        background: MobileTheme.page-bg;
-
-        CoverBackdrop {
-            width: 100%;
-            height: 100%;
-            cover-color: MobileTheme.primary;
-        }
-
-        VerticalLayout {
-            width: 100%;
-            height: 100%;
-            spacing: 0;
-            padding-top: root.safe-top + 8px;
-            padding-bottom: root.safe-bottom + 12px;
-            padding-left: root.safe-left + 20px;
-            padding-right: root.safe-right + 20px;
-
-            // 顶栏：标题 + 关闭
-            HorizontalLayout {
-                height: 48px;
-                spacing: 8px;
-                cross-axis-alignment: center;
-
-                Text {
-                    text: "正在播放";
-                    horizontal-stretch: 1;
-                    color: MobileTheme.text;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                }
-                Rectangle {
-                    width: 48px;
-                    height: 48px;
-                    border-radius: 24px;
-                    background: close-ta.has-hover ? Theme.palette.hover : rgba(255, 255, 255, 0.10);
-
-                    Image {
-                        source: @image-url("../assets/icons/arrow-big-down-lines.svg");
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        width: 20px;
-                        height: 20px;
-                        colorize: MobileTheme.text;
-                    }
-                    close-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.player-open = false; }
-                    }
-                }
-            }
-
-            Rectangle { vertical-stretch: 1; }
-
-            // 封面：受可用宽高约束，横屏不会把控制区挤出屏幕；有真实封面时覆盖渐变
-            Rectangle {
-                width: min(min(root.window-width * 0.62, root.window-height * 0.30), 240px);
-                height: self.width;
-                border-radius: 24px;
-                clip: true;
-                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
-
-                if (root.current-song.cover.width > 0) : Image {
-                    width: 100%;
-                    height: 100%;
-                    source: root.current-song.cover;
-                }
-            }
-
-            Rectangle { height: 16px; }
-
-            Text {
-                text: root.current-song.name == "" ? "歌曲标题" : root.current-song.name;
-                color: MobileTheme.text;
-                font-size: 20px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                overflow: elide;
-            }
-            Text {
-                text: root.current-song.name == "" ? "歌手 · 专辑" : root.current-song.artist;
-                color: MobileTheme.text-secondary;
-                font-size: 13px;
-                horizontal-alignment: center;
-                overflow: elide;
-            }
-
-            Rectangle { vertical-stretch: 1; }
-
-            // 进度条（占位，只展示不拖动）
-            Rectangle {
-                height: 4px;
-                border-radius: 2px;
-                background: rgba(255, 255, 255, 0.18);
-
-                Rectangle {
-                    x: 0;
-                    y: 0;
-                    width: parent.width * min(1.0, max(0.0, root.progress));
-                    height: 100%;
-                    border-radius: 2px;
-                    background: MobileTheme.secondary;
-                }
-            }
-            Rectangle { height: 6px; }
-            HorizontalLayout {
-                height: 14px;
-                Text { text: "0:00"; color: MobileTheme.text-faint; font-size: 10px; }
-                Rectangle { horizontal-stretch: 1; }
-                Text {
-                    text: root.current-song.duration == "" ? "3:45" : root.current-song.duration;
-                    color: MobileTheme.text-faint;
-                    font-size: 10px;
-                }
-            }
-
-            Rectangle { height: 14px; }
-
-            // 控制区玻璃面板
-            GlassRectangle {
-                height: 88px;
-                border-radius: 26px;
-                color: MobileTheme.surface-bg;
-                blur-radius: MobileTheme.surface-blur-radius;
-                border-width: 1px;
-                highlight-alpha: MobileTheme.highlight-alpha;
-
-                HorizontalLayout {
-                    width: 100%;
-                    height: 100%;
-                    spacing: 12px;
-                    padding: 12px;
-
-                    PlayBarButton {
-                        size: 44px;
-                        icon: @image-url("../assets/icons/repeat-gray.svg");
-                        icon-color: root.play-mode == 0 ? MobileTheme.icon : MobileTheme.primary;
-                        clicked => { root.player-mode(); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    PlayBarButton {
-                        icon: @image-url("../assets/icons/prev-gray.svg");
-                        icon-color: MobileTheme.icon;
-                        clicked => { root.player-prev(); }
-                    }
-                    PlayBarButton {
-                        size: 52px;
-                        accent: true;
-                        icon: root.playing
-                            ? @image-url("../assets/icons/pause-white.svg")
-                            : @image-url("../assets/icons/play-white.svg");
-                        clicked => { root.player-toggle(); }
-                    }
-                    PlayBarButton {
-                        icon: @image-url("../assets/icons/next-gray.svg");
-                        icon-color: MobileTheme.icon;
-                        clicked => { root.player-next(); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                }
-            }
-        }
+        open <=> root.player-open;
+        song: root.current-song;
+        playing: root.playing;
+        progress: root.progress;
+        play-mode: root.play-mode;
+        lyrics: root.lyrics;
+        queue: root.queue;
+        wide: root.layout-kind != 0;
+        close => { root.player-open = false; }
+        toggle => { root.player-toggle(); }
+        prev => { root.player-prev(); }
+        next => { root.player-next(); }
+        mode => { root.player-mode(); }
+        seek(r) => { root.player-seek(r); }
+        queue-played(id) => { root.queue-played(id); }
     }
 }
 

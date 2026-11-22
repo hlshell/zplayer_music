@@ -34,6 +34,8 @@ pub struct MobileCtx {
     pub detail_seq: Arc<AtomicU64>,
     /// 播放请求序号：每次点歌自增；旧请求晚到的音频字节直接丢弃，避免覆盖后点的歌。
     pub play_seq: Arc<AtomicU64>,
+    /// 当前曲目序号：仅在切歌时自增；歌词请求按它校验（seek 不影响歌词）。
+    pub song_seq: Arc<AtomicU64>,
     /// 用户配置快照（设置页修改后写盘；与桌面共用同一份 config.toml）
     pub cfg: RefCell<AppConfig>,
 }
@@ -521,6 +523,64 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
 
     // Slint int 是 i32：大 ID 存为负数，须经 u32 往返还原真实网易云 ID
     let uid = song.id as u32 as i64;
+
+    // 歌词：先清空上一首，再与音频并行拉取；失败/无歌词只留空（播放不受影响）。
+    // 用 song_seq（仅切歌自增）校验，拖动进度 seek 不会让在途歌词作废。
+    ui.set_lyrics(crate::load::model::<crate::LyricRow>(Vec::new()));
+    let song_token = ctx.song_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let lyric_client = ctx.client.clone();
+    let lyric_ui = ctx.ui.clone();
+    let lyric_seq = ctx.song_seq.clone();
+    ctx.rt.spawn(async move {
+        let parsed = match crate::network::service::song_lyric(&lyric_client, uid).await {
+            Ok(v) => v
+                .get("lrc")
+                .and_then(|x| x.get("lyric"))
+                .and_then(|x| x.as_str())
+                .map(crate::core::lyrics::parse_lrc)
+                .unwrap_or_default(),
+            Err(e) => {
+                log::warn!("[mobile] 歌词获取失败: id={uid} err={e}");
+                return;
+            }
+        };
+        if parsed.is_empty() {
+            log::warn!("[mobile] 歌词为空: id={uid}");
+        }
+        // 期间已切歌：不写入内存表，也不回填 UI
+        if lyric_seq.load(Ordering::SeqCst) != song_token {
+            return;
+        }
+        // 与桌面共用同一份内存表（供播放进度定位）
+        *crate::core::lyrics::LYRICS.lock().unwrap() = parsed.clone();
+        let n = parsed.len();
+        let rows: Vec<crate::LyricRow> = parsed
+            .iter()
+            .enumerate()
+            .map(|(i, (t, text))| {
+                let start = (t * 1000.0) as i32;
+                crate::LyricRow {
+                    text: text.as_str().into(),
+                    start_ms: start,
+                    end_ms: if i + 1 < n {
+                        (parsed[i + 1].0 * 1000.0) as i32
+                    } else {
+                        start + 5000
+                    },
+                }
+            })
+            .collect();
+        let _ = slint::invoke_from_event_loop(move || {
+            // 期间已切歌：本次歌词作废
+            if lyric_seq.load(Ordering::SeqCst) != song_token {
+                return;
+            }
+            if let Some(u) = lyric_ui.upgrade() {
+                u.set_lyrics(crate::load::model(rows));
+            }
+        });
+    });
+
     let dur_sec = song.duration_sec.max(0.0);
     let name = song.name.to_string();
     let artist = song.artist.to_string();
@@ -551,6 +611,63 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
                     }
                 });
                 eprintln!("[mobile] 音频获取失败: id={uid} name={name}");
+            }
+        }
+    });
+}
+
+/// 拖动进度：保持当前曲目，从 ratio 位置重新取流续播（旧请求按序号作废）。
+fn seek_song(ctx: &Rc<MobileCtx>, ratio: f32) {
+    let Some(ui) = ctx.ui.upgrade() else { return; };
+    let ratio = ratio.clamp(0.0, 1.0);
+    let song = ui.get_current_song();
+    if song.name.is_empty() {
+        return;
+    }
+    let uid = song.id as u32 as i64;
+    let dur_sec = song.duration_sec.max(0.0);
+    if dur_sec <= 0.0 {
+        return;
+    }
+    // 末尾留 1 秒，避免 ratio=1.0 时 offset 等于总时长导致立即播完并自动切歌
+    let offset = (dur_sec * ratio).min((dur_sec - 1.0).max(0.0));
+    let name = song.name.to_string();
+    let artist = song.artist.to_string();
+
+    // 先反馈预览位置，再停旧流进入切换过渡态
+    ui.set_progress(ratio);
+    player::stop();
+    player::begin_switch();
+
+    let play_seq = ctx.play_seq.clone();
+    let seq = play_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let client = ctx.client.clone();
+    let ui_weak = ctx.ui.clone();
+    ctx.rt.spawn(async move {
+        let bytes = crate::fetch::fetch_song_bytes(&client, uid, &name, &artist, dur_sec as u64).await;
+        // 期间又点歌/再次拖动：本次结果作废
+        if play_seq.load(Ordering::SeqCst) != seq {
+            return;
+        }
+        match bytes {
+            Some(b) => {
+                player::play_at(b, dur_sec, offset);
+                let ui_set = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(u) = ui_set.upgrade() {
+                        u.set_playing(true);
+                    }
+                });
+            }
+            None => {
+                player::end_switch();
+                let ui_set = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(u) = ui_set.upgrade() {
+                        u.set_playing(false);
+                    }
+                });
+                log::warn!("[mobile] seek 音频获取失败: id={uid} offset={offset}");
             }
         }
     });
@@ -612,6 +729,7 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         search_kw: RefCell::new(String::new()),
         detail_seq: Arc::new(AtomicU64::new(0)),
         play_seq: Arc::new(AtomicU64::new(0)),
+        song_seq: Arc::new(AtomicU64::new(0)),
         cfg: RefCell::new(cfg),
     });
 
@@ -713,6 +831,12 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
     ui.on_player_next(move || step_song(&c, 1));
     let c = ctx.clone();
     ui.on_player_prev(move || step_song(&c, -1));
+
+    // 播放层拖动 seek / 队列点播
+    let c = ctx.clone();
+    ui.on_player_seek(move |ratio| seek_song(&c, ratio));
+    let c = ctx.clone();
+    ui.on_queue_played(move |id| play_song(&c, id));
 
     let c = ctx.clone();
     ui.on_player_mode(move || {

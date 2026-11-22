@@ -1,0 +1,684 @@
+// ============================================================================
+//  player.slint — 移动端播放层（全屏）
+//  竖屏：顶栏 + 封面 + 曲目信息 + 可拖动进度 + 控制区 + 歌词/队列；
+//  横屏/平板：左侧 46%（封面与控制）+ 右侧 54%（歌词/队列），互不挤压。
+//  数据全部由 AppWindow 属性驱动；进度只读，拖动时本地预览，松手才回调 seek。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { MobileTheme } from "../theme.slint";
+import { Song } from "../../components/models.slint";
+import { GlassRectangle, CoverBackdrop } from "../components/glass.slint";
+import { PlayBarButton } from "../components/playbar.slint";
+
+// 歌词行（start-ms/end-ms 由 Rust 依据 LRC 相邻时间戳生成）
+export struct LyricRow {
+    text: string,
+    start-ms: int,
+    end-ms: int,
+}
+
+// 秒 → "mm:ss"（与桌面/平板播放栏同一格式）
+component TimeText inherits Text {
+    in property <float> sec: 0.0;
+    in property <string> literal: "";
+
+    text: root.literal == "" ? root.fmt-sec(root.sec) : root.literal;
+
+    function fmt-sec(s: float) -> string {
+        let total = max(0, round(s));
+        return (Math.floor(total / 60) < 10 ? "0" : "") + Math.floor(total / 60) + ":"
+            + (Math.mod(total, 60) < 10 ? "0" : "") + Math.mod(total, 60);
+    }
+}
+
+// 封面：空图回退主题渐变
+component PlayerCover inherits Rectangle {
+    in property <image> cover;
+    in property <length> size: 240px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: 24px;
+    clip: true;
+    background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+
+    if (root.cover.width > 0) : Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+    }
+}
+
+// 可拖动进度条：命中区 20px，视觉 4px；拖动中显示本地预览位置，松手回调 seek
+component PlayerSlider inherits Rectangle {
+    in property <float> ratio: 0.0;
+    callback seek(float);
+
+    property <bool> dragging: false;
+    property <float> preview: 0.0;
+    property <float> shown: min(1.0, max(0.0, root.dragging ? root.preview : root.ratio));
+
+    height: 20px;
+    background: transparent;
+
+    Rectangle {
+        y: (parent.height - 4px) / 2;
+        width: 100%;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.18);
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width * root.shown;
+            height: 100%;
+            border-radius: 2px;
+            background: MobileTheme.secondary;
+        }
+        // 拖动圆点：贴边时夹在轨道内，避免溢出
+        Rectangle {
+            x: min(parent.width - 12px, max(0px, parent.width * root.shown - 6px));
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            border-radius: 6px;
+            background: MobileTheme.secondary;
+        }
+    }
+
+    slider-ta := TouchArea {
+        width: 100%;
+        height: 100%;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.dragging = true;
+                root.preview = min(1.0, max(0.0, self.mouse-x / self.width));
+                EventResult.accept
+            } else if (e.kind == PointerEventKind.move) {
+                if (root.dragging) {
+                    root.preview = min(1.0, max(0.0, self.mouse-x / self.width));
+                }
+                EventResult.accept
+            } else if (e.kind == PointerEventKind.up) {
+                if (root.dragging) {
+                    root.seek(root.preview);
+                }
+                root.dragging = false;
+                EventResult.accept
+            } else { EventResult.reject }
+        }
+    }
+}
+
+// 歌词行：落在 [start-ms, end-ms) 内高亮
+component LyricLineView inherits Rectangle {
+    in property <LyricRow> lyric;
+    in property <float> pos-ms: 0.0;
+
+    property <bool> active: root.pos-ms >= root.lyric.start-ms && root.pos-ms < root.lyric.end-ms;
+
+    height: 44px;
+    background: transparent;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.lyric.text;
+        color: root.active ? MobileTheme.primary : MobileTheme.text-faint;
+        font-size: root.active ? 16px : 14px;
+        font-weight: root.active ? 700 : 400;
+        horizontal-alignment: left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component LyricsList inherits Rectangle {
+    in property <[LyricRow]> lyrics;
+    in property <float> pos-ms: 0.0;
+
+    background: transparent;
+    clip: true;
+
+    if (root.lyrics.length == 0) : Text {
+        width: 100%;
+        height: 100%;
+        text: "暂无歌词";
+        color: MobileTheme.text-faint;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if (root.lyrics.length > 0) : ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 0px;
+
+            for l in root.lyrics : LyricLineView {
+                lyric: l;
+                pos-ms: root.pos-ms;
+            }
+        }
+    }
+}
+
+// 队列行：序号 + 歌名/歌手，当前曲目高亮；整行点播
+component QueueRowView inherits Rectangle {
+    in property <int> index: 0;
+    in property <Song> song;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 56px;
+    background: row-ta.has-hover ? MobileTheme.hover : transparent;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-left: 4px;
+        padding-right: 4px;
+        cross-axis-alignment: center;
+
+        Text {
+            width: 24px;
+            text: "" + (root.index + 1);
+            color: root.active ? MobileTheme.primary : MobileTheme.text-faint;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.song.name;
+                color: root.active ? MobileTheme.primary : MobileTheme.text;
+                font-size: 14px;
+                font-weight: root.active ? 600 : 400;
+                overflow: elide;
+            }
+            Text {
+                text: root.song.artist;
+                color: MobileTheme.text-faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+
+    row-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component QueueList inherits Rectangle {
+    in property <[Song]> queue;
+    in property <int> current-id: 0;
+    callback played(int);
+
+    background: transparent;
+    clip: true;
+
+    if (root.queue.length == 0) : Text {
+        width: 100%;
+        height: 100%;
+        text: "队列为空";
+        color: MobileTheme.text-faint;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if (root.queue.length > 0) : ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 0px;
+
+            for s[i] in root.queue : QueueRowView {
+                index: i;
+                song: s;
+                active: s.id == root.current-id;
+                clicked => { root.played(s.id); }
+            }
+        }
+    }
+}
+
+// 顶栏：「正在播放」+ 48px 关闭按钮
+component PlayerTopBar inherits Rectangle {
+    in property <string> title: "正在播放";
+    callback closed();
+
+    height: 48px;
+    background: transparent;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        cross-axis-alignment: center;
+
+        Text {
+            text: root.title;
+            horizontal-stretch: 1;
+            color: MobileTheme.text-secondary;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 24px;
+            background: close-ta.has-hover ? MobileTheme.hover : rgba(255, 255, 255, 0.10);
+
+            Image {
+                source: @image-url("../../assets/icons/arrow-big-down-lines.svg");
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 20px;
+                height: 20px;
+                colorize: MobileTheme.text;
+            }
+
+            close-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+}
+
+// 歌词 / 队列切换的单个页签
+component PlayerTab inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 44px;
+    background: transparent;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: root.active ? MobileTheme.text : MobileTheme.text-faint;
+        font-size: 14px;
+        font-weight: root.active ? 600 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Rectangle {
+        x: (parent.width - 24px) / 2;
+        y: parent.height - 2px;
+        width: 24px;
+        height: 2px;
+        border-radius: 1px;
+        background: root.active ? MobileTheme.primary : transparent;
+    }
+
+    tab-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 歌词 / 队列切换
+component PlayerTabs inherits HorizontalLayout {
+    in property <int> tab: 0;
+    callback changed(int);
+
+    height: 44px;
+    spacing: 0px;
+
+    PlayerTab {
+        horizontal-stretch: 1;
+        text: "歌词";
+        active: root.tab == 0;
+        clicked => { root.changed(0); }
+    }
+    PlayerTab {
+        horizontal-stretch: 1;
+        text: "队列";
+        active: root.tab == 1;
+        clicked => { root.changed(1); }
+    }
+}
+
+// 曲目信息：歌名 + 歌手
+component PlayerTitles inherits VerticalLayout {
+    in property <Song> song;
+
+    spacing: 4px;
+
+    Text {
+        text: root.song.name == "" ? "歌曲标题" : root.song.name;
+        color: MobileTheme.text;
+        font-size: 20px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    Text {
+        text: root.song.name == "" ? "歌手 · 专辑" : root.song.artist;
+        color: MobileTheme.text-secondary;
+        font-size: 13px;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+}
+
+// 控制区玻璃面板：模式 / 上一首 / 播放暂停 / 下一首
+component PlayerControls inherits GlassRectangle {
+    in property <bool> playing: false;
+    in property <int> play-mode: 0;
+    callback mode-clicked();
+    callback prev-clicked();
+    callback toggle-clicked();
+    callback next-clicked();
+
+    height: 88px;
+    border-radius: 26px;
+    color: MobileTheme.surface-bg;
+    blur-radius: MobileTheme.surface-blur-radius;
+    border-width: 1px;
+    highlight-alpha: MobileTheme.highlight-alpha;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding: 12px;
+
+        PlayBarButton {
+            size: 44px;
+            icon: @image-url("../../assets/icons/repeat-gray.svg");
+            icon-color: root.play-mode == 0 ? MobileTheme.icon : MobileTheme.primary;
+            clicked => { root.mode-clicked(); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        PlayBarButton {
+            icon: @image-url("../../assets/icons/prev-gray.svg");
+            icon-color: MobileTheme.icon;
+            clicked => { root.prev-clicked(); }
+        }
+        PlayBarButton {
+            size: 52px;
+            accent: true;
+            icon: root.playing
+                ? @image-url("../../assets/icons/pause-white.svg")
+                : @image-url("../../assets/icons/play-white.svg");
+            clicked => { root.toggle-clicked(); }
+        }
+        PlayBarButton {
+            icon: @image-url("../../assets/icons/next-gray.svg");
+            icon-color: MobileTheme.icon;
+            clicked => { root.next-clicked(); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
+
+export component PlayerPage inherits Rectangle {
+    in-out property <bool> open: false;
+    in property <Song> song;
+    in property <bool> playing: false;
+    in property <float> progress: 0.0;
+    in property <int> play-mode: 0;
+    in property <[LyricRow]> lyrics;
+    in property <[Song]> queue;
+    in property <bool> wide: false;
+
+    callback close();
+    callback toggle();
+    callback prev();
+    callback next();
+    callback mode();
+    callback seek(float);
+    callback queue-played(int);
+
+    // 0 歌词 / 1 队列
+    property <int> tab: 0;
+    property <float> dur-sec: max(0.0, root.song.duration-sec);
+    property <float> pos-ms: root.progress * root.dur-sec * 1000.0;
+    // 封面尺寸：竖屏受宽高约束（最大 240px）；宽屏左栏更小，保证控制区可见
+    property <length> cover-size: min(min(root.width * 0.62, root.height * 0.30), 240px);
+    property <length> wide-cover-size: min(min(root.width * 0.20, root.height * 0.26), 220px);
+
+    background: transparent;
+
+    // 背景：封面色氛围渐变 + 页面底色半透明叠加（无实时模糊，静态降级）
+    CoverBackdrop {
+        width: 100%;
+        height: 100%;
+        cover-color: MobileTheme.primary;
+    }
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: rgba(MobileTheme.page-bg.red, MobileTheme.page-bg.green, MobileTheme.page-bg.blue, 0.72);
+    }
+
+    // ===== 竖屏：单列全屏 =====
+    if (!root.wide) : VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0px;
+        padding-top: MobileTheme.safe-top + 8px;
+        padding-bottom: MobileTheme.safe-bottom + 10px;
+        padding-left: MobileTheme.safe-left + 20px;
+        padding-right: MobileTheme.safe-right + 20px;
+
+        PlayerTopBar {
+            closed => { root.close(); }
+        }
+
+        Rectangle { vertical-stretch: 1; min-height: 0px; }
+
+        Rectangle {
+            height: root.cover-size;
+            background: transparent;
+
+            PlayerCover {
+                x: (parent.width - self.width) / 2;
+                size: root.cover-size;
+                cover: root.song.cover;
+            }
+        }
+
+        Rectangle { height: 16px; }
+
+        PlayerTitles { song: root.song; }
+
+        Rectangle { vertical-stretch: 1; min-height: 0px; }
+
+        PlayerSlider {
+            ratio: root.progress;
+            seek(r) => { root.seek(r); }
+        }
+
+        Rectangle { height: 6px; }
+
+        HorizontalLayout {
+            height: 14px;
+            TimeText {
+                sec: root.progress * root.dur-sec;
+                color: MobileTheme.text-faint;
+                font-size: 10px;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            TimeText {
+                sec: root.dur-sec;
+                literal: root.song.duration;
+                color: MobileTheme.text-faint;
+                font-size: 10px;
+            }
+        }
+
+        Rectangle { height: 14px; }
+
+        PlayerControls {
+            playing: root.playing;
+            play-mode: root.play-mode;
+            mode-clicked => { root.mode(); }
+            prev-clicked => { root.prev(); }
+            toggle-clicked => { root.toggle(); }
+            next-clicked => { root.next(); }
+        }
+
+        Rectangle { height: 10px; }
+
+        PlayerTabs {
+            tab: root.tab;
+            changed(t) => { root.tab = t; }
+        }
+
+        Rectangle {
+            vertical-stretch: 2;
+            min-height: 80px;
+            background: transparent;
+            clip: true;
+
+            LyricsList {
+                visible: root.tab == 0;
+                width: 100%;
+                height: 100%;
+                lyrics: root.lyrics;
+                pos-ms: root.pos-ms;
+            }
+            QueueList {
+                visible: root.tab == 1;
+                width: 100%;
+                height: 100%;
+                queue: root.queue;
+                current-id: root.song.id;
+                played(id) => { root.queue-played(id); }
+            }
+        }
+    }
+
+    // ===== 横屏 / 平板：左 46% 信息与控制，右 54% 歌词/队列 =====
+    if (root.wide) : HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 24px;
+        padding-top: MobileTheme.safe-top + 12px;
+        padding-bottom: MobileTheme.safe-bottom + 12px;
+        padding-left: MobileTheme.safe-left + 28px;
+        padding-right: MobileTheme.safe-right + 28px;
+
+        VerticalLayout {
+            horizontal-stretch: 46;
+            spacing: 0px;
+
+            PlayerTopBar {
+                closed => { root.close(); }
+            }
+
+            Rectangle { vertical-stretch: 1; min-height: 0px; }
+
+            Rectangle {
+                height: root.wide-cover-size;
+                background: transparent;
+
+                PlayerCover {
+                    x: (parent.width - self.width) / 2;
+                    size: root.wide-cover-size;
+                    cover: root.song.cover;
+                }
+            }
+
+            Rectangle { height: 14px; }
+
+            PlayerTitles { song: root.song; }
+
+            Rectangle { vertical-stretch: 1; min-height: 0px; }
+
+            PlayerSlider {
+                ratio: root.progress;
+                seek(r) => { root.seek(r); }
+            }
+
+            Rectangle { height: 6px; }
+
+            HorizontalLayout {
+                height: 14px;
+                TimeText {
+                    sec: root.progress * root.dur-sec;
+                    color: MobileTheme.text-faint;
+                    font-size: 10px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                TimeText {
+                    sec: root.dur-sec;
+                    literal: root.song.duration;
+                    color: MobileTheme.text-faint;
+                    font-size: 10px;
+                }
+            }
+
+            Rectangle { height: 14px; }
+
+            PlayerControls {
+                playing: root.playing;
+                play-mode: root.play-mode;
+                mode-clicked => { root.mode(); }
+                prev-clicked => { root.prev(); }
+                toggle-clicked => { root.toggle(); }
+                next-clicked => { root.next(); }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 54;
+            spacing: 0px;
+            padding-top: 4px;
+
+            PlayerTabs {
+                tab: root.tab;
+                changed(t) => { root.tab = t; }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+                clip: true;
+
+                LyricsList {
+                    visible: root.tab == 0;
+                    width: 100%;
+                    height: 100%;
+                    lyrics: root.lyrics;
+                    pos-ms: root.pos-ms;
+                }
+                QueueList {
+                    visible: root.tab == 1;
+                    width: 100%;
+                    height: 100%;
+                    queue: root.queue;
+                    current-id: root.song.id;
+                    played(id) => { root.queue-played(id); }
+                }
+            }
+        }
+    }
+}
