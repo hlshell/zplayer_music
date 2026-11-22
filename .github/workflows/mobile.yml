@@ -103,7 +103,18 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "ndk;27.0.12077973" "platforms;android-35" "build-tools;35.0.0"
-          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          # 兜底：若 platforms/android-35 目录存在但缺 android.jar（镜像里可能是空壳目录），
+          # 先卸载再重装，确保 jar 真实落盘。
+          if [ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]; then
+            sdkmanager --uninstall "platforms;android-35" >/dev/null 2>&1 || true
+            sdkmanager "platforms;android-35"
+          fi
+          ls -l "$ANDROID_HOME/platforms/android-35/android.jar"
+          # android-build crate 按 ANDROID_JAR > ANDROID_PLATFORM > 目录扫描 的顺序解析，
+          # 用 GITHUB_ENV 显式注入可绕开目录扫描（runner 预装的预览平台目录无 android.jar）。
+          echo "ANDROID_JAR=$ANDROID_HOME/platforms/android-35/android.jar" >> "$GITHUB_ENV"
+          echo "ANDROID_PLATFORM=android-35" >> "$GITHUB_ENV"
+          echo "ANDROID_BUILD_TOOLS_VERSION=35.0.0" >> "$GITHUB_ENV"
 
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk --locked
