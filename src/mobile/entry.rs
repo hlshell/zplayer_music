@@ -30,23 +30,36 @@ fn init_common() -> crate::persist::config::AppConfig {
     cfg
 }
 
-/// 首页数据加载：与桌面 main 同一条链路（NeteaseClient → tokio 运行时 →
-/// load::load_initial），仅省略托盘/桌面歌词/自启/在线更新/音频设备枚举等桌面专属步骤。
-/// 在 UI 创建之后调用，后台任务填充 UI 属性，不阻塞事件循环；失败只记录不 panic。
-fn start_home_load(ui: &crate::AppWindow, cfg: &crate::persist::config::AppConfig) {
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
+/// 创建进程内常驻的 tokio 运行时并返回句柄。
+/// 仅在首次调用时真正创建（`RUNTIME.set` 成功）；已初始化或创建失败返回 None，
+/// 避免重复启动运行时或重复 spawn 首页加载。
+fn init_runtime() -> Option<tokio::runtime::Handle> {
+    if RUNTIME.get().is_some() {
+        return None;
+    }
+    match tokio::runtime::Runtime::new() {
+        Ok(rt) => {
+            let handle = rt.handle().clone();
+            if RUNTIME.set(rt).is_err() {
+                return None;
+            }
+            Some(handle)
+        }
         Err(e) => {
             eprintln!("[mobile] tokio 运行时创建失败: {e}");
-            return;
+            None
         }
-    };
-    let handle = rt.handle().clone();
-    // 运行时放进静态 OnceLock 常驻；重复调用（不应发生）时直接跳过
-    if RUNTIME.set(rt).is_err() {
-        eprintln!("[mobile] tokio 运行时已初始化，跳过首页加载");
-        return;
     }
+}
+
+/// 首页数据加载 + 播放接线：与桌面 main 同一条链路（NeteaseClient → tokio 运行时 →
+/// load::load_initial），仅省略托盘/桌面歌词/自启/在线更新/音频设备枚举等桌面专属步骤。
+/// 在 UI 创建之后调用，后台任务填充 UI 属性，不阻塞事件循环；失败只记录不 panic。
+fn start_home_load(
+    ui: &crate::AppWindow,
+    cfg: crate::persist::config::AppConfig,
+    handle: tokio::runtime::Handle,
+) {
     // 网络配置（代理 / realip）：各 reqwest client 构建时读取
     crate::network::proxy::init(crate::network::proxy::NetOptions {
         proxy_enabled: cfg.network.proxy_enabled,
@@ -59,11 +72,13 @@ fn start_home_load(ui: &crate::AppWindow, cfg: &crate::persist::config::AppConfi
     // 封面门面（cover_warm / cover_now）需要运行时句柄在 UI 线程发起后台任务
     crate::load::set_runtime(handle.clone());
     let client = Arc::new(crate::network::netease::client::NeteaseClient::new());
+    // 播放/首页回调先于数据加载接线，保证首页数据到达后点歌立即可用
+    crate::mobile::handlers::setup(ui, handle.clone(), client.clone());
     // load_initial 只读写移动 AppWindow 已补齐的同名属性，桌面/移动共用同一实现
     handle.spawn(crate::load::home::load_initial(
         client,
         ui.as_weak(),
-        cfg.clone(),
+        cfg,
     ));
 }
 
@@ -74,8 +89,11 @@ fn run_ui(cfg: crate::persist::config::AppConfig) {
         eprintln!("[mobile] 创建 UI 失败: {e}");
         panic!("创建移动端 UI 失败: {e}");
     });
-    // 数据加载放到 UI 创建之后（需要 as_weak），后台执行
-    start_home_load(&ui, &cfg);
+    // 运行时在 UI 创建后初始化；数据加载与回调接线共用同一个运行时
+    match init_runtime() {
+        Some(handle) => start_home_load(&ui, cfg, handle),
+        None => eprintln!("[mobile] tokio 运行时不可用或已初始化，跳过首页加载"),
+    }
     if let Err(e) = ui.run() {
         eprintln!("[mobile] 事件循环失败: {e}");
         panic!("移动端事件循环失败: {e}");

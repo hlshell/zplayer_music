@@ -1,0 +1,80 @@
+// ============================================================================
+//  song-row.slint — 歌曲行（热门歌曲列表）
+//  左侧排名 + 48px 封面（无图回退 from/to 渐变）+ 标题/副标题 elide。
+// ============================================================================
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+
+export component SongRow inherits Rectangle {
+    in property <int> index: 0;
+    in property <string> rank: "";
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    in property <image> cover;
+    in property <color> from: transparent;
+    in property <color> to: transparent;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 64px;
+    border-radius: 12px;
+    background: ta.has-hover ? Theme.palette.hover : transparent;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 10px;
+        padding-left: 8px;
+        padding-right: 12px;
+        cross-axis-alignment: center;
+
+        if (root.rank != "") : Text {
+            width: 24px;
+            text: root.rank;
+            color: root.active ? MobileTheme.primary : MobileTheme.text-faint;
+            font-size: 13px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            clip: true;
+            background: @linear-gradient(135deg, root.from 0%, root.to 100%);
+
+            if (root.cover.width > 0) : Image {
+                width: 100%;
+                height: 100%;
+                source: root.cover;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.title;
+                color: root.active ? MobileTheme.primary : MobileTheme.text;
+                font-size: 14px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.subtitle;
+                color: root.active ? MobileTheme.primary : MobileTheme.text-faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

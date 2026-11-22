@@ -12,8 +12,9 @@ import { PlayBar, PlayBarButton } from "components/playbar.slint";
 import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
 // 首页/队列数据模型（与桌面共用同一份 struct 定义，Rust 侧 load 直接填充）
 import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../components/models.slint";
+import { HomePage } from "pages/home.slint";
 
-// 一级页面占位内容（本阶段只做壳，不接数据）
+// 一级页面占位内容（搜索/设置尚未接入）
 component PagePlaceholder inherits Rectangle {
     in property <string> title: "";
     in property <string> subtitle: "";
@@ -49,98 +50,48 @@ component PagePlaceholder inherits Rectangle {
     }
 }
 
-// 按 current-nav 切换的三个一级页面（文案随 nav 计算，避免元素级 if/else 链）
-component NavPage inherits Rectangle {
+// 内容区：nav==0 渲染真实首页，其余一级页面暂用占位。
+// 三种形态（竖屏/横屏/平板单列）共用同一份内容与数据属性。
+component ContentArea inherits Rectangle {
     in property <int> nav: 0;
-    in property <string> form-hint: "";
-    // 首页数据到达状态（本阶段用简单文本确认数据接通）
     in property <bool> loading: false;
-    in property <int> hot-count: 0;
+    in property <[HotSong]> hot-songs;
+    in property <[NewSong]> new-songs;
+    in property <[Playlist]> recommend-playlists;
+    in property <[HeroSong]> hero-songs;
+    in property <image> hero-cover;
+    in property <int> hero-count: 0;
+    callback song-played(int);
+    callback playlist-opened(int);
+
     background: transparent;
 
-    function page-title() -> string {
-        return root.nav == 0 ? "首页" : (root.nav == 1 ? "搜索" : "设置");
-    }
-    function page-subtitle() -> string {
-        return root.nav == 0 ? "热门歌曲与歌单数据已接通，列表 UI 后续完善"
-             : root.nav == 1 ? "单曲 / 专辑 / 歌单搜索入口占位"
-             : "深浅色、主题色、语言、音质与缓存设置占位";
-    }
-
-    PagePlaceholder {
+    if (root.nav == 0) : HomePage {
         width: 100%;
         height: 100%;
-        title: root.page-title();
-        subtitle: root.page-subtitle();
-        hint: root.nav == 0
-            ? (root.loading ? "数据加载中…" : "已加载 " + root.hot-count + " 首热歌")
-            : root.form-hint;
+        hot-songs: root.hot-songs;
+        new-songs: root.new-songs;
+        recommend-playlists: root.recommend-playlists;
+        hero-songs: root.hero-songs;
+        hero-cover: root.hero-cover;
+        hero-count: root.hero-count;
+        loading: root.loading;
+        song-played(id) => { root.song-played(id); }
+        playlist-opened(id) => { root.playlist-opened(id); }
     }
-}
-
-// 平板双栏左侧列表占位（骨架行）
-component ListPlaceholder inherits Rectangle {
-    in property <string> title: "列表";
-    callback row-clicked();
-    background: transparent;
-
-    VerticalLayout {
+    if (root.nav == 1) : PagePlaceholder {
         width: 100%;
         height: 100%;
-        spacing: 8px;
-        padding: 12px;
-
-        Text {
-            text: root.title;
-            color: MobileTheme.text;
-            font-size: 16px;
-            font-weight: 600;
-        }
-        for i in [0, 1, 2, 3, 4, 5] : Rectangle {
-            height: 56px;
-            border-radius: 12px;
-            background: Theme.palette.surface;
-
-            HorizontalLayout {
-                width: 100%;
-                height: 100%;
-                spacing: 10px;
-                padding-left: 10px;
-                padding-right: 10px;
-                cross-axis-alignment: center;
-
-                Rectangle {
-                    width: 40px;
-                    height: 40px;
-                    border-radius: 8px;
-                    background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
-                    opacity: 0.7;
-                }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 4px;
-                    alignment: center;
-
-                    Text {
-                        text: "列表项 " + (i + 1);
-                        color: MobileTheme.text;
-                        font-size: 13px;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: "详情占位";
-                        color: MobileTheme.text-faint;
-                        font-size: 11px;
-                        overflow: elide;
-                    }
-                }
-            }
-
-            row-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.row-clicked(); }
-            }
-        }
+        title: "搜索";
+        subtitle: "搜索页即将接入";
+        hint: "";
+    }
+    if (root.nav == 2) : PagePlaceholder {
+        width: 100%;
+        height: 100%;
+        title: "设置";
+        subtitle: "设置页即将接入";
+        hint: "";
     }
 }
 
@@ -157,6 +108,18 @@ export component AppWindow inherits Window {
     in-out property <bool> playing: false;
     in-out property <int> play-mode: 0;
     in-out property <float> progress: 0.0;
+
+    // 主题与桌面同源：深浅色 / 主题色由 Rust 按用户配置写入 Theme，本窗口双向转发
+    in-out property <bool> dark <=> Theme.dark;
+    in-out property <int> theme-color-index <=> Theme.theme-color-index;
+
+    // ===== 首页/播放回调（由 src/mobile/handlers.rs 接线）=====
+    callback song-played(int);
+    callback playlist-opened(int);
+    callback player-toggle();
+    callback player-prev();
+    callback player-next();
+    callback player-mode();
 
     // ===== 首页/队列真实数据（由 crate::load 填充，命名与桌面 AppWindow 一致）=====
     in-out property <[HotSong]> hot-songs;
@@ -188,14 +151,6 @@ export component AppWindow inherits Window {
         ? 2
         : (root.window-width > root.window-height ? 1 : 0);
 
-    // 平板双栏：内容可用宽度 >= 840dp（与 layout.rs::should_use_two_column 一致）
-    property <bool> use-two-column: root.layout-kind == 2
-        && (root.window-width - MobileTheme.sidebar-width - root.safe-left) >= MobileTheme.two-column-threshold;
-
-    function page-title(nav: int) -> string {
-        return nav == 0 ? "首页" : (nav == 1 ? "搜索" : "设置");
-    }
-
     init => {
         // 深浅色沿用 Theme.dark（由 Rust 按用户配置写入），此处不强行覆盖
         MobileTheme.layout-kind = root.layout-kind;
@@ -220,13 +175,19 @@ export component AppWindow inherits Window {
         Rectangle {
             vertical-stretch: 1;
             clip: true;
-            NavPage {
+            ContentArea {
                 width: 100%;
                 height: 100%;
                 nav: root.current-nav;
-                form-hint: "手机竖屏 · 底部三栏导航";
                 loading: root.loading;
-                hot-count: root.hot-songs.length;
+                hot-songs: root.hot-songs;
+                new-songs: root.new-songs;
+                recommend-playlists: root.recommend-playlists;
+                hero-songs: root.hero-songs;
+                hero-cover: root.hero-cover;
+                hero-count: root.hero-count;
+                song-played(id) => { root.song-played(id); }
+                playlist-opened(id) => { root.playlist-opened(id); }
             }
         }
 
@@ -238,12 +199,12 @@ export component AppWindow inherits Window {
                 height: 100%;
                 padding: 8px;
                 MiniPlayer {
-                    title: "未在播放";
-                    subtitle: "点击打开播放页";
+                    title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
+                    subtitle: root.current-song.name == "" ? "点击打开播放页" : root.current-song.artist;
                     playing: root.playing;
                     progress: root.progress;
                     clicked => { root.player-open = true; }
-                    toggled => { root.playing = !root.playing; }
+                    toggled => { root.player-toggle(); }
                 }
             }
         }
@@ -272,13 +233,19 @@ export component AppWindow inherits Window {
             Rectangle {
                 vertical-stretch: 1;
                 clip: true;
-                NavPage {
+                ContentArea {
                     width: 100%;
                     height: 100%;
                     nav: root.current-nav;
-                    form-hint: "手机横屏 · 左侧窄导航栏";
                     loading: root.loading;
-                    hot-count: root.hot-songs.length;
+                    hot-songs: root.hot-songs;
+                    new-songs: root.new-songs;
+                    recommend-playlists: root.recommend-playlists;
+                    hero-songs: root.hero-songs;
+                    hero-cover: root.hero-cover;
+                    hero-count: root.hero-count;
+                    song-played(id) => { root.song-played(id); }
+                    playlist-opened(id) => { root.playlist-opened(id); }
                 }
             }
 
@@ -290,19 +257,19 @@ export component AppWindow inherits Window {
                     padding: 4px;
                     padding-right: root.safe-right + 4px;
                     MiniPlayer {
-                        title: "未在播放";
-                        subtitle: "点击打开播放页";
+                        title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
+                        subtitle: root.current-song.name == "" ? "点击打开播放页" : root.current-song.artist;
                         playing: root.playing;
                         progress: root.progress;
                         clicked => { root.player-open = true; }
-                        toggled => { root.playing = !root.playing; }
+                        toggled => { root.player-toggle(); }
                     }
                 }
             }
         }
     }
 
-    // ===== 平板：完整左侧栏 + 内容区（宽 >= 840 双栏）+ 底部播放栏 =====
+    // ===== 平板：完整左侧栏 + 内容区（单列）+ 底部播放栏 =====
     if (root.layout-kind == 2) : HorizontalLayout {
         width: 100%;
         height: 100%;
@@ -321,49 +288,7 @@ export component AppWindow inherits Window {
                 vertical-stretch: 1;
                 clip: true;
 
-                if (root.use-two-column) : HorizontalLayout {
-                    width: 100%;
-                    height: 100%;
-                    spacing: 16px;
-                    padding-top: root.safe-top + 12px;
-                    padding-bottom: 12px;
-                    padding-left: 16px;
-                    padding-right: root.safe-right + 16px;
-
-                    ListPlaceholder {
-                        width: 320px;
-                        height: 100%;
-                        title: root.page-title(root.current-nav) + "列表";
-                        row-clicked => { root.detail-open = true; }
-                    }
-
-                    Rectangle {
-                        width: 1px;
-                        height: 100%;
-                        background: MobileTheme.divider;
-                    }
-
-                    GlassRectangle {
-                        horizontal-stretch: 1;
-                        height: 100%;
-                        border-radius: 20px;
-                        color: MobileTheme.surface;
-                        blur-radius: MobileTheme.surface-blur-radius;
-                        border-width: 1px;
-                        highlight-alpha: MobileTheme.highlight-alpha;
-
-                        PagePlaceholder {
-                            width: 100%;
-                            height: 100%;
-                            title: root.detail-open ? "歌曲详情占位" : "未选择内容";
-                            subtitle: root.detail-open
-                                ? "详情页将在后续阶段接入"
-                                : "点击左侧列表项查看详情占位";
-                            hint: "平板双栏 · 左列表右详情";
-                        }
-                    }
-                }
-                if (!root.use-two-column) : VerticalLayout {
+                VerticalLayout {
                     width: 100%;
                     height: 100%;
                     padding-top: root.safe-top + 12px;
@@ -371,25 +296,33 @@ export component AppWindow inherits Window {
                     padding-left: 16px;
                     padding-right: root.safe-right + 16px;
 
-                    NavPage {
+                    ContentArea {
                         width: 100%;
                         height: 100%;
                         nav: root.current-nav;
-                        form-hint: "平板 · 左侧完整侧栏（宽单列）";
                         loading: root.loading;
-                        hot-count: root.hot-songs.length;
+                        hot-songs: root.hot-songs;
+                        new-songs: root.new-songs;
+                        recommend-playlists: root.recommend-playlists;
+                        hero-songs: root.hero-songs;
+                        hero-cover: root.hero-cover;
+                        hero-count: root.hero-count;
+                        song-played(id) => { root.song-played(id); }
+                        playlist-opened(id) => { root.playlist-opened(id); }
                     }
                 }
             }
 
             PlayBar {
-                title: "未在播放";
-                subtitle: "平板底部播放栏占位";
+                title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
+                subtitle: root.current-song.name == "" ? "选择歌曲开始播放" : root.current-song.artist;
                 playing: root.playing;
                 progress: root.progress;
                 play-mode: root.play-mode;
-                toggle => { root.playing = !root.playing; }
-                mode => { root.play-mode = Math.mod(root.play-mode + 1, 3); }
+                prev => { root.player-prev(); }
+                toggle => { root.player-toggle(); }
+                next => { root.player-next(); }
+                mode => { root.player-mode(); }
             }
         }
     }
@@ -453,28 +386,37 @@ export component AppWindow inherits Window {
 
             Rectangle { vertical-stretch: 1; }
 
-            // 封面占位：同时受可用宽高约束，横屏不会把控制区挤出屏幕
+            // 封面：受可用宽高约束，横屏不会把控制区挤出屏幕；有真实封面时覆盖渐变
             Rectangle {
                 width: min(min(root.window-width * 0.62, root.window-height * 0.30), 240px);
                 height: self.width;
                 border-radius: 24px;
+                clip: true;
                 background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+
+                if (root.current-song.cover.width > 0) : Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.current-song.cover;
+                }
             }
 
             Rectangle { height: 16px; }
 
             Text {
-                text: "歌曲标题";
+                text: root.current-song.name == "" ? "歌曲标题" : root.current-song.name;
                 color: MobileTheme.text;
                 font-size: 20px;
                 font-weight: 700;
                 horizontal-alignment: center;
+                overflow: elide;
             }
             Text {
-                text: "歌手 · 专辑";
+                text: root.current-song.name == "" ? "歌手 · 专辑" : root.current-song.artist;
                 color: MobileTheme.text-secondary;
                 font-size: 13px;
                 horizontal-alignment: center;
+                overflow: elide;
             }
 
             Rectangle { vertical-stretch: 1; }
@@ -499,7 +441,11 @@ export component AppWindow inherits Window {
                 height: 14px;
                 Text { text: "0:00"; color: MobileTheme.text-faint; font-size: 10px; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "3:45"; color: MobileTheme.text-faint; font-size: 10px; }
+                Text {
+                    text: root.current-song.duration == "" ? "3:45" : root.current-song.duration;
+                    color: MobileTheme.text-faint;
+                    font-size: 10px;
+                }
             }
 
             Rectangle { height: 14px; }
@@ -523,12 +469,13 @@ export component AppWindow inherits Window {
                         size: 44px;
                         icon: @image-url("../assets/icons/repeat-gray.svg");
                         icon-color: root.play-mode == 0 ? MobileTheme.icon : MobileTheme.primary;
-                        clicked => { root.play-mode = Math.mod(root.play-mode + 1, 3); }
+                        clicked => { root.player-mode(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     PlayBarButton {
                         icon: @image-url("../assets/icons/prev-gray.svg");
                         icon-color: MobileTheme.icon;
+                        clicked => { root.player-prev(); }
                     }
                     PlayBarButton {
                         size: 52px;
@@ -536,11 +483,12 @@ export component AppWindow inherits Window {
                         icon: root.playing
                             ? @image-url("../assets/icons/pause-white.svg")
                             : @image-url("../assets/icons/play-white.svg");
-                        clicked => { root.playing = !root.playing; }
+                        clicked => { root.player-toggle(); }
                     }
                     PlayBarButton {
                         icon: @image-url("../assets/icons/next-gray.svg");
                         icon-color: MobileTheme.icon;
+                        clicked => { root.player-next(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }

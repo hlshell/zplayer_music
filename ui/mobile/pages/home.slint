@@ -1,0 +1,289 @@
+// ============================================================================
+//  home.slint — 移动端首页（真实数据）
+//  Hero 每日精选 / 推荐歌单 / 热门歌曲 / 新歌速递，全部由 AppWindow 属性驱动。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+import { HotSong, NewSong, Playlist, HeroSong } from "../../components/models.slint";
+import { SongRow } from "../components/song-row.slint";
+
+component SectionTitle inherits Text {
+    color: MobileTheme.text;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+// Hero 卡内单行（排名 + 歌名 + 歌手），整行可点
+component HeroRow inherits Rectangle {
+    in property <string> rank: "";
+    in property <string> name: "";
+    in property <string> artist: "";
+    callback clicked();
+
+    height: 26px;
+    border-radius: 8px;
+    background: ta.has-hover ? rgba(255, 255, 255, 0.14) : transparent;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        padding-left: 6px;
+        padding-right: 6px;
+        cross-axis-alignment: center;
+
+        Text {
+            width: 18px;
+            text: root.rank;
+            color: rgba(255, 255, 255, 0.65);
+            font-size: 11px;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.name;
+            color: #ffffff;
+            font-size: 12px;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.artist;
+            color: rgba(255, 255, 255, 0.65);
+            font-size: 11px;
+            overflow: elide;
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component HomePage inherits Rectangle {
+    in property <[HotSong]> hot-songs;
+    in property <[NewSong]> new-songs;
+    in property <[Playlist]> recommend-playlists;
+    in property <[HeroSong]> hero-songs;
+    in property <image> hero-cover;
+    in property <int> hero-count: 0;
+    in property <bool> loading: false;
+    callback song-played(int);
+    callback playlist-opened(int);
+
+    background: transparent;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 18px;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 12px;
+            padding-bottom: 24px;
+
+            if (root.loading) : Text {
+                text: "数据加载中…";
+                color: MobileTheme.text-faint;
+                font-size: 12px;
+            }
+
+            // ===== Hero：每日为你精选 =====
+            Rectangle {
+                height: 160px;
+                border-radius: 20px;
+                clip: true;
+                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+
+                if (root.hero-cover.width > 0) : Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.hero-cover;
+                }
+                // 半透明遮罩保证文字可读
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+                    background: @linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0.74) 100%);
+                }
+
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: 4px;
+                    padding: 14px;
+
+                    Text {
+                        text: "每日为你精选";
+                        color: #ffffff;
+                        font-size: 17px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.hero-count > 0 ? ("共 " + root.hero-count + " 首") : "正在为你准备";
+                        color: rgba(255, 255, 255, 0.78);
+                        font-size: 11px;
+                    }
+
+                    if (root.hero-songs.length > 0) : HeroRow {
+                        rank: root.hero-songs[0].rank;
+                        name: root.hero-songs[0].name;
+                        artist: root.hero-songs[0].artist;
+                        clicked => { root.song-played(root.hero-songs[0].id); }
+                    }
+                    if (root.hero-songs.length > 1) : HeroRow {
+                        rank: root.hero-songs[1].rank;
+                        name: root.hero-songs[1].name;
+                        artist: root.hero-songs[1].artist;
+                        clicked => { root.song-played(root.hero-songs[1].id); }
+                    }
+                    if (root.hero-songs.length > 2) : HeroRow {
+                        rank: root.hero-songs[2].rank;
+                        name: root.hero-songs[2].name;
+                        artist: root.hero-songs[2].artist;
+                        clicked => { root.song-played(root.hero-songs[2].id); }
+                    }
+                }
+            }
+
+            // ===== 推荐歌单 =====
+            SectionTitle { text: "推荐歌单"; }
+            ScrollView {
+                width: 100%;
+                height: 152px;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                HorizontalLayout {
+                    height: 100%;
+                    spacing: 12px;
+
+                    for p in root.recommend-playlists : Rectangle {
+                        width: 112px;
+                        height: 148px;
+                        border-radius: 14px;
+                        background: pl-ta.has-hover ? Theme.palette.hover : transparent;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            spacing: 6px;
+                            padding: 2px;
+
+                            Rectangle {
+                                width: 108px;
+                                height: 108px;
+                                border-radius: 12px;
+                                clip: true;
+                                background: @linear-gradient(135deg, p.from 0%, p.to 100%);
+
+                                if (p.cover.width > 0) : Image {
+                                    width: 100%;
+                                    height: 100%;
+                                    source: p.cover;
+                                }
+                            }
+                            Text {
+                                width: 108px;
+                                text: p.name;
+                                color: MobileTheme.text;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                max-lines: 2;
+                                overflow: elide;
+                            }
+                        }
+
+                        pl-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.playlist-opened(p.id); }
+                        }
+                    }
+                }
+            }
+
+            // ===== 热门歌曲 =====
+            SectionTitle { text: "热门歌曲"; }
+            VerticalLayout {
+                for h[i] in root.hot-songs : SongRow {
+                    index: i;
+                    rank: h.rank;
+                    title: h.name;
+                    subtitle: h.artist;
+                    cover: h.cover;
+                    from: h.from;
+                    to: h.to;
+                    clicked => { root.song-played(h.id); }
+                }
+            }
+
+            // ===== 新歌速递 =====
+            SectionTitle { text: "新歌速递"; }
+            ScrollView {
+                width: 100%;
+                height: 168px;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                HorizontalLayout {
+                    height: 100%;
+                    spacing: 12px;
+
+                    for n in root.new-songs : Rectangle {
+                        width: 112px;
+                        height: 164px;
+                        border-radius: 14px;
+                        background: ns-ta.has-hover ? Theme.palette.hover : transparent;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            spacing: 6px;
+                            padding: 2px;
+
+                            Rectangle {
+                                width: 108px;
+                                height: 108px;
+                                border-radius: 12px;
+                                clip: true;
+                                background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+
+                                if (n.cover.width > 0) : Image {
+                                    width: 100%;
+                                    height: 100%;
+                                    source: n.cover;
+                                }
+                            }
+                            Text {
+                                width: 108px;
+                                text: n.name;
+                                color: MobileTheme.text;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                            Text {
+                                width: 108px;
+                                text: n.artist;
+                                color: MobileTheme.text-faint;
+                                font-size: 10px;
+                                overflow: elide;
+                            }
+                        }
+
+                        ns-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.song-played(n.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
