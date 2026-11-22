@@ -16,8 +16,8 @@ android {
         // Slint Android 后端最低要求 minSdk 26
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.5"
+        versionCode = 7
+        versionName = "0.2.7"
 
         ndk {
             abiFilters += "arm64-v8a"

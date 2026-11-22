@@ -9227,7 +9227,7 @@ dependencies = [
 
 [[package]]
 name = "zplayer-music"
-version = "0.2.5"
+version = "0.2.7"
 dependencies = [
  "aes",
  "base64 0.22.1",
