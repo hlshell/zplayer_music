@@ -2,6 +2,7 @@
 //! 歌曲收藏走既有 Vec<i64>；资源收藏（歌单/专辑/MV/电台）为 v2 新增，存快照避免列表拉网络。
 //! 持久化跨启动真实保存；切换时由上层调网易云 like_song API（仅歌曲）。
 
+#[cfg(feature = "desktop")]
 use crate::AppWindow;
 use std::sync::Mutex;
 
@@ -155,6 +156,7 @@ pub(crate) fn update_song_meta(entries: Vec<LikedSong>) {
 }
 
 /// 按当前歌曲同步收藏状态显示（所有 set_current_song 之后调用）。
+#[cfg(feature = "desktop")]
 pub(crate) fn sync_liked(u: &AppWindow) {
     let uid = u.get_current_song().id as u32 as i64;
     u.set_liked(is_liked(uid));

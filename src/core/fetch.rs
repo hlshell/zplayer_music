@@ -73,8 +73,8 @@ pub(crate) async fn fetch_song_bytes(
         }
     }
     // 洛雪音源脚本兜底（用户导入 .js，网易云直链 + 内置 7 源都失败后逐源解析）。
-    // 仅非 wasm（desktop/mobile）：web 下 rquickjs 无法编译，不启用。
-    #[cfg(not(target_arch = "wasm32"))]
+    // 仅桌面（rquickjs 为 desktop feature 依赖，移动端不编译）。
+    #[cfg(feature = "desktop")]
     {
         if crate::network::sources::lx_scripts::enabled_any() {
             let info = crate::network::sources::lx_scripts::music_info(uid, name, artist, "", dur_sec);

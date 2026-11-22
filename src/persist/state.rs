@@ -1,10 +1,16 @@
 //! 配置持久化 + 缓存状态统计（供设置页展示与退出保存调用）。
 
+#[cfg(feature = "desktop")]
 use crate::persist::config::AppConfig;
+#[cfg(feature = "desktop")]
 use crate::AppWindow;
+#[cfg(feature = "desktop")]
 use slint::winit_030::WinitWindowAccessor;
+#[cfg(feature = "desktop")]
 use slint::ComponentHandle;
+#[cfg(feature = "desktop")]
 use std::cell::RefCell;
+#[cfg(feature = "desktop")]
 use std::rc::Rc;
 
 /// 计算缓存状态：占用 MB / 百分比 / 各类缓存文件数。
@@ -26,6 +32,7 @@ pub(crate) fn compute_cache_stats(limit_mb: i32) -> (i32, i32, i32, i32, f32) {
 }
 
 /// 把缓存状态写入设置页 UI（仅设置属性，无任何 I/O，可安全在 UI 线程调用）。
+#[cfg(feature = "desktop")]
 pub(crate) fn set_cache_stats(u: &AppWindow, usage_mb: i32, music: i32, lyric: i32, cover: i32, pct: f32) {
     u.set_cache_usage_mb(usage_mb);
     u.set_cache_percent(pct.min(1.0));
@@ -36,6 +43,7 @@ pub(crate) fn set_cache_stats(u: &AppWindow, usage_mb: i32, music: i32, lyric: i
 
 /// 刷新设置页缓存状态（同步版）：占用 / 百分比 / 各类缓存文件数。
 /// 内部为递归遍历，仅适用于缓存很小或可接受卡顿的场合；大缓存请改用 compute_cache_stats 后台算 + set_cache_stats 回填。
+#[cfg(feature = "desktop")]
 pub(crate) fn refresh_cache_stats(u: &AppWindow) {
     let limit = u.get_cache_limit_mb();
     let (m, mu, l, c, p) = compute_cache_stats(limit);
@@ -43,6 +51,7 @@ pub(crate) fn refresh_cache_stats(u: &AppWindow) {
 }
 
 /// 退出前把窗口位置 / 音量 / 播放进度写入共享配置并落盘。
+#[cfg(feature = "desktop")]
 pub(crate) fn save_state(ui: &AppWindow, shared: &Rc<RefCell<AppConfig>>) {
     let mut cfg = shared.borrow_mut();
     let _ = ui.window().with_winit_window(|w: &slint::winit_030::winit::window::Window| {

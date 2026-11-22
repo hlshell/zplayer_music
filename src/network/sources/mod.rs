@@ -10,13 +10,13 @@ pub mod qq;
 pub mod joox;
 pub mod soundcloud;
 pub mod gdmusic;
-// 洛雪脚本执行器 / 脚本管理 / UNM：仅非 wasm（desktop/mobile）启用；
-// web（wasm32）下 rquickjs / unm_engine 无法编译，由主源兜底。
-#[cfg(not(target_arch = "wasm32"))]
+// 洛雪脚本执行器 / 脚本管理 / UNM：桌面专属（rquickjs / unm_engine 为 desktop feature 依赖；
+// web 与移动端不编译，由主源兜底）。
+#[cfg(feature = "desktop")]
 pub mod lx;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "desktop")]
 pub mod lx_scripts;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "desktop")]
 pub mod unm;
 
 use serde_json::Value;
@@ -265,11 +265,11 @@ fn norm(s: &str) -> String {
 pub async fn resolve(title: &str, artist: &str, duration: Option<u64>) -> Result<Option<ResolvedSong>, String> {
     let client = MultiSourceClient::new();
     let mut best: Option<(ResolvedSong, u64)> = None; // (song, diff)；diff=u64::MAX 表示源未给时长
-    // 主源列表：纯 HTTP 源（web 可编译）在首位；UNM 仅非 wasm 追加（web 下 rquickjs/unm 不可用）
+    // 主源列表：纯 HTTP 源（web/移动端可编译）在首位；UNM 仅桌面追加（rquickjs/unm 为桌面依赖）
     let mut sources = vec![
         migu::NAME, kuwo::NAME, kugou::NAME, qq::NAME, joox::NAME, soundcloud::NAME, gdmusic::NAME,
     ];
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "desktop")]
     sources.push(unm::NAME);
     for src in sources {
         let song = match src {
@@ -280,7 +280,7 @@ pub async fn resolve(title: &str, artist: &str, duration: Option<u64>) -> Result
             joox::NAME => joox::try_resolve(&client, title, artist).await,
             soundcloud::NAME => soundcloud::try_resolve(&client, title, artist).await,
             gdmusic::NAME => gdmusic::try_resolve(&client, title, artist).await,
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "desktop")]
             unm::NAME => unm::try_resolve(&client, title, artist).await,
             _ => None,
         };
@@ -324,8 +324,8 @@ impl Default for MultiSourceClient {
     }
 }
 
-// 依赖 rquickjs / unm_engine 的地基验证，仅非 wasm（wasm 下这些依赖不编译）
-#[cfg(all(test, not(target_arch = "wasm32")))]
+// 依赖 rquickjs / unm_engine 的地基验证，仅桌面（这些依赖为 desktop feature 专属）
+#[cfg(all(test, feature = "desktop"))]
 mod tests {
     // 地基验证：rquickjs(QuickJS) 在 Windows 编译 + 基本脚本执行
     #[test]

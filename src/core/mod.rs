@@ -2,8 +2,19 @@
 //! 均无 UI/平台依赖，供各层复用。
 pub mod fetch;
 pub mod ids;
+#[cfg(feature = "desktop")]
 pub mod logger;
+// 阶段 3 临时切片：移动端无文件日志与崩溃钩子（依赖 simplelog），仅保留可编译空实现
+#[cfg(feature = "mobile")]
+pub mod logger {
+    pub fn init() {}
+    pub fn mark_clean_exit() {}
+}
+// 歌词模型直接构造桌面 UI 生成的 LyricLine/LyricWord 结构，移动端 UI 未导出
+#[cfg(feature = "desktop")]
 pub mod lyrics;
+// 队列逻辑直接操作桌面端 AppWindow 的队列/当前歌曲属性，移动端 UI 无对应属性
+#[cfg(feature = "desktop")]
 pub mod queue;
 pub mod song_util;
 

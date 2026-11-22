@@ -5,6 +5,7 @@
 //! 合并规则：中文 zh 为默认兜底 → 目标语言（内置或用户扩展）覆盖同 key → 缺失 key 回退中文。
 //! 用户扩展语言显示名取自 json 顶层可选 `meta.name`，缺省用大写短码。
 
+#[cfg(feature = "desktop")]
 use slint::ComponentHandle;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -72,6 +73,7 @@ pub fn list_languages() -> Vec<(String, String)> {
 
 /// 按短码加载语言并写入 `Language` global。
 /// 找不到目标语言时回退中文（zh 兜底）。
+#[cfg(feature = "desktop")]
 pub fn load(ui: &crate::AppWindow, code: &str) {
     if let Ok(mut cur) = current_code_store().write() {
         *cur = code.to_string();
@@ -120,6 +122,7 @@ pub fn t(key: &str) -> String {
 }
 
 /// 把扁平 key 逐一写入 Language global（key 与属性名一一对应）。
+#[cfg(feature = "desktop")]
 fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     // 同步一份供 Rust 侧取文案（i18n::t）
     if let Ok(mut cur) = current().write() {

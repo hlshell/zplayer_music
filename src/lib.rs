@@ -15,12 +15,15 @@
 #[cfg(any(feature = "desktop", feature = "web", feature = "mobile", target_arch = "wasm32"))]
 slint::include_modules!();
 
-// 桌面/web 业务模块。移动端阶段 1 只编译移动入口所需的最小切片（存储 + config/cache），
-// 其余业务模块依赖桌面音频后端与完整 UI，待阶段 2 提供移动实现后再纳入。
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
+// 桌面/web 业务模块。移动端阶段 3 编译 core/network/persist/i18n 切片
+// （load/handlers 强耦合桌面 UI，仍不纳入）；core 内的 UI 耦合项（queue）与
+// 桌面能力项（logger 实体）在各模块内部按 feature 门控。
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 mod core;
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
-pub use core::{fetch, logger, lyrics, queue, song_util};
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
+pub use core::{fetch, logger, song_util};
+#[cfg(all(not(target_arch = "wasm32"), feature = "desktop"))]
+pub use core::{lyrics, queue};
 
 #[cfg(not(feature = "mobile"))]
 mod platform;
@@ -37,21 +40,25 @@ mod platform {
 mod persist;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use persist::{cache, config, liked, recent, state};
-// 移动端阶段 1：配置与缓存初始化（不依赖桌面音频/完整 UI）
+// 移动端阶段 3：持久化全部子模块（桌面 UI 耦合函数在模块内部按 feature 门控）
 #[cfg(feature = "mobile")]
 mod persist {
     pub mod cache;
     pub mod config;
+    pub mod history;
+    pub mod liked;
+    pub mod recent;
+    pub mod state;
 }
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 mod network;
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 pub use network::{netease, service, sources};
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod load;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod handlers;
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
+#[cfg(all(not(target_arch = "wasm32"), any(feature = "desktop", feature = "mobile")))]
 mod i18n;
 
 // 启动打点基准；跨模块统一打点用 crate::boot_elapsed_ms()（与 bin 入口同一语义）
