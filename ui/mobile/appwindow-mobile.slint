@@ -15,44 +15,9 @@ import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../co
 import { HomePage } from "pages/home.slint";
 import { SearchPage } from "pages/search.slint";
 import { DetailPage } from "pages/detail.slint";
+import { SettingsPage } from "pages/settings.slint";
 
-// 一级页面占位内容（搜索/设置尚未接入）
-component PagePlaceholder inherits Rectangle {
-    in property <string> title: "";
-    in property <string> subtitle: "";
-    in property <string> hint: "";
-    background: transparent;
-
-    VerticalLayout {
-        width: 100%;
-        height: 100%;
-        alignment: center;
-        spacing: 10px;
-
-        Text {
-            text: root.title;
-            color: MobileTheme.text;
-            font-size: 22px;
-            font-weight: 700;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: root.subtitle;
-            color: MobileTheme.text-secondary;
-            font-size: 14px;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        Text {
-            text: root.hint;
-            color: MobileTheme.text-faint;
-            font-size: 12px;
-            horizontal-alignment: center;
-        }
-    }
-}
-
-// 内容区：nav==0 渲染真实首页，nav==1 渲染搜索页，其余一级页面暂用占位。
+// 内容区：nav==0 渲染首页，nav==1 渲染搜索页，nav==2 渲染设置页。
 // 三种形态（竖屏/横屏/平板单列）共用同一份内容与数据属性。
 component ContentArea inherits Rectangle {
     in property <int> nav: 0;
@@ -81,6 +46,14 @@ component ContentArea inherits Rectangle {
     in property <[Song]> detail-songs;
     in property <bool> detail-loading: false;
     in property <string> detail-error;
+    // 设置页数据与状态
+    in property <bool> dark: false;
+    in property <int> theme-color: 0;
+    in property <int> settings-language: 0;
+    in property <int> settings-quality: 0;
+    in property <int> settings-source: 0;
+    in property <string> cache-usage;
+    in property <string> data-dir;
     callback song-played(int);
     callback playlist-opened(int);
     callback album-opened(int);
@@ -88,6 +61,12 @@ component ContentArea inherits Rectangle {
     callback search-type-changed(int);
     callback detail-back();
     callback detail-play-all();
+    callback dark-changed(bool);
+    callback theme-changed(int);
+    callback settings-language-changed(int);
+    callback settings-quality-changed(int);
+    callback settings-source-changed(int);
+    callback settings-clear-cache();
 
     background: transparent;
 
@@ -136,12 +115,22 @@ component ContentArea inherits Rectangle {
         playlist-opened(id) => { root.playlist-opened(id); }
         album-opened(id) => { root.album-opened(id); }
     }
-    if (!root.detail-open && root.nav == 2) : PagePlaceholder {
+    if (!root.detail-open && root.nav == 2) : SettingsPage {
         width: 100%;
         height: 100%;
-        title: "设置";
-        subtitle: "设置页即将接入";
-        hint: "";
+        dark: root.dark;
+        theme-color: root.theme-color;
+        language: root.settings-language;
+        quality: root.settings-quality;
+        source: root.settings-source;
+        cache-usage: root.cache-usage;
+        data-dir: root.data-dir;
+        dark-changed(v) => { root.dark-changed(v); }
+        theme-changed(i) => { root.theme-changed(i); }
+        language-changed(i) => { root.settings-language-changed(i); }
+        quality-changed(i) => { root.settings-quality-changed(i); }
+        source-changed(i) => { root.settings-source-changed(i); }
+        clear-cache => { root.settings-clear-cache(); }
     }
 }
 
@@ -175,6 +164,12 @@ export component AppWindow inherits Window {
     callback player-mode();
     callback detail-back();
     callback detail-play-all();
+    callback dark-changed(bool);
+    callback theme-changed(int);
+    callback settings-language-changed(int);
+    callback settings-quality-changed(int);
+    callback settings-source-changed(int);
+    callback settings-clear-cache();
 
     // ===== 首页/队列真实数据（由 crate::load 填充，命名与桌面 AppWindow 一致）=====
     in-out property <[HotSong]> hot-songs;
@@ -208,6 +203,13 @@ export component AppWindow inherits Window {
     in-out property <[Song]> detail-songs;
     in-out property <bool> detail-loading: false;
     in-out property <string> detail-error: "";
+
+    // ===== 设置页状态（由 src/mobile/handlers.rs 按用户配置填充）=====
+    in-out property <int> settings-language: 0;
+    in-out property <int> settings-quality: 0;
+    in-out property <int> settings-source: 0;
+    in-out property <string> cache-usage: "";
+    in-out property <string> data-dir: "";
 
     // ===== 窗口尺寸：由内置 width/height 驱动 =====
     in-out property <length> window-width: root.width;
@@ -278,6 +280,13 @@ export component AppWindow inherits Window {
                 detail-songs: root.detail-songs;
                 detail-loading: root.detail-loading;
                 detail-error: root.detail-error;
+                dark: root.dark;
+                theme-color: root.theme-color-index;
+                settings-language: root.settings-language;
+                settings-quality: root.settings-quality;
+                settings-source: root.settings-source;
+                cache-usage: root.cache-usage;
+                data-dir: root.data-dir;
                 song-played(id) => { root.song-played(id); }
                 playlist-opened(id) => { root.playlist-opened(id); }
                 album-opened(id) => { root.album-opened(id); }
@@ -285,6 +294,12 @@ export component AppWindow inherits Window {
                 search-type-changed(ty) => { root.search-type-changed(ty); }
                 detail-back => { root.detail-back(); }
                 detail-play-all => { root.detail-play-all(); }
+                dark-changed(v) => { root.dark-changed(v); }
+                theme-changed(i) => { root.theme-changed(i); }
+                settings-language-changed(i) => { root.settings-language-changed(i); }
+                settings-quality-changed(i) => { root.settings-quality-changed(i); }
+                settings-source-changed(i) => { root.settings-source-changed(i); }
+                settings-clear-cache => { root.settings-clear-cache(); }
             }
         }
 
@@ -357,6 +372,13 @@ export component AppWindow inherits Window {
                     detail-songs: root.detail-songs;
                     detail-loading: root.detail-loading;
                     detail-error: root.detail-error;
+                    dark: root.dark;
+                    theme-color: root.theme-color-index;
+                    settings-language: root.settings-language;
+                    settings-quality: root.settings-quality;
+                    settings-source: root.settings-source;
+                    cache-usage: root.cache-usage;
+                    data-dir: root.data-dir;
                     song-played(id) => { root.song-played(id); }
                     playlist-opened(id) => { root.playlist-opened(id); }
                     album-opened(id) => { root.album-opened(id); }
@@ -364,6 +386,12 @@ export component AppWindow inherits Window {
                     search-type-changed(ty) => { root.search-type-changed(ty); }
                     detail-back => { root.detail-back(); }
                     detail-play-all => { root.detail-play-all(); }
+                    dark-changed(v) => { root.dark-changed(v); }
+                    theme-changed(i) => { root.theme-changed(i); }
+                    settings-language-changed(i) => { root.settings-language-changed(i); }
+                    settings-quality-changed(i) => { root.settings-quality-changed(i); }
+                    settings-source-changed(i) => { root.settings-source-changed(i); }
+                    settings-clear-cache => { root.settings-clear-cache(); }
                 }
             }
 
@@ -441,6 +469,13 @@ export component AppWindow inherits Window {
                         detail-songs: root.detail-songs;
                         detail-loading: root.detail-loading;
                         detail-error: root.detail-error;
+                        dark: root.dark;
+                        theme-color: root.theme-color-index;
+                        settings-language: root.settings-language;
+                        settings-quality: root.settings-quality;
+                        settings-source: root.settings-source;
+                        cache-usage: root.cache-usage;
+                        data-dir: root.data-dir;
                         song-played(id) => { root.song-played(id); }
                         playlist-opened(id) => { root.playlist-opened(id); }
                         album-opened(id) => { root.album-opened(id); }
@@ -448,6 +483,12 @@ export component AppWindow inherits Window {
                         search-type-changed(ty) => { root.search-type-changed(ty); }
                         detail-back => { root.detail-back(); }
                         detail-play-all => { root.detail-play-all(); }
+                        dark-changed(v) => { root.dark-changed(v); }
+                        theme-changed(i) => { root.theme-changed(i); }
+                        settings-language-changed(i) => { root.settings-language-changed(i); }
+                        settings-quality-changed(i) => { root.settings-quality-changed(i); }
+                        settings-source-changed(i) => { root.settings-source-changed(i); }
+                        settings-clear-cache => { root.settings-clear-cache(); }
                     }
                 }
             }

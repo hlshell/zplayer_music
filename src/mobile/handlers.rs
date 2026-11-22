@@ -5,6 +5,8 @@
 //! 所有回调均在 UI 线程触发（Slint 回调语义），因此可直接读写 UI 属性。
 
 use crate::network::netease::client::NeteaseClient;
+use crate::persist::cache;
+use crate::persist::config::AppConfig;
 use crate::platform::audio as player;
 use slint::{ComponentHandle, Model};
 use std::cell::{Cell, RefCell};
@@ -30,6 +32,22 @@ pub struct MobileCtx {
     pub search_kw: RefCell<String>,
     /// 详情请求序号：打开/关闭详情时自增，过期响应直接丢弃（防快速切换歌单串台）。
     pub detail_seq: Arc<AtomicU64>,
+    /// 用户配置快照（设置页修改后写盘；与桌面共用同一份 config.toml）
+    pub cfg: RefCell<AppConfig>,
+}
+
+/// 缓存占用字节 → 人类可读文本（KB / MB / GB）。
+fn format_usage(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * 1024 * 1024;
+    if bytes < MB {
+        format!("{} KB", bytes / KB)
+    } else if bytes < GB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    }
 }
 
 /// 读取任意 Song 模型为 Vec（仅 UI 线程使用）。
@@ -546,6 +564,21 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
     ui.set_play_mode(0);
     ui.set_playing(false);
 
+    // 启动即应用用户配置（深浅色 / 主题色 / 设置页各控件状态 / 缓存与数据目录）
+    let cfg = AppConfig::load();
+    ui.set_dark(cfg.app.dark);
+    ui.set_theme_color_index(cfg.ui.theme_color_index.clamp(0, 3));
+    ui.set_settings_language(if cfg.app.language_code == "en" { 1 } else { 0 });
+    ui.set_settings_quality(cfg.play.quality_index.clamp(0, 2));
+    ui.set_settings_source(cfg.play.source_index.clamp(0, 4));
+    ui.set_cache_usage(format_usage(cache::total_usage()).into());
+    ui.set_data_dir(
+        crate::persist::config::data_dir()
+            .display()
+            .to_string()
+            .into(),
+    );
+
     let ctx = Rc::new(MobileCtx {
         ui: ui.as_weak(),
         rt,
@@ -556,6 +589,7 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         search_seq: Arc::new(AtomicU64::new(0)),
         search_kw: RefCell::new(String::new()),
         detail_seq: Arc::new(AtomicU64::new(0)),
+        cfg: RefCell::new(cfg),
     });
 
     // ---- 首页点歌（详情页点歌：队列不含该曲时用详情列表整体替换队列）----
@@ -663,6 +697,67 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         c.mode.set(next);
         if let Some(u) = c.ui.upgrade() {
             u.set_play_mode(next);
+        }
+    });
+
+    // ---- 设置页：改内存配置 → 写盘 → 立即应用 ----
+    let c = ctx.clone();
+    ui.on_dark_changed(move |v| {
+        c.cfg.borrow_mut().app.dark = v;
+        c.cfg.borrow().save();
+        if let Some(u) = c.ui.upgrade() {
+            u.set_dark(v);
+        }
+    });
+
+    let c = ctx.clone();
+    ui.on_theme_changed(move |i| {
+        let i = i.clamp(0, 3);
+        c.cfg.borrow_mut().ui.theme_color_index = i;
+        c.cfg.borrow().save();
+        if let Some(u) = c.ui.upgrade() {
+            u.set_theme_color_index(i);
+        }
+    });
+
+    // 移动端 UI 文案暂固定中文：只持久化语言选择，不调用桌面专用的 i18n::load
+    let c = ctx.clone();
+    ui.on_settings_language_changed(move |i| {
+        let i = i.clamp(0, 1);
+        let code = if i == 1 { "en" } else { "zh" };
+        c.cfg.borrow_mut().app.language_code = code.to_string();
+        c.cfg.borrow().save();
+        if let Some(u) = c.ui.upgrade() {
+            u.set_settings_language(i);
+        }
+    });
+
+    let c = ctx.clone();
+    ui.on_settings_quality_changed(move |i| {
+        let i = i.clamp(0, 2);
+        c.cfg.borrow_mut().play.quality_index = i;
+        c.cfg.borrow().save();
+        if let Some(u) = c.ui.upgrade() {
+            u.set_settings_quality(i);
+        }
+    });
+
+    let c = ctx.clone();
+    ui.on_settings_source_changed(move |i| {
+        let i = i.clamp(0, 4);
+        c.cfg.borrow_mut().play.source_index = i;
+        c.cfg.borrow().save();
+        if let Some(u) = c.ui.upgrade() {
+            u.set_settings_source(i);
+        }
+    });
+
+    let c = ctx.clone();
+    ui.on_settings_clear_cache(move || {
+        let freed = cache::clear_all();
+        log::info!("[mobile] 已清空缓存，释放 {freed} 字节");
+        if let Some(u) = c.ui.upgrade() {
+            u.set_cache_usage(format_usage(cache::total_usage()).into());
         }
     });
 
