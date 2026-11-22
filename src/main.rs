@@ -5,15 +5,15 @@
 
 // desktop / web(wasm32) 入口都需要生成的 UI 类型（web 构建为 --no-default-features
 // --features web，不含 desktop feature，故必须显式覆盖 web 与 wasm32）
-#[cfg(any(feature = "desktop", feature = "web", target_arch = "wasm32"))]
+#[cfg(any(feature = "desktop", feature = "web", feature = "mobile", target_arch = "wasm32"))]
 slint::include_modules!();
 
 // ---- 从 src-tauri 迁移的后端纯 Rust 核心 ----
 // web(wasm) 最小闭环自包含（不编译 core：其 fetch/logger 依赖 reqwest/simplelog，
 // 由 web_main 内嵌 gdmusic 解析 + console_log 替代，阶段 1b 再做 core 的 web 移植）
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod core;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use core::{fetch, logger, lyrics, queue, song_util};
 // wasm 仅复用 core::lyrics（LyricLine 模型构造，纯 std+slint 类型无平台依赖；
 // fetch/logger 依赖 reqwest/simplelog 仍不进 web 构建）
@@ -23,50 +23,66 @@ mod core {
 }
 #[cfg(target_arch = "wasm32")]
 pub use core::lyrics;
+#[cfg(not(feature = "mobile"))]
 mod platform;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use platform::{autolaunch, winshell};
+#[cfg(not(feature = "mobile"))]
 pub use platform::audio as player;
+// 移动端阶段 1：仅存储门面（config/cache 经它读写）
+#[cfg(feature = "mobile")]
+mod platform {
+    pub mod storage;
+}
 
 // ---- 桌面/mobile 专属模块（web 最小闭环不编译；web 入口见下方 cfg(wasm) 段）----
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod persist;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use persist::{cache, config, liked, recent, state};
-#[cfg(not(target_arch = "wasm32"))]
+// 移动端阶段 1：配置与缓存初始化（不依赖桌面音频/完整 UI）
+#[cfg(feature = "mobile")]
+mod persist {
+    pub mod cache;
+    pub mod config;
+}
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod network;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use network::{netease, service, sources};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use network::proxy as net;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod load;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod handlers;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod i18n;
 // web(wasm32) 业务层：gdmusic 数据通道 + 按业务拆分的回调接线（web_main 编排 setup_all）
 #[cfg(target_arch = "wasm32")]
 mod web;
+// 移动端入口（Android NativeActivity / iOS 宿主）；桌面不编译
+#[cfg(feature = "mobile")]
+mod mobile;
 
 use slint::ComponentHandle;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 use slint::winit_030::winit;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 use slint::winit_030::WinitWindowAccessor;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 use crate::network::netease::client::NeteaseClient;
 
 // 运行时窗口图标（任务栏/标题栏/Alt+Tab）：无边框窗口默认任务栏图标空白，
 // 解码编译期嵌入的 logo 为 RGBA 设置 winit 窗口图标。
 // 必须在事件循环启动后调用 —— 事件循环未跑时 with_winit_window 静默失败
 // （回调永不执行），曾导致任务栏/Alt+Tab 图标空白。仅桌面（web 无 winit）。
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 fn set_runtime_icon(ui: &AppWindow) {
     use image::GenericImageView;
     let Ok(dyn_img) = image::load_from_memory(include_bytes!("../ui/assets/app-icon.png")) else { return };
@@ -87,7 +103,7 @@ pub fn boot_elapsed_ms() -> u128 {
 }
 
 // ---- 桌面入口（desktop feature；web 最小闭环见下方 cfg(wasm) 段）----
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", not(feature = "mobile")))]
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), slint::PlatformError> {
     // 启动性能打点：各阶段累计耗时写日志，定位启动慢的阶段（低频输出，保留无碍）
@@ -728,6 +744,12 @@ mod web_main {
             use wasm_bindgen::JsCast;
             if let Some(win) = web_sys::window() {
                 let w = win.inner_width().ok().and_then(|x| x.as_f64()).unwrap_or(1280.0) as u32;
+// ---- 移动端入口（Android 由 android_main 提供，不编译此 main；iOS 与桌面 preview 使用）----
+#[cfg(all(feature = "mobile", not(target_os = "android")))]
+fn main() {
+    crate::mobile::entry::run_mobile_main();
+}
+
                 let h = win.inner_height().ok().and_then(|x| x.as_f64()).unwrap_or(800.0) as u32;
                 let _ = ui.window().set_size(LogicalSize::new(w as f32, h as f32));
 

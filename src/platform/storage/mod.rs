@@ -17,9 +17,9 @@ pub trait Storage: Send + Sync {
     fn remove(&self, key: &str) -> std::io::Result<()>;
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "mobile"))]
 mod fs;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "mobile"))]
 use fs::FsStorage as DefaultStorage;
 
 #[cfg(feature = "web")]
@@ -27,8 +27,7 @@ mod web;
 #[cfg(feature = "web")]
 use web::WebStorage as DefaultStorage;
 
-// 后续（#33 mobile）：
-// #[cfg(feature = "mobile")] mod mobile;    use mobile::MobileStorage as DefaultStorage;
+// mobile 直接复用 FsStorage（base = 应用数据目录）；后续如接入 Android/iOS 专属存储再替换。
 
 static INSTANCE: OnceLock<Arc<dyn Storage>> = OnceLock::new();
 

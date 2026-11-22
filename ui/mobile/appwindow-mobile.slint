@@ -1,0 +1,19 @@
+// 阶段 1 占位窗口：验证移动端构建链与入口可达。阶段 2 将替换为完整移动 UI。
+export component AppWindow inherits Window {
+    title: "ZPlayer Music";
+    width: 390px;
+    height: 844px;
+    background: #111318;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: "ZPlayer Music - mobile shell";
+        color: #e8eaed;
+        font-size: 18px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// 供移动入口与计划中的命名使用；同一组件两个导出名，避免桌面共享模块引用 AppWindow 时失败。
+export component AppWindowMobile inherits AppWindow { }

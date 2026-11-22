@@ -12,30 +12,45 @@
 // 桌面/web 构建下 lib 会报大量 dead_code；移动端由 mobile 入口真实使用，不屏蔽。
 #![cfg_attr(not(feature = "mobile"), allow(dead_code))]
 
-#[cfg(any(feature = "desktop", feature = "web", target_arch = "wasm32"))]
+#[cfg(any(feature = "desktop", feature = "web", feature = "mobile", target_arch = "wasm32"))]
 slint::include_modules!();
 
-#[cfg(not(target_arch = "wasm32"))]
+// 桌面/web 业务模块。移动端阶段 1 只编译移动入口所需的最小切片（存储 + config/cache），
+// 其余业务模块依赖桌面音频后端与完整 UI，待阶段 2 提供移动实现后再纳入。
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod core;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use core::{fetch, logger, lyrics, queue, song_util};
 
+#[cfg(not(feature = "mobile"))]
 mod platform;
+#[cfg(not(feature = "mobile"))]
 pub use platform::audio as player;
+// 移动端阶段 1：仅存储门面（config/cache 经它读写）
+#[cfg(feature = "mobile")]
+mod platform {
+    pub mod storage;
+}
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod persist;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use persist::{cache, config, liked, recent, state};
-#[cfg(not(target_arch = "wasm32"))]
+// 移动端阶段 1：配置与缓存初始化（不依赖桌面音频/完整 UI）
+#[cfg(feature = "mobile")]
+mod persist {
+    pub mod cache;
+    pub mod config;
+}
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod network;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 pub use network::{netease, service, sources};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod load;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod handlers;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 mod i18n;
 
 // 启动打点基准；跨模块统一打点用 crate::boot_elapsed_ms()（与 bin 入口同一语义）

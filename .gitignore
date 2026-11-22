@@ -55,3 +55,10 @@ scripts/web-test/node_modules/
 scripts/web-test/dist/
 playwright-report/
 test-results/
+
+# Android 构建产物（cargo-ndk 产出的 .so 与 Gradle 缓存）
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/

@@ -27,7 +27,7 @@ desktop = ["dep:rodio", "dep:cpal", "dep:tinyfiledialogs", "dep:winapi", "dep:si
 # 注：ffmpeg-next 已移到 target-specific 段（Windows 带 static，其他 platform 不带），
 # 不需要在 feature 里 dep: 它——target-specific 依赖会自动在满足条件的 target 上启用。
 web = []
-mobile = []
+mobile = ["slint/backend-android-activity-06"]
 
 [dependencies]
 # slint 恢复原始全局配置（desktop 稳定基线，skia 渲染器已有缓存；feature 传递改法会触发 skia-bindings
@@ -133,7 +133,7 @@ cpal = { version = "0.15", optional = true }
 [target.'cfg(all(target_os = "windows", not(target_arch = "wasm32")))'.dependencies]
 ffmpeg-next = { version = "9.0", default-features = false, features = ["static", "codec", "format", "software-resampling", "software-scaling"] }
 
-[target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dependencies]
+[target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
 
 # ---- web(wasm32) 平台依赖：无 reqwest（用 web-sys fetch 直调 gdmusic，
