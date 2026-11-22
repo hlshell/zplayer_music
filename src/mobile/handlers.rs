@@ -32,6 +32,8 @@ pub struct MobileCtx {
     pub search_kw: RefCell<String>,
     /// 详情请求序号：打开/关闭详情时自增，过期响应直接丢弃（防快速切换歌单串台）。
     pub detail_seq: Arc<AtomicU64>,
+    /// 播放请求序号：每次点歌自增；旧请求晚到的音频字节直接丢弃，避免覆盖后点的歌。
+    pub play_seq: Arc<AtomicU64>,
     /// 用户配置快照（设置页修改后写盘；与桌面共用同一份 config.toml）
     pub cfg: RefCell<AppConfig>,
 }
@@ -274,7 +276,19 @@ fn ms_to_year(ms: i64) -> slint::SharedString {
     if ms <= 0 {
         return slint::SharedString::default();
     }
-    ((1970.0 + (ms / 1000 / 86400) as f64 / 365.25) as i64).to_string().into()
+    // 按实际天数逐年扣减（含闰年），避免按 365.25 估算在年末偏到下一年
+    let mut days = ms / 86_400_000;
+    let mut year = 1970i64;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let year_days = if leap { 366 } else { 365 };
+        if days < year_days {
+            break;
+        }
+        days -= year_days;
+        year += 1;
+    }
+    year.to_string().into()
 }
 
 /// 后台线程解析响应：只产出 Send 结构，不碰 slint::Image。
@@ -501,6 +515,10 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
     player::stop();
     player::begin_switch();
 
+    // 播放请求序号：快速连点不同歌曲时，先发后到的音频不得覆盖后点的歌
+    let play_seq = ctx.play_seq.clone();
+    let seq = play_seq.fetch_add(1, Ordering::SeqCst) + 1;
+
     // Slint int 是 i32：大 ID 存为负数，须经 u32 往返还原真实网易云 ID
     let uid = song.id as u32 as i64;
     let dur_sec = song.duration_sec.max(0.0);
@@ -510,6 +528,10 @@ fn play_song(ctx: &Rc<MobileCtx>, id: i32) {
     let ui_weak = ctx.ui.clone();
     ctx.rt.spawn(async move {
         let bytes = crate::fetch::fetch_song_bytes(&client, uid, &name, &artist, dur_sec as u64).await;
+        // 期间又点了别的歌：本次结果作废（不 play_at、不改 playing/过渡态）
+        if play_seq.load(Ordering::SeqCst) != seq {
+            return;
+        }
         match bytes {
             Some(b) => {
                 player::play_at(b, dur_sec, 0.0);
@@ -589,6 +611,7 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         search_seq: Arc::new(AtomicU64::new(0)),
         search_kw: RefCell::new(String::new()),
         detail_seq: Arc::new(AtomicU64::new(0)),
+        play_seq: Arc::new(AtomicU64::new(0)),
         cfg: RefCell::new(cfg),
     });
 
