@@ -1,0 +1,285 @@
+name: Mobile
+
+# 移动端独立流水线：桌面 Release 工作流（release.yml）不受影响。
+#  - pull_request：改动 src/、ui/mobile/、android/、ios/、构建脚本时校验
+#  - workflow_dispatch：手动触发；配置了签名 Secrets 时额外产出可安装包
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'ui/mobile/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'build.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ==================== Android：布局单测 + Debug APK ====================
+  check-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 移动 feature 在宿主上编译时 cpal 需要 ALSA 头文件
+      - name: 安装宿主依赖（cpal/ALSA）
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK 27.0.12077973（与 app/build.gradle.kts 一致）
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      # 布局分类器单测在移动 feature 下即可运行（不链接桌面 FFmpeg）
+      - name: Rust 单测（mobile feature）
+        run: cargo test --no-default-features --features mobile --lib --tests
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: 构建 Debug APK（Gradle 内调 cargo-ndk）
+        working-directory: android
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: 上传 Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  # ==================== iOS：无签名 Simulator 构建 ====================
+  check-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: 构建 Simulator 版本（无签名）
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project ZPlayer.xcodeproj \
+            -scheme ZPlayer \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 说明（无签名，非真机安装包）
+        run: echo "Simulator 构建仅用于编译校验；真机安装包需配置 iOS 签名 Secrets 后手动触发 package-ios。"
+
+      - name: 打包 Simulator .app
+        run: |
+          cd ios/build/Build/Products/Release-iphonesimulator
+          ditto -c -k --sequesterRsrc --keepParent ZPlayer.app ZPlayer-simulator.zip
+
+      - name: 上传 Simulator 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: ios/build/Build/Products/Release-iphonesimulator/ZPlayer-simulator.zip
+          if-no-files-found: error
+
+  # ==================== Android Release（需签名 Secrets）====================
+  package-android:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK 与 cargo-ndk
+        run: |
+          sdkmanager "ndk;27.0.12077973"
+          cargo install cargo-ndk --locked
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: 检查签名 Secrets
+        id: signing
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] \
+             && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "未配置 Android 签名 Secrets，跳过 Release 签名包（Debug APK 由 check-android 产出）。"
+          fi
+
+      - name: 构建并签名 Release APK
+        if: steps.signing.outputs.enabled == 'true'
+        working-directory: android
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          import_keystore="$RUNNER_TEMP/release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$import_keystore"
+          gradle :app:assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="$import_keystore" \
+            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+          rm -f "$import_keystore"
+
+      - name: 上传 Release APK
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  # ==================== iOS Release（需签名 Secrets）====================
+  package-ios:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    env:
+      IOS_CERT_BASE64: ${{ secrets.IOS_CERT_BASE64 }}
+      IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 检查签名 Secrets
+        id: signing
+        run: |
+          if [ -n "$IOS_CERT_BASE64" ] && [ -n "$IOS_CERT_PASSWORD" ] \
+             && [ -n "$IOS_PROFILE_BASE64" ] && [ -n "$IOS_TEAM_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "未配置 iOS 签名 Secrets，跳过 IPA 归档（Simulator .app 由 check-ios 产出）。"
+          fi
+
+      - name: 导入证书与描述文件
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          cert_path="$RUNNER_TEMP/cert.p12"
+          echo "$IOS_CERT_BASE64" | base64 --decode > "$cert_path"
+          security import "$cert_path" -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychain -d user -s "$keychain"
+
+          profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$profile_dir"
+          echo "$IOS_PROFILE_BASE64" | base64 --decode > "$profile_dir/zplayer.mobileprovision"
+          rm -f "$cert_path"
+
+      - name: 生成工程并归档
+        if: steps.signing.outputs.enabled == 'true'
+        working-directory: ios
+        run: |
+          xcodegen generate
+          xcodebuild \
+            -project ZPlayer.xcodeproj \
+            -scheme ZPlayer \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/ZPlayer.xcarchive \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            archive
+
+      - name: 导出 IPA
+        if: steps.signing.outputs.enabled == 'true'
+        working-directory: ios
+        run: |
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>$IOS_TEAM_ID</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/ZPlayer.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist
+
+      - name: 上传 IPA
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ios/build/export/*.ipa
+          if-no-files-found: error
