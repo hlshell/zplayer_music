@@ -95,11 +95,15 @@ jobs:
           echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
-      # 显式喂入 y 接受许可证，避免 sdkmanager 交互挂起
-      - name: 接受 Android SDK 许可证并安装 NDK
+      # 显式喂入 y 接受许可证，避免 sdkmanager 交互挂起。
+      # platforms/build-tools 必装：Rust 侧的 i-slint-backend-android-activity build.rs
+      # 会用 android.jar 编译 Java 辅助类并用 D8 生成 dex，缺 platforms 会直接 panic
+      # “No Android platforms found”（run 45021733144）。compileSdk=35 对应 android-35。
+      - name: 接受 Android SDK 许可证并安装 NDK/Platform/Build-Tools
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "ndk;27.0.12077973"
+          sdkmanager "ndk;27.0.12077973" "platforms;android-35" "build-tools;35.0.0"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk --locked
