@@ -1,0 +1,305 @@
+// ============================================================================
+//  detail.slint — 移动端歌单/专辑详情页
+//  kind：0=歌单 / 1=专辑；数据与状态全部由 AppWindow 属性驱动。
+//  窄屏：顶栏 + 头部（封面/标题/描述/曲目数）+ 播放全部 + 滚动列表；
+//  宽屏：头部固定左栏（300px），右侧列表独立滚动。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { MobileTheme } from "../theme.slint";
+import { Song } from "../../components/models.slint";
+import { SongRow } from "../components/song-row.slint";
+
+// 封面：空图回退主题渐变
+component DetailCover inherits Rectangle {
+    in property <image> cover;
+
+    width: 120px;
+    height: 120px;
+    border-radius: 16px;
+    clip: true;
+    background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+
+    if (root.cover.width > 0) : Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+    }
+}
+
+// 头部文字块：标题（20px 粗体）+ 描述（2 行 elide）+ 曲目数
+component DetailTitle inherits VerticalLayout {
+    in property <string> title: "";
+    in property <string> desc: "";
+    in property <int> count: 0;
+
+    spacing: 6px;
+
+    Text {
+        text: root.title == "" ? "加载中…" : root.title;
+        color: MobileTheme.text;
+        font-size: 20px;
+        font-weight: 700;
+        overflow: elide;
+    }
+    if (root.desc != "") : Text {
+        text: root.desc;
+        color: MobileTheme.text-secondary;
+        font-size: 12px;
+        wrap: word-wrap;
+        max-lines: 2;
+        overflow: elide;
+    }
+    Text {
+        text: "共 " + root.count + " 首";
+        color: MobileTheme.text-faint;
+        font-size: 11px;
+    }
+}
+
+// 顶栏：48px 返回按钮 + 类型标题
+component DetailTopBar inherits Rectangle {
+    in property <int> kind: 0;
+    callback back();
+
+    height: 48px;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        padding-left: 4px;
+        padding-right: 4px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 24px;
+            background: back-ta.has-hover ? Theme.palette.hover : transparent;
+
+            Text {
+                width: 100%;
+                height: 100%;
+                text: "‹";
+                color: MobileTheme.text;
+                font-size: 26px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            back-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.back(); }
+            }
+        }
+
+        Text {
+            text: root.kind == 0 ? "歌单" : "专辑";
+            color: MobileTheme.text;
+            font-size: 15px;
+            font-weight: 600;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// 播放全部：视觉高度 40px，触控区域撑到 44px
+component DetailPlayAll inherits Rectangle {
+    callback clicked();
+
+    height: 44px;
+    background: transparent;
+
+    Rectangle {
+        y: 2px;
+        width: 100%;
+        height: 40px;
+        border-radius: 20px;
+        background: play-ta.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+
+        Text {
+            width: 100%;
+            height: 100%;
+            text: "播放全部";
+            color: Theme.palette.icon-white;
+            font-size: 14px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    play-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 歌曲列表：加载中 / 错误 / 空态 / 列表
+component DetailList inherits Rectangle {
+    in property <[Song]> songs;
+    in property <bool> loading: false;
+    in property <string> error: "";
+    callback song-played(int);
+
+    background: transparent;
+    clip: true;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 4px;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-bottom: 24px;
+
+            if (root.loading) : Text {
+                text: "加载中…";
+                color: MobileTheme.text-faint;
+                font-size: 13px;
+                horizontal-alignment: center;
+                height: 64px;
+                vertical-alignment: center;
+            }
+
+            if (!root.loading && root.error != "") : Text {
+                text: root.error;
+                color: MobileTheme.text-secondary;
+                font-size: 13px;
+                horizontal-alignment: center;
+                height: 64px;
+                vertical-alignment: center;
+            }
+
+            if (!root.loading && root.error == "" && root.songs.length == 0) : Text {
+                text: "暂无歌曲";
+                color: MobileTheme.text-faint;
+                font-size: 13px;
+                horizontal-alignment: center;
+                height: 64px;
+                vertical-alignment: center;
+            }
+
+            if (!root.loading && root.error == "") : VerticalLayout {
+                for s[i] in root.songs : SongRow {
+                    index: i;
+                    rank: "" + (i + 1);
+                    title: s.name;
+                    subtitle: s.artist;
+                    cover: s.cover;
+                    from: Theme.palette.primary;
+                    to: Theme.palette.secondary;
+                    clicked => { root.song-played(s.id); }
+                }
+            }
+        }
+    }
+}
+
+export component DetailPage inherits Rectangle {
+    in property <int> kind: 0;
+    in property <string> title: "";
+    in property <string> desc: "";
+    in property <image> cover;
+    in property <[Song]> songs;
+    in property <bool> loading: false;
+    in property <string> error: "";
+    in property <bool> wide: false;
+    callback back();
+    callback song-played(int);
+    callback play-all();
+
+    background: transparent;
+
+    // ===== 宽屏：头部固定左栏，右侧列表 =====
+    if (root.wide) : HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 16px;
+
+        VerticalLayout {
+            width: 300px;
+            spacing: 12px;
+            padding-top: 4px;
+
+            DetailTopBar {
+                kind: root.kind;
+                back => { root.back(); }
+            }
+            DetailCover { cover: root.cover; }
+            DetailTitle {
+                title: root.title;
+                desc: root.desc;
+                count: root.songs.length;
+            }
+            DetailPlayAll {
+                clicked => { root.play-all(); }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        DetailList {
+            horizontal-stretch: 1;
+            height: 100%;
+            songs: root.songs;
+            loading: root.loading;
+            error: root.error;
+            song-played(id) => { root.song-played(id); }
+        }
+    }
+
+    // ===== 窄屏：顶栏 + 头部 + 播放全部 + 列表 =====
+    if (!root.wide) : VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 8px;
+        padding-top: 4px;
+
+        DetailTopBar {
+            kind: root.kind;
+            back => { root.back(); }
+        }
+
+        HorizontalLayout {
+            height: 120px;
+            spacing: 14px;
+            padding-left: 16px;
+            padding-right: 16px;
+            cross-axis-alignment: center;
+
+            DetailCover { cover: root.cover; }
+            DetailTitle {
+                horizontal-stretch: 1;
+                title: root.title;
+                desc: root.desc;
+                count: root.songs.length;
+            }
+        }
+
+        HorizontalLayout {
+            height: 44px;
+            padding-left: 16px;
+            padding-right: 16px;
+
+            DetailPlayAll {
+                horizontal-stretch: 1;
+                clicked => { root.play-all(); }
+            }
+        }
+
+        DetailList {
+            vertical-stretch: 1;
+            songs: root.songs;
+            loading: root.loading;
+            error: root.error;
+            song-played(id) => { root.song-played(id); }
+        }
+    }
+}

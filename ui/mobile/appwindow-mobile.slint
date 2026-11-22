@@ -14,6 +14,7 @@ import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
 import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../components/models.slint";
 import { HomePage } from "pages/home.slint";
 import { SearchPage } from "pages/search.slint";
+import { DetailPage } from "pages/detail.slint";
 
 // 一级页面占位内容（搜索/设置尚未接入）
 component PagePlaceholder inherits Rectangle {
@@ -70,15 +71,43 @@ component ContentArea inherits Rectangle {
     in property <int> search-type: 0;
     in property <bool> search-loading: false;
     in property <string> search-error;
+    // 详情页数据与状态
+    in property <bool> wide: false;
+    in property <bool> detail-open: false;
+    in property <int> detail-kind: 0;
+    in property <string> detail-title;
+    in property <string> detail-desc;
+    in property <image> detail-cover;
+    in property <[Song]> detail-songs;
+    in property <bool> detail-loading: false;
+    in property <string> detail-error;
     callback song-played(int);
     callback playlist-opened(int);
     callback album-opened(int);
     callback search-submitted(string, int);
     callback search-type-changed(int);
+    callback detail-back();
+    callback detail-play-all();
 
     background: transparent;
 
-    if (root.nav == 0) : HomePage {
+    // 详情页优先：打开时覆盖一级页面
+    if (root.detail-open) : DetailPage {
+        width: 100%;
+        height: 100%;
+        kind: root.detail-kind;
+        title: root.detail-title;
+        desc: root.detail-desc;
+        cover: root.detail-cover;
+        songs: root.detail-songs;
+        loading: root.detail-loading;
+        error: root.detail-error;
+        wide: root.wide;
+        back => { root.detail-back(); }
+        song-played(id) => { root.song-played(id); }
+        play-all => { root.detail-play-all(); }
+    }
+    if (!root.detail-open && root.nav == 0) : HomePage {
         width: 100%;
         height: 100%;
         hot-songs: root.hot-songs;
@@ -91,7 +120,7 @@ component ContentArea inherits Rectangle {
         song-played(id) => { root.song-played(id); }
         playlist-opened(id) => { root.playlist-opened(id); }
     }
-    if (root.nav == 1) : SearchPage {
+    if (!root.detail-open && root.nav == 1) : SearchPage {
         width: 100%;
         height: 100%;
         results: root.search-songs;
@@ -107,7 +136,7 @@ component ContentArea inherits Rectangle {
         playlist-opened(id) => { root.playlist-opened(id); }
         album-opened(id) => { root.album-opened(id); }
     }
-    if (root.nav == 2) : PagePlaceholder {
+    if (!root.detail-open && root.nav == 2) : PagePlaceholder {
         width: 100%;
         height: 100%;
         title: "设置";
@@ -144,6 +173,8 @@ export component AppWindow inherits Window {
     callback player-prev();
     callback player-next();
     callback player-mode();
+    callback detail-back();
+    callback detail-play-all();
 
     // ===== 首页/队列真实数据（由 crate::load 填充，命名与桌面 AppWindow 一致）=====
     in-out property <[HotSong]> hot-songs;
@@ -169,6 +200,15 @@ export component AppWindow inherits Window {
     in-out property <bool> search-loading: false;
     in-out property <string> search-error: "";
 
+    // ===== 歌单/专辑详情（由 src/mobile/handlers.rs 填充）=====
+    in-out property <int> detail-kind: 0;
+    in-out property <string> detail-title: "";
+    in-out property <string> detail-desc: "";
+    in-out property <image> detail-cover;
+    in-out property <[Song]> detail-songs;
+    in-out property <bool> detail-loading: false;
+    in-out property <string> detail-error: "";
+
     // ===== 窗口尺寸：由内置 width/height 驱动 =====
     in-out property <length> window-width: root.width;
     in-out property <length> window-height: root.height;
@@ -183,6 +223,9 @@ export component AppWindow inherits Window {
     property <int> layout-kind: min(root.window-width, root.window-height) >= MobileTheme.tablet-min-side
         ? 2
         : (root.window-width > root.window-height ? 1 : 0);
+    // 平板内容区宽 >= 840dp 时启用双栏（详情页用宽布局）
+    property <bool> use-two-column: root.layout-kind == 2
+        && (root.window-width - MobileTheme.sidebar-width - root.safe-left) >= MobileTheme.two-column-threshold;
 
     init => {
         // 深浅色沿用 Theme.dark（由 Rust 按用户配置写入），此处不强行覆盖
@@ -226,11 +269,22 @@ export component AppWindow inherits Window {
                 search-type: root.search-type;
                 search-loading: root.search-loading;
                 search-error: root.search-error;
+                wide: false;
+                detail-open: root.detail-open;
+                detail-kind: root.detail-kind;
+                detail-title: root.detail-title;
+                detail-desc: root.detail-desc;
+                detail-cover: root.detail-cover;
+                detail-songs: root.detail-songs;
+                detail-loading: root.detail-loading;
+                detail-error: root.detail-error;
                 song-played(id) => { root.song-played(id); }
                 playlist-opened(id) => { root.playlist-opened(id); }
                 album-opened(id) => { root.album-opened(id); }
                 search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
                 search-type-changed(ty) => { root.search-type-changed(ty); }
+                detail-back => { root.detail-back(); }
+                detail-play-all => { root.detail-play-all(); }
             }
         }
 
@@ -254,7 +308,7 @@ export component AppWindow inherits Window {
 
         NavBottomBar {
             current <=> root.current-nav;
-            selected(idx) => { root.current-nav = idx; }
+            selected(idx) => { root.current-nav = idx; root.detail-open = false; }
         }
     }
 
@@ -266,7 +320,7 @@ export component AppWindow inherits Window {
 
         NavRail {
             current <=> root.current-nav;
-            selected(idx) => { root.current-nav = idx; }
+            selected(idx) => { root.current-nav = idx; root.detail-open = false; }
         }
 
         VerticalLayout {
@@ -294,11 +348,22 @@ export component AppWindow inherits Window {
                     search-type: root.search-type;
                     search-loading: root.search-loading;
                     search-error: root.search-error;
+                    wide: false;
+                    detail-open: root.detail-open;
+                    detail-kind: root.detail-kind;
+                    detail-title: root.detail-title;
+                    detail-desc: root.detail-desc;
+                    detail-cover: root.detail-cover;
+                    detail-songs: root.detail-songs;
+                    detail-loading: root.detail-loading;
+                    detail-error: root.detail-error;
                     song-played(id) => { root.song-played(id); }
                     playlist-opened(id) => { root.playlist-opened(id); }
                     album-opened(id) => { root.album-opened(id); }
                     search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
                     search-type-changed(ty) => { root.search-type-changed(ty); }
+                    detail-back => { root.detail-back(); }
+                    detail-play-all => { root.detail-play-all(); }
                 }
             }
 
@@ -330,7 +395,7 @@ export component AppWindow inherits Window {
 
         NavSidebar {
             current <=> root.current-nav;
-            selected(idx) => { root.current-nav = idx; }
+            selected(idx) => { root.current-nav = idx; root.detail-open = false; }
         }
 
         VerticalLayout {
@@ -367,11 +432,22 @@ export component AppWindow inherits Window {
                         search-type: root.search-type;
                         search-loading: root.search-loading;
                         search-error: root.search-error;
+                        wide: root.use-two-column;
+                        detail-open: root.detail-open;
+                        detail-kind: root.detail-kind;
+                        detail-title: root.detail-title;
+                        detail-desc: root.detail-desc;
+                        detail-cover: root.detail-cover;
+                        detail-songs: root.detail-songs;
+                        detail-loading: root.detail-loading;
+                        detail-error: root.detail-error;
                         song-played(id) => { root.song-played(id); }
                         playlist-opened(id) => { root.playlist-opened(id); }
                         album-opened(id) => { root.album-opened(id); }
                         search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
                         search-type-changed(ty) => { root.search-type-changed(ty); }
+                        detail-back => { root.detail-back(); }
+                        detail-play-all => { root.detail-play-all(); }
                     }
                 }
             }

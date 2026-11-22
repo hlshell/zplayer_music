@@ -28,18 +28,24 @@ pub struct MobileCtx {
     pub search_seq: Arc<AtomicU64>,
     /// 最近一次有效搜索关键词（切换类型时复用）
     pub search_kw: RefCell<String>,
+    /// 详情请求序号：打开/关闭详情时自增，过期响应直接丢弃（防快速切换歌单串台）。
+    pub detail_seq: Arc<AtomicU64>,
 }
 
-/// 读取 UI 侧 queue 模型为 Vec（仅 UI 线程使用）。
-fn read_ui_queue(ui: &crate::AppWindow) -> Vec<crate::Song> {
-    let q = ui.get_queue();
-    let mut out = Vec::with_capacity(q.row_count());
-    for i in 0..q.row_count() {
-        if let Some(s) = q.row_data(i) {
+/// 读取任意 Song 模型为 Vec（仅 UI 线程使用）。
+fn read_song_model(m: &slint::ModelRc<crate::Song>) -> Vec<crate::Song> {
+    let mut out = Vec::with_capacity(m.row_count());
+    for i in 0..m.row_count() {
+        if let Some(s) = m.row_data(i) {
             out.push(s);
         }
     }
     out
+}
+
+/// 读取 UI 侧 queue 模型为 Vec（仅 UI 线程使用）。
+fn read_ui_queue(ui: &crate::AppWindow) -> Vec<crate::Song> {
+    read_song_model(&ui.get_queue())
 }
 
 /// 取当前队列快照：UI 队列非空时以其为准并回写 ctx；否则沿用 ctx 内队列
@@ -95,6 +101,133 @@ fn song_from_base(b: &crate::load::SongBase) -> crate::Song {
         liked: crate::persist::liked::is_liked(b.id as u32 as i64),
     }
 }
+
+/// 业务码校验：响应顶层 code 非 200 视为失败。
+fn biz_ok(v: &serde_json::Value) -> bool {
+    v.get("code").and_then(|c| c.as_i64()) == Some(200)
+}
+
+/// 详情响应中间态：标题 / 描述 / 封面 URL / 歌曲（全部 Send）。
+type DetailData = (String, String, String, Vec<crate::load::SongBase>);
+
+/// 歌单详情：tracks 不足时用 trackIds + song_detail 兜底补全（上限 500 首）。
+async fn fetch_playlist_detail(client: &NeteaseClient, uid: u64) -> Result<DetailData, String> {
+    let v = crate::network::service::playlist_detail(client, uid, 1000).await?;
+    if !biz_ok(&v) {
+        return Err("歌单加载失败".to_string());
+    }
+    let p = v
+        .get("playlist")
+        .filter(|x| !x.is_null())
+        .ok_or_else(|| "歌单不存在".to_string())?;
+    let title = p.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let desc: String = p
+        .get("description")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .chars()
+        .take(120)
+        .collect();
+    let cover = p.get("coverImgUrl").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let mut tracks = p.get("tracks").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    let total_ids: Vec<i64> = p
+        .get("trackIds")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.get("id").and_then(|i| i.as_i64()))
+                .take(500)
+                .collect()
+        })
+        .unwrap_or_default();
+    if tracks.len() < total_ids.len() && !total_ids.is_empty() {
+        if let Ok(dv) = crate::network::service::song_detail(client, &total_ids).await {
+            if biz_ok(&dv) {
+                let full = dv.get("songs").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+                if !full.is_empty() {
+                    tracks = full;
+                }
+            }
+        }
+    }
+    Ok((title, desc, cover, crate::load::parse_tracks(&tracks)))
+}
+
+/// 专辑详情：album 元信息 + songs。
+async fn fetch_album_detail(client: &NeteaseClient, uid: u64) -> Result<DetailData, String> {
+    let v = crate::network::service::album_songs(client, uid).await?;
+    if !biz_ok(&v) {
+        return Err("专辑加载失败".to_string());
+    }
+    let al = v
+        .get("album")
+        .filter(|x| !x.is_null())
+        .ok_or_else(|| "专辑不存在".to_string())?;
+    let title = al.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let desc = al
+        .get("artist")
+        .and_then(|x| x.get("name"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cover = al.get("picUrl").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let songs = v.get("songs").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    Ok((title, desc, cover, crate::load::parse_tracks(&songs)))
+}
+
+/// 打开歌单/专辑详情：序号自增 → 置加载态 → 后台拉取 → UI 线程按序号防串回填。
+fn open_detail(ctx: &Rc<MobileCtx>, id: i32, kind: i32) {
+    let Some(ui) = ctx.ui.upgrade() else { return; };
+    let seq = ctx.detail_seq.fetch_add(1, Ordering::SeqCst) + 1;
+
+    ui.set_detail_open(true);
+    ui.set_detail_kind(kind);
+    ui.set_detail_title("".into());
+    ui.set_detail_desc("".into());
+    ui.set_detail_cover(slint::Image::default());
+    ui.set_detail_songs(crate::load::model(Vec::new()));
+    ui.set_detail_loading(true);
+    ui.set_detail_error("".into());
+
+    let client = ctx.client.clone();
+    let ui_weak = ctx.ui.clone();
+    let seq_now = ctx.detail_seq.clone();
+    // Slint int 是 i32：大 ID 存为负数，须经 u32 往返还原真实网易云 ID
+    let uid = id as u32 as u64;
+    ctx.rt.spawn(async move {
+        let got = if kind == 0 {
+            fetch_playlist_detail(&client, uid).await
+        } else {
+            fetch_album_detail(&client, uid).await
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(u) = ui_weak.upgrade() else { return; };
+            // 序号防串：期间已打开/关闭其他详情则丢弃本次响应
+            if seq_now.load(Ordering::SeqCst) != seq {
+                return;
+            }
+            match got {
+                Ok((title, desc, cover_url, songs)) => {
+                    u.set_detail_title(title.as_str().into());
+                    u.set_detail_desc(desc.as_str().into());
+                    let img = crate::load::cover_now(&cover_url);
+                    if img.size().width > 0 {
+                        u.set_detail_cover(img);
+                    }
+                    let rows: Vec<crate::Song> = songs.iter().map(song_from_base).collect();
+                    u.set_detail_songs(crate::load::model(rows));
+                    u.set_detail_error("".into());
+                }
+                Err(e) => {
+                    log::warn!("[mobile] 详情加载失败: kind={kind} id={id} err={e}");
+                    u.set_detail_error("加载失败，请重试".into());
+                }
+            }
+            u.set_detail_loading(false);
+        });
+    });
+}
+
 
 /// 搜索结果中间态（仅含 Send 数据；slint::Image 只能在 UI 线程构造）。
 enum SearchHits {
@@ -422,16 +555,31 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         mode: Cell::new(0),
         search_seq: Arc::new(AtomicU64::new(0)),
         search_kw: RefCell::new(String::new()),
+        detail_seq: Arc::new(AtomicU64::new(0)),
     });
 
-    // ---- 首页点歌 ----
+    // ---- 首页点歌（详情页点歌：队列不含该曲时用详情列表整体替换队列）----
     let c = ctx.clone();
-    ui.on_song_played(move |id| play_song(&c, id));
-
-    // 歌单打开：详情页尚未接入，暂仅记录
-    ui.on_playlist_opened(move |id| {
-        log::info!("[mobile] 打开歌单: id={id}");
+    ui.on_song_played(move |id| {
+        if let Some(u) = c.ui.upgrade() {
+            let detail = read_song_model(&u.get_detail_songs());
+            if detail.iter().any(|s| s.id == id) {
+                let ui_queue = read_ui_queue(&u);
+                let in_queue = ui_queue.iter().any(|s| s.id == id)
+                    || c.queue.borrow().iter().any(|s| s.id == id);
+                if !in_queue {
+                    *c.queue.borrow_mut() = detail.clone();
+                    u.set_queue(crate::load::model(detail));
+                    c.cur.set(0);
+                }
+            }
+        }
+        play_song(&c, id);
     });
+
+    // 歌单/专辑打开：进入详情页
+    let c = ctx.clone();
+    ui.on_playlist_opened(move |id| open_detail(&c, id, 0));
 
     // ---- 搜索 ----
     let c = ctx.clone();
@@ -449,9 +597,32 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         }
     });
 
-    // 专辑打开：详情页在后续任务接入，暂仅记录
-    ui.on_album_opened(move |id| {
-        log::info!("[mobile] 打开专辑: id={id}");
+    let c = ctx.clone();
+    ui.on_album_opened(move |id| open_detail(&c, id, 1));
+
+    // ---- 详情页 ----
+    // 返回：作废在途请求并关闭详情
+    let c = ctx.clone();
+    ui.on_detail_back(move || {
+        c.detail_seq.fetch_add(1, Ordering::SeqCst);
+        if let Some(u) = c.ui.upgrade() {
+            u.set_detail_open(false);
+        }
+    });
+
+    // 播放全部：详情列表整体成为队列，从第一首开始
+    let c = ctx.clone();
+    ui.on_detail_play_all(move || {
+        let Some(u) = c.ui.upgrade() else { return; };
+        let songs = read_song_model(&u.get_detail_songs());
+        if songs.is_empty() {
+            return;
+        }
+        let first = songs[0].id;
+        *c.queue.borrow_mut() = songs.clone();
+        u.set_queue(crate::load::model(songs));
+        c.cur.set(0);
+        play_song(&c, first);
     });
 
     // ---- 播放控制 ----
