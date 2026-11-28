@@ -46,6 +46,8 @@ struct CacheSettings {
     limit_mb: u64,
     /// 清理策略：0=最近少用(LRU) 1=先进先出(FIFO)
     evict_strategy: i32,
+    /// 歌曲缓存开关：关闭后不读/不写歌曲缓存（仍可在线流式播放）
+    enabled: bool,
 }
 
 static SETTINGS: Mutex<Option<CacheSettings>> = Mutex::new(None);
@@ -58,8 +60,19 @@ pub fn init(cfg: &AppConfig) {
         lyric_dir: config::lyric_cache_dir(cfg),
         limit_mb: cfg.app.cache_limit_mb,
         evict_strategy: cfg.cache.evict_strategy,
+        enabled: cfg.cache.enabled,
     };
     *SETTINGS.lock().unwrap() = Some(s);
+}
+
+/// 歌曲缓存开关（未初始化时按默认开启处理）。
+fn cache_enabled() -> bool {
+    SETTINGS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.enabled)
+        .unwrap_or(true)
 }
 
 /// 读取当前缓存设置；未初始化时回退默认值。
@@ -146,11 +159,17 @@ pub fn migrate_legacy_covers() {
 
 /// 读取歌曲缓存。
 pub fn load_song(id: i64) -> Option<Vec<u8>> {
+    if !cache_enabled() {
+        return None;
+    }
     std::fs::read(song_file(id)).ok()
 }
 
 /// 写入歌曲缓存（播放下载成功后调用），并触发容量清理。
 pub fn save_song(id: i64, bytes: &[u8]) {
+    if !cache_enabled() {
+        return;
+    }
     let p = song_file(id);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -180,8 +199,11 @@ fn song_part_file(id: i64) -> PathBuf {
     dir.join(format!("{id}.part"))
 }
 
-/// 为流式下载创建临时文件（边下边写）。
+/// 为流式下载创建临时文件（边下边写）。缓存关闭时不落盘，仅内存流式播放。
 pub fn open_song_stream(id: i64) -> Option<std::fs::File> {
+    if !cache_enabled() {
+        return None;
+    }
     let p = song_part_file(id);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);

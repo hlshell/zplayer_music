@@ -1,11 +1,13 @@
 package com.zplayer.music;
 
 import android.app.NativeActivity;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -147,6 +149,20 @@ public class MainActivity extends NativeActivity {
             }
             if (veil != null && veil.getHolder().getSurface().isValid()) {
                 paintVeil(veil.getHolder());
+            }
+        });
+    }
+
+    /** 由 Rust 调用（JNI）：用系统浏览器打开链接（更新下载页 / MV 页面）。 */
+    @SuppressWarnings("unused")
+    public void openUrl(final String url) {
+        mainHandler.post(() -> {
+            try {
+                Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(it);
+            } catch (Throwable e) {
+                Log.w(TAG, "[ui] 打开链接失败: " + e);
             }
         });
     }

@@ -74,3 +74,30 @@ export global MobileTheme {
     // 当前歌曲封面主色（播放层环境背景）：由 Rust 侧取色后写入，取色失败时为主题色
     in-out property <color> cover-color: #6c5ce7;
 }
+
+// ============================================================================
+//  MobileSettings — 设置页新增项（自动播放 / 缓存开关与上限 / 关于与在线更新）
+//  放到 global 里由 Rust 直接读写，避免 AppWindow 三形态重复接线同名属性与回调。
+// ============================================================================
+export global MobileSettings {
+    // 关于：编译期版本号（Rust 启动时写入）
+    in-out property <string> app-version: "";
+    // 播放：启动自动播放 / 边听边缓存
+    in-out property <bool> auto-play: false;
+    in-out property <bool> cache-enabled: true;
+    // 缓存上限档位：0=不限 1=512MB 2=1GB 3=2GB
+    in-out property <int> cache-limit-index: 0;
+    // 关于：在线更新检查状态（发现新版本时 update-version 非空）
+    in-out property <bool> update-checking: false;
+    in-out property <string> update-version: "";
+    in-out property <string> update-notes: "";
+    in-out property <string> update-message: "";
+
+    callback auto-play-changed(bool);
+    callback cache-enabled-changed(bool);
+    callback cache-limit-changed(int);
+    callback check-update();
+    callback open-update-page();
+    // 分类浏览：MV 条目点击（移动端无视频解码栈，交给系统浏览器打开）
+    callback mv-opened(int);
+}

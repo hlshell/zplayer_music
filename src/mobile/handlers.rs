@@ -70,6 +70,72 @@ fn format_usage(bytes: u64) -> String {
     }
 }
 
+/// 设置页缓存上限档位 → MB（0=不限）
+fn cache_limit_mb(idx: i32) -> u64 {
+    match idx {
+        1 => 512,
+        2 => 1024,
+        3 => 2048,
+        _ => 0,
+    }
+}
+
+/// 配置中的上限 MB → 档位（用于设置页回显）
+fn cache_limit_index(mb: u64) -> i32 {
+    match mb {
+        0 => 0,
+        v if v <= 512 => 1,
+        v if v <= 1024 => 2,
+        _ => 3,
+    }
+}
+
+/// 语义化版本比较：latest 是否比 current 新（忽略 v 前缀与预发布后缀）。
+fn version_is_newer(latest: &str, current: &str) -> bool {
+    fn parse(v: &str) -> Vec<u64> {
+        v.trim_start_matches('v')
+            .split('.')
+            .map(|s| {
+                s.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+            })
+            .map(|s| s.parse().unwrap_or(0))
+            .collect()
+    }
+    parse(latest) > parse(current)
+}
+
+/// 更新下载页（Release 列表最新版）
+const UPDATE_PAGE: &str = "https://github.com/hlshell/zplayer_music/releases/latest";
+
+/// 查询 GitHub 最新 Release；有新版返回 (版本号, 更新说明)。
+/// 与桌面端 network::update 使用同一仓库与 UA，移动端仅做检查 + 引导下载（APK 安装由系统完成）。
+async fn check_update_latest() -> Result<Option<(String, String)>, String> {
+    let client = crate::network::proxy::build_client(Some(std::time::Duration::from_secs(15)));
+    let resp = client
+        .get("https://api.github.com/repos/hlshell/zplayer_music/releases/latest")
+        .header("User-Agent", concat!("zplayer-music/", env!("CARGO_PKG_VERSION")))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API 返回 {}", resp.status()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("解析响应失败: {e}"))?;
+    let tag = json.get("tag_name").and_then(|v| v.as_str()).unwrap_or_default();
+    if tag.is_empty() {
+        return Err("未找到最新版本".into());
+    }
+    let latest = tag.trim_start_matches('v').to_string();
+    if !version_is_newer(&latest, env!("CARGO_PKG_VERSION")) {
+        return Ok(None);
+    }
+    let notes = json.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    Ok(Some((latest, notes)))
+}
+
 /// 读取任意 Song 模型为 Vec（仅 UI 线程使用）。
 fn read_song_model(m: &slint::ModelRc<crate::Song>) -> Vec<crate::Song> {
     let mut out = Vec::with_capacity(m.row_count());
@@ -518,6 +584,7 @@ fn browse_cover_type(kind: i32) -> cache::CoverType {
     match kind {
         1 => cache::CoverType::Album,
         3 => cache::CoverType::Radio,
+        4 => cache::CoverType::Mv,
         _ => cache::CoverType::Playlist,
     }
 }
@@ -729,6 +796,46 @@ async fn fetch_browse(
                 radio_programs: program_map.into_iter().collect(),
             })
         }
+        4 => {
+            // MV：0=全部MV（mv_all），1=精选MV（mv_exclusive），响应字段一致
+            let v = if cat == "精选" {
+                crate::network::service::mv_exclusive(client, BROWSE_LIMIT, offset).await?
+            } else {
+                crate::network::service::mv_all(client, "", BROWSE_LIMIT, offset).await?
+            };
+            if !biz_ok(&v) {
+                return Err("MV 加载失败".into());
+            }
+            let arr = v.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let has_more = arr.len() >= BROWSE_LIMIT as usize;
+            let rows = arr.iter().filter_map(|m| {
+                let full = m.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
+                if full == 0 {
+                    return None;
+                }
+                let artist = m.get("artistName").and_then(|x| x.as_str()).unwrap_or("");
+                let plays = crate::core::song_util::fmt_plays_cat(
+                    m.get("playCount").and_then(|x| x.as_u64()).unwrap_or(0),
+                );
+                let sub = if artist.is_empty() {
+                    format!("{plays} 次播放")
+                } else {
+                    format!("{artist} · {plays} 次播放")
+                };
+                Some(BrowseRow {
+                    id: crate::core::ids::remember(4, full),
+                    name: m.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    sub,
+                    url: norm_cover(
+                        m.get("cover").and_then(|x| x.as_str())
+                            .or_else(|| m.get("imgurl").and_then(|x| x.as_str()))
+                            .unwrap_or(""),
+                    ),
+                    cat: String::new(),
+                })
+            }).collect();
+            Ok(BrowseData { rows, cats: Vec::new(), has_more, radio_programs: Vec::new() })
+        }
         _ => Err("未知浏览类型".into()),
     }
 }
@@ -748,6 +855,7 @@ fn load_browse(ctx: &Rc<MobileCtx>, append: bool) {
             .map(|s| s.to_string()).unwrap_or_else(|| "全部".to_string()),
         1 => ["ALL", "ZH", "EU", "KR", "JP"]
             .get(active.max(0) as usize).unwrap_or(&"ALL").to_string(),
+        4 => if active == 1 { "精选".to_string() } else { "全部".to_string() },
         _ => String::new(),
     };
     let seq = ctx.browse_seq.load(Ordering::SeqCst);
@@ -788,7 +896,7 @@ fn load_browse(ctx: &Rc<MobileCtx>, append: bool) {
 }
 
 fn open_browse(ctx: &Rc<MobileCtx>, kind: i32) {
-    if !(0..=3).contains(&kind) {
+    if !(0..=4).contains(&kind) {
         return;
     }
     let Some(ui) = ctx.ui.upgrade() else { return; };
@@ -796,7 +904,8 @@ fn open_browse(ctx: &Rc<MobileCtx>, kind: i32) {
         0 => ("歌单", &["全部", "华语", "流行", "摇滚", "民谣", "电子", "轻音乐", "ACG"]),
         1 => ("专辑", &["全部", "华语", "欧美", "韩国", "日本"]),
         2 => ("排行榜", &[]),
-        _ => ("电台", &[]),
+        3 => ("电台", &[]),
+        _ => ("MV", &["全部", "精选"]),
     };
     ctx.browse_seq.fetch_add(1, Ordering::SeqCst);
     ctx.browse_offset.store(0, Ordering::SeqCst);
@@ -811,7 +920,7 @@ fn open_browse(ctx: &Rc<MobileCtx>, kind: i32) {
     ui.set_browse_items(crate::load::model(Vec::new()));
     ui.set_browse_loading(true);
     ui.set_browse_error("".into());
-    ui.set_browse_has_more(kind < 2);
+    ui.set_browse_has_more(kind == 0 || kind == 1 || kind == 4);
     if kind == 3 {
         RADIO_ROWS.lock().unwrap().clear();
         RADIO_POOL.lock().unwrap().clear();
@@ -854,7 +963,8 @@ fn browse_cat_changed(ctx: &Rc<MobileCtx>, idx: i32) {
 fn browse_load_more(ctx: &Rc<MobileCtx>) {
     let Some(ui) = ctx.ui.upgrade() else { return; };
     let kind = ui.get_browse_kind();
-    if kind > 1 || ui.get_browse_loading() || !ui.get_browse_has_more() {
+    // 排行榜/电台一次性返回全部，不支持分页；歌单/专辑/MV 支持加载更多
+    if kind == 2 || kind == 3 || ui.get_browse_loading() || !ui.get_browse_has_more() {
         return;
     }
     ui.set_browse_loading(true);
@@ -1685,6 +1795,14 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
             .to_string()
             .into(),
     );
+    // 设置页新增项（global MobileSettings）：版本号 / 自动播放 / 缓存开关与上限
+    {
+        let g = ui.global::<crate::MobileSettings>();
+        g.set_app_version(env!("CARGO_PKG_VERSION").into());
+        g.set_auto_play(cfg.play.auto_play);
+        g.set_cache_enabled(cfg.cache.enabled);
+        g.set_cache_limit_index(cache_limit_index(cfg.app.cache_limit_mb));
+    }
     // 启动即填充最近播放（记录已在入口 load_recent 恢复）
     refresh_recent(ui);
     // 坏歌标记同步到 UI 全局（列表行显示「无法播放」）
@@ -1713,6 +1831,18 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
 
     // 启动恢复上次队列（有 queue.json 时首页加载不会覆盖队列与当前曲目）
     restore_queue(&ctx);
+
+    // 设置页「自动播放」：恢复队列后自动续播上次歌曲（坏歌不自动播放，避免启动即报错）
+    if ctx.cfg.borrow().play.auto_play {
+        if let Some(u) = ctx.ui.upgrade() {
+            let song = u.get_current_song();
+            if song.id != 0 && !is_bad_song(song.id) {
+                let start = u.get_progress();
+                log::info!("[mobile] 自动播放：恢复上次歌曲 id={}", song.id);
+                play_song_at(&ctx, song.id, start, false);
+            }
+        }
+    }
 
     // 「最近」页的我的最爱 Tab 首屏填充（收藏数据为本地快照，无网络阻塞）
     if let Some(u) = ctx.ui.upgrade() {
@@ -2073,6 +2203,85 @@ pub fn setup(ui: &crate::AppWindow, rt: tokio::runtime::Handle, client: Arc<Nete
         if let Some(u) = c.ui.upgrade() {
             u.set_cache_usage(format_usage(cache::total_usage()).into());
         }
+    });
+
+    // ---- 设置页新增项（global MobileSettings）：自动播放 / 缓存开关与上限 / 关于与更新 ----
+    let c = ctx.clone();
+    ui.global::<crate::MobileSettings>().on_auto_play_changed(move |on| {
+        c.cfg.borrow_mut().play.auto_play = on;
+        c.cfg.borrow().save();
+        log::info!("[mobile] 自动播放 → {on}");
+    });
+
+    let c = ctx.clone();
+    ui.global::<crate::MobileSettings>().on_cache_enabled_changed(move |on| {
+        c.cfg.borrow_mut().cache.enabled = on;
+        c.cfg.borrow().save();
+        cache::init(&c.cfg.borrow());
+        log::info!("[mobile] 边听边缓存 → {on}");
+    });
+
+    let c = ctx.clone();
+    ui.global::<crate::MobileSettings>().on_cache_limit_changed(move |idx| {
+        let mb = cache_limit_mb(idx);
+        c.cfg.borrow_mut().app.cache_limit_mb = mb;
+        c.cfg.borrow().save();
+        cache::init(&c.cfg.borrow());
+        cache::enforce_limit_now();
+        if let Some(u) = c.ui.upgrade() {
+            u.global::<crate::MobileSettings>().set_cache_limit_index(idx);
+            u.set_cache_usage(format_usage(cache::total_usage()).into());
+        }
+        log::info!("[mobile] 缓存上限 → {mb}MB");
+    });
+
+    // 检查更新：后台查询 GitHub Release，结果回投 UI 线程写入 MobileSettings
+    let c = ctx.clone();
+    ui.global::<crate::MobileSettings>().on_check_update(move || {
+        let Some(u) = c.ui.upgrade() else { return; };
+        {
+            let g = u.global::<crate::MobileSettings>();
+            if g.get_update_checking() {
+                return;
+            }
+            g.set_update_checking(true);
+            g.set_update_version("".into());
+            g.set_update_notes("".into());
+            g.set_update_message("".into());
+        }
+        let ui_w = c.ui.clone();
+        c.rt.spawn(async move {
+            let r = check_update_latest().await;
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(u) = ui_w.upgrade() else { return; };
+                let g = u.global::<crate::MobileSettings>();
+                g.set_update_checking(false);
+                match r {
+                    Ok(Some((ver, notes))) => {
+                        log::info!("[mobile] 发现新版本 v{ver}");
+                        g.set_update_version(ver.into());
+                        g.set_update_notes(notes.into());
+                    }
+                    Ok(None) => g.set_update_message("已是最新版本".into()),
+                    Err(e) => {
+                        log::warn!("[mobile] 检查更新失败: {e}");
+                        g.set_update_message(format!("检查更新失败：{e}").into());
+                    }
+                }
+            });
+        });
+    });
+
+    ui.global::<crate::MobileSettings>().on_open_update_page(move || {
+        crate::mobile::entry::open_url(UPDATE_PAGE);
+    });
+
+    // MV 分类条目：移动端未集成视频解码栈，交给系统浏览器打开网易云 MV 页
+    ui.global::<crate::MobileSettings>().on_mv_opened(move |id| {
+        let full = crate::core::ids::resolve(4, id) as u64;
+        let url = format!("https://music.163.com/mv/{full}");
+        log::info!("[mobile] 打开 MV: {url}");
+        crate::mobile::entry::open_url(&url);
     });
 
     // ---- 250ms 进度轮询 ----

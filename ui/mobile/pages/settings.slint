@@ -6,7 +6,7 @@
 // ============================================================================
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../../shared/theme.slint";
-import { MobileTheme } from "../theme.slint";
+import { MobileTheme, MobileSettings } from "../theme.slint";
 
 // 分组标题
 component GroupTitle inherits Text {
@@ -87,6 +87,54 @@ component Chip inherits Rectangle {
         height: 100%;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// 开关行：整行可点，右侧自绘胶囊开关（与深色模式开关同一视觉）
+component SwitchRow inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> checked: false;
+    callback changed(bool);
+
+    height: 44px;
+    background: transparent;
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+
+        Text {
+            text: root.text;
+            horizontal-stretch: 1;
+            color: MobileTheme.text;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 62px;
+            height: 36px;
+            border-radius: 18px;
+            background: root.checked ? MobileTheme.primary : MobileTheme.active;
+
+            Rectangle {
+                y: 3px;
+                x: root.checked ? parent.width - 33px : 3px;
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                background: #ffffff;
+
+                animate x { duration: 150ms; easing: ease-in-out; }
+            }
+        }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.changed(!root.checked); }
     }
 }
 
@@ -231,6 +279,23 @@ export component SettingsPage inherits Rectangle {
                             clicked => { root.source-changed(idx); }
                         }
                     }
+
+                    Rectangle {
+                        height: 1px;
+                        background: MobileTheme.divider;
+                    }
+
+                    // 启动时自动续播上次歌曲 / 边听边缓存（流式播放同时写盘）
+                    SwitchRow {
+                        text: "自动播放";
+                        checked: MobileSettings.auto-play;
+                        changed(v) => { MobileSettings.auto-play-changed(v); }
+                    }
+                    SwitchRow {
+                        text: "边听边缓存";
+                        checked: MobileSettings.cache-enabled;
+                        changed(v) => { MobileSettings.cache-enabled-changed(v); }
+                    }
                 }
             }
 
@@ -293,6 +358,29 @@ export component SettingsPage inherits Rectangle {
                     }
 
                     Rectangle {
+                        height: 1px;
+                        background: MobileTheme.divider;
+                    }
+
+                    Text {
+                        text: "缓存上限";
+                        color: MobileTheme.text-secondary;
+                        font-size: 12px;
+                    }
+
+                    HorizontalLayout {
+                        height: 44px;
+                        spacing: 6px;
+
+                        for name[idx] in ["不限", "512MB", "1GB", "2GB"] : Chip {
+                            horizontal-stretch: 1;
+                            text: name;
+                            selected: MobileSettings.cache-limit-index == idx;
+                            clicked => { MobileSettings.cache-limit-changed(idx); }
+                        }
+                    }
+
+                    Rectangle {
                         height: 44px;
                         border-radius: 12px;
                         border-width: 1px;
@@ -331,6 +419,121 @@ export component SettingsPage inherits Rectangle {
                             color: MobileTheme.text-secondary;
                             font-size: 11px;
                             overflow: elide;
+                        }
+                    }
+                }
+            }
+
+            // ===== 关于 / 在线更新 =====
+            GroupTitle { text: "关于"; }
+            GroupCard {
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        height: 32px;
+
+                        Text {
+                            text: "当前版本";
+                            horizontal-stretch: 1;
+                            color: MobileTheme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "v" + MobileSettings.app-version;
+                            color: MobileTheme.text-secondary;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 44px;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: MobileTheme.glass-stroke;
+                        background: check-ta.has-hover ? rgba(255, 255, 255, 0.20) : MobileTheme.glass-capsule;
+
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: MobileSettings.update-checking ? "正在检查更新…" : "检查更新";
+                            color: MobileTheme.text;
+                            font-size: 14px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        check-ta := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => { MobileSettings.check-update(); }
+                        }
+                    }
+
+                    if (MobileSettings.update-message != "") : Text {
+                        text: MobileSettings.update-message;
+                        color: MobileTheme.text-secondary;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    // 发现新版本：版本号 + 更新说明（可滚动，避免超长 Release 说明撑爆页面）
+                    if (MobileSettings.update-version != "") : VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "发现新版本 v" + MobileSettings.update-version;
+                            color: MobileTheme.primary;
+                            font-size: 14px;
+                            font-weight: 700;
+                        }
+
+                        if (MobileSettings.update-notes != "") : Rectangle {
+                            height: 120px;
+                            clip: true;
+
+                            Flickable {
+                                width: 100%;
+                                height: 100%;
+                                content-height: notes-txt.preferred-height;
+
+                                notes-txt := Text {
+                                    width: parent.width;
+                                    text: MobileSettings.update-notes;
+                                    color: MobileTheme.text-secondary;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 44px;
+                            border-radius: 22px;
+                            background: MobileTheme.primary;
+
+                            Text {
+                                width: 100%;
+                                height: 100%;
+                                text: "前往下载";
+                                color: #ffffff;
+                                font-size: 14px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+                                clicked => { MobileSettings.open-update-page(); }
+                            }
                         }
                     }
                 }

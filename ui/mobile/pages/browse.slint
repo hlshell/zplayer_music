@@ -176,7 +176,7 @@ export component BrowsePage inherits Rectangle {
     property <length> card-w: (root.width - MobileTheme.safe-left - MobileTheme.safe-right - 32px - root.gap * (root.cols - 1)) / root.cols;
     property <length> card-h: root.card-w + 46px;
     property <length> row-h: root.card-w + 60px;
-    property <string> unit: root.kind == 1 ? "张专辑" : (root.kind == 2 ? "个榜单" : (root.kind == 3 ? "个电台" : "个歌单"));
+    property <string> unit: root.kind == 1 ? "张专辑" : (root.kind == 2 ? "个榜单" : (root.kind == 3 ? "个电台" : (root.kind == 4 ? "个 MV" : "个歌单")));
     property <string> subtitle: root.items.length > 0
         ? ("共 " + root.items.length + (root.has-more ? "+ " : " ") + root.unit)
         : "";

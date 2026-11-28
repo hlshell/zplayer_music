@@ -161,6 +161,86 @@ fn android_set_window_background(argb: u32) {
     android_call_activity("setThemeBackground", "(I)V", &[JValue::Int(argb as i32)]);
 }
 
+/// 用系统浏览器打开链接（Android 走 JNI Intent；桌面预览走系统命令）。
+/// 用于「检查更新 → 前往下载」与 MV 分类条目（移动端无视频解码栈）。
+pub fn open_url(url: &str) {
+    #[cfg(target_os = "android")]
+    android_open_url(url);
+    #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
+    {
+        let bin = if cfg!(windows) {
+            "cmd"
+        } else if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        let mut cmd = std::process::Command::new(bin);
+        if cfg!(windows) {
+            cmd.args(["/C", "start", "", url]);
+        } else {
+            cmd.arg(url);
+        }
+        if let Err(e) = cmd.spawn() {
+            log::warn!("[ui] 打开链接失败: {e}");
+        }
+    }
+    #[cfg(target_os = "ios")]
+    {
+        log::warn!("[ui] iOS 尚未实现打开链接: {url}");
+    }
+}
+
+/// Android：调用 MainActivity.openUrl(String)，由 Java 侧以 ACTION_VIEW 拉起浏览器。
+#[cfg(target_os = "android")]
+fn android_open_url(url: &str) {
+    use jni::objects::{JObject, JValue};
+    let ptr = ACTIVITY_PTR.load(std::sync::atomic::Ordering::Acquire);
+    if ptr.is_null() {
+        log::warn!("[ui] Activity 指针为空，无法打开链接");
+        return;
+    }
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(vm) => vm,
+        Err(e) => {
+            log::warn!("[ui] JNI JavaVM 获取失败: {e}");
+            return;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(env) => env,
+        Err(e) => {
+            log::warn!("[ui] JNI attach 失败: {e}");
+            return;
+        }
+    };
+    let jurl = match env.new_string(url) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[ui] 创建 jstring 失败: {e}");
+            return;
+        }
+    };
+    let jurl_obj = JObject::from(jurl);
+    let act = unsafe { JObject::from_raw(ptr.cast()) };
+    let r = env.call_method(
+        &act,
+        "openUrl",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&jurl_obj)],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        log::warn!("[ui] openUrl 抛异常");
+        return;
+    }
+    if let Err(e) = r {
+        log::warn!("[ui] openUrl 调用失败: {e}");
+    }
+}
+
 /// 创建窗口组件（UI 类型由 lib 的 include_modules 生成）。
 fn new_ui() -> crate::AppWindow {
     crate::AppWindow::new().unwrap_or_else(|e| {

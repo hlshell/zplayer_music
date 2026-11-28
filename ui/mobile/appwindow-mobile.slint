@@ -9,9 +9,11 @@
 // default-font-family 使用；桌面预览同样可用（不依赖本机是否安装该字体）。
 import "../../src/fonts/simhei.ttf";
 import { Theme } from "../shared/theme.slint";
-import { MobileTheme } from "theme.slint";
+import { MobileTheme, MobileSettings } from "theme.slint";
 // 平台/封面取色 token：Rust 侧需 global::<crate::MobileTheme>() 写入，须在编译根显式 re-export
 export { MobileTheme } from "theme.slint";
+// 设置页新增项（自动播放/缓存/关于与更新）与 MV 打开动作：global 直连 Rust，避免三形态重复接线
+export { MobileSettings } from "theme.slint";
 import { NavBottomBar, NavRail, NavSidebar } from "components/nav.slint";
 import { MiniPlayer } from "components/mini-player.slint";
 import { SongSheet } from "components/song-sheet.slint";
@@ -208,6 +210,9 @@ component ContentArea inherits Rectangle {
                 root.album-opened(id);
             } else if (root.browse-kind == 3) {
                 root.radio-opened(id);
+            } else if (root.browse-kind == 4) {
+                // 移动端未集成视频解码栈：MV 条目交给系统浏览器播放
+                MobileSettings.mv-opened(id);
             } else {
                 root.playlist-opened(id);
             }

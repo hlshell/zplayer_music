@@ -158,11 +158,11 @@ export component HomePage inherits Rectangle {
                 }
             }
 
-            // ===== 圆形快捷入口（4 列绝对等宽：中心固定在 12.5/37.5/62.5/87.5%）=====
+            // ===== 圆形快捷入口（5 列绝对等宽：中心固定在 10/30/50/70/90%）=====
             Rectangle {
                 height: 84px;
                 background: transparent;
-                property <length> cw: self.width / 4;
+                property <length> cw: self.width / 5;
 
                 QuickEntry {
                     x: 0;
@@ -195,6 +195,14 @@ export component HomePage inherits Rectangle {
                     icon: @image-url("../../assets/icons/radio-gray.svg");
                     label: "电台";
                     clicked => { root.browse-opened(3); }
+                }
+                QuickEntry {
+                    x: parent.cw * 4;
+                    width: parent.cw;
+                    height: parent.height;
+                    icon: @image-url("../../assets/icons/mv-gray.svg");
+                    label: "MV";
+                    clicked => { root.browse-opened(4); }
                 }
             }
 
