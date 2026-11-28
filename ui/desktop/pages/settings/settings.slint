@@ -35,9 +35,9 @@ export component SettingsPage inherits Rectangle {
         Language.sc-volume-up, Language.sc-volume-down, Language.sc-mute,
         Language.sc-home, Language.sc-settings, Language.sc-hide,
     ];
-    // web 下隐藏"网络设置/系统管理"两个整 tab（其下全部为桌面专属项）：
+    // web 下隐藏"播放/网络设置/系统管理"三个整 tab（其下全部为桌面专属项，播放 tab 无剩余可见项）：
     // tab-map 把可见索引映射回桌面索引（可见序 → 真实序），TabBar items 同步过滤。
-    property <[int]> tab-map: root.is-web ? [0, 1, 2, 5, 6] : [0, 1, 2, 3, 4, 5, 6];
+    property <[int]> tab-map: root.is-web ? [0, 2, 5, 6] : [0, 1, 2, 3, 4, 5, 6];
     property <int> real-tab: root.tab-map[root.tab-index];
     // 基础
     in-out property <bool> dark;
@@ -60,6 +60,14 @@ export component SettingsPage inherits Rectangle {
     in-out property <int> theme-color-index;
     in-out property <bool> lyrics-style;
     in-out property <int> close-behavior-index;
+    // 桌面歌词悬浮窗（仅桌面端）
+    in-out property <bool> desktop-lyrics: false;
+    in-out property <bool> desktop-lyrics-lock: false;
+    // 配色预设：已唱 / 未唱（kind: 0=已唱 1=未唱）
+    in-out property <int> desktop-lyrics-sung: 0;
+    in-out property <int> desktop-lyrics-unsung: 0;
+    in-out property <bool> desktop-lyrics-outline: true;
+    callback lyrics-color-changed(int, int);
     // 网络
     in-out property <int> threads-index;
     in-out property <int> buffer-index;
@@ -159,9 +167,9 @@ export component SettingsPage inherits Rectangle {
             }
             HorizontalLayout { padding-left: 20px; padding-right: 20px; cross-axis-alignment: center;
                 TabBar {
-                    // web：过滤掉全桌面专属的网络设置/系统管理（索引经 tab-map 重映射）
+                    // web：过滤掉全桌面专属的播放/网络设置/系统管理（索引经 tab-map 重映射）
                     items: root.is-web
-                        ? [Language.tab-basic, Language.tab-play, Language.tab-app, Language.tab-about, Language.tab-donate]
+                        ? [Language.tab-basic, Language.tab-app, Language.tab-about, Language.tab-donate]
                         : [Language.tab-basic, Language.tab-play, Language.tab-app, Language.tab-network, Language.tab-system, Language.tab-about, Language.tab-donate];
                     current <=> root.tab-index;
                     bar-height: 34px;
@@ -210,8 +218,15 @@ export component SettingsPage inherits Rectangle {
                             is-web: root.is-web;
                             theme-color-index <=> root.theme-color-index;
                             lyrics-style <=> root.lyrics-style;
+                            desktop-lyrics <=> root.desktop-lyrics;
+                            desktop-lyrics-lock <=> root.desktop-lyrics-lock;
+                            desktop-lyrics-sung <=> root.desktop-lyrics-sung;
+                            desktop-lyrics-unsung <=> root.desktop-lyrics-unsung;
+                            desktop-lyrics-outline <=> root.desktop-lyrics-outline;
+                            lyrics-color-changed(kind, idx) => { root.lyrics-color-changed(kind, idx); }
                             close-behavior-index <=> root.close-behavior-index;
                             open-select(id, title, opts, idx) => { root.open-select(id, title, opts, idx); }
+                            toggle-changed(id, c) => { root.toggle-changed(id, c); }
                             clicked(id) => {
                                 if (id == 42) { root.active-shortcut = true; }
                                 else { root.clicked(id); }

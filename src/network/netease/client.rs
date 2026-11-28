@@ -106,9 +106,9 @@ impl NeteaseClient {
                 }
                 Err(e) => {
                     if attempt == 1 {
-                        return Err(format!("request failed: {}", e));
+                        return Err(format!("request failed: {:?}", e));
                     }
-                    log::warn!("weapi POST {} 发送失败，重试一次: {}", url, e);
+                    log::warn!("weapi POST {} 发送失败，重试一次: {:?}", url, e);
                 }
             }
         }

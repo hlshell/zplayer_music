@@ -7,6 +7,7 @@ import { Song } from "../../shared/models.slint";
 import { ScrollView } from "std-widgets.slint";
 import { CustomScrollBar } from "scroll.slint";
 import { MarqueeText } from "marquee.slint";
+import { SongMenuState } from "song-menu.slint";
 import { Theme } from "../../shared/theme.slint";
 import { Language } from "../../shared/language.slint";
 
@@ -161,6 +162,24 @@ export component PlaylistPanel inherits Rectangle {
                     row-ta := TouchArea {
                         clicked => { root.play-song(song.id); }
                         mouse-cursor: pointer;
+                        // 右键：队列行额外提供「从播放列表移除」
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                                SongMenuState.song-id = song.id;
+                                SongMenuState.song-name = song.name;
+                                SongMenuState.song-artist = song.artist;
+                                SongMenuState.song-cover = song.cover;
+                                SongMenuState.liked = song.liked;
+                                SongMenuState.show-at(
+                                    row-ta.absolute-position.x + row-ta.mouse-x,
+                                    row-ta.absolute-position.y + row-ta.mouse-y,
+                                    true
+                                );
+                                EventResult.accept
+                            } else {
+                                EventResult.reject
+                            }
+                        }
                     }
                     // 收藏爱心（tabler heart）：已收藏红心、未收藏灰心，默认常显；
                 // 位于移除按钮左侧，点击切换收藏（不换歌），与迷你抽屉共用队列模型刷新。

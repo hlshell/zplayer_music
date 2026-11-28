@@ -23,8 +23,19 @@ export global Language {
     in-out property <string> tray-play: "播放";
     in-out property <string> tray-pause: "暂停";
     in-out property <string> tray-next: "下一首";
+    in-out property <string> tray-dl-lock: "锁定桌面歌词";
+    in-out property <string> tray-dl-unlock: "解锁桌面歌词";
+    in-out property <string> tray-dl-show: "显示桌面歌词";
+    in-out property <string> tray-dl-hide: "隐藏桌面歌词";
     in-out property <string> tray-language: "语言";
     in-out property <string> tray-quit: "退出";
+
+    // ---- 歌曲列表右键菜单（song-menu.slint）----
+    in-out property <string> songmenu-play: "播放";
+    in-out property <string> songmenu-play-next: "下一首播放";
+    in-out property <string> songmenu-favorite: "收藏";
+    in-out property <string> songmenu-unfavorite: "取消收藏";
+    in-out property <string> songmenu-remove: "从播放列表移除";
 
     // ---- 侧边栏导航 ----
     in-out property <string> nav-home: "首页";
@@ -101,6 +112,14 @@ export global Language {
     in-out property <string> app-lyrics-desc: "选择歌词与封面的排布方式";
     in-out property <string> app-lyrics-cover: "上封面模式";
     in-out property <string> app-lyrics-side: "左右模式";
+    in-out property <string> app-desktop-lyrics: "桌面歌词";
+    in-out property <string> app-desktop-lyrics-desc: "在桌面显示独立置顶的歌词悬浮窗";
+    in-out property <string> app-desktop-lyrics-lock: "锁定桌面歌词";
+    in-out property <string> app-desktop-lyrics-lock-desc: "锁定后鼠标点击可穿透悬浮窗（关闭此开关解锁）";
+    in-out property <string> app-desktop-lyrics-sung: "已唱颜色";
+    in-out property <string> app-desktop-lyrics-unsung: "未唱颜色";
+    in-out property <string> app-desktop-lyrics-outline: "歌词描边";
+    in-out property <string> app-desktop-lyrics-outline-desc: "为已唱和未唱歌词添加黑色描边，复杂背景下更清晰";
     in-out property <string> app-close-behavior: "关闭行为";
     in-out property <string> app-close-desc: "关闭窗口时执行的操作";
     in-out property <string> app-close-ask: "每次询问";

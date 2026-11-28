@@ -1,0 +1,495 @@
+// ============================================================================
+//  browse.slint — 移动端歌单 / 专辑 / 排行榜 / 电台分类浏览页
+//  歌单/专辑：封面网格；排行榜/电台：信息列表（含排名与简介）。
+//  结构：渐变头部 + 分类胶囊 + 独立滚动内容区（骨架屏 / 空态 / 错误重试 / 加载更多）。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { MobileTheme } from "../theme.slint";
+import { BrowseItem } from "../../shared/models.slint";
+
+// 封面占位：无图时显示主题渐变，避免空洞
+component CoverThumb inherits Rectangle {
+    in property <image> cover;
+    border-radius: 14px;
+    clip: true;
+    background: @linear-gradient(135deg, MobileTheme.primary.with-alpha(0.55) 0%, MobileTheme.secondary.with-alpha(0.45) 100%);
+
+    if (root.cover.width > 0) : Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+    }
+}
+
+// 网格卡片：正方形封面 + 名称 + 副标题
+component BrowseCard inherits Rectangle {
+    in property <BrowseItem> item;
+    callback opened(int);
+
+    property <int> pressed-id: 0;
+    property <bool> pressed: false;
+
+    cover := CoverThumb {
+        y: 0;
+        width: parent.width;
+        height: self.width;
+        cover: root.item.cover;
+    }
+
+    Text {
+        x: 2px;
+        y: cover.height + 8px;
+        width: parent.width - 4px;
+        text: root.item.name;
+        color: MobileTheme.text;
+        font-size: 13px;
+        font-weight: 600;
+        overflow: elide;
+    }
+    Text {
+        x: 2px;
+        y: cover.height + 29px;
+        width: parent.width - 4px;
+        height: 16px;
+        text: root.item.sub;
+        color: MobileTheme.text-faint;
+        font-size: 11px;
+        overflow: elide;
+    }
+
+    // 按压高亮（整卡覆盖，不改变布局）
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 14px;
+        background: MobileTheme.primary.with-alpha(0.10);
+        visible: root.pressed;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pressed-id = root.item.id;
+                root.pressed = true;
+            } else if (e.kind == PointerEventKind.up) {
+                root.pressed = false;
+            }
+            EventResult.reject
+        }
+        clicked => { root.pressed = false; root.opened(root.pressed-id); }
+    }
+}
+
+// 列表行：排名（可选）+ 方形封面 + 名称/副标题
+component BrowseRow inherits Rectangle {
+    in property <BrowseItem> item;
+    in property <int> rank: -1;
+    callback opened(int);
+
+    property <int> pressed-id: 0;
+
+    height: 76px;
+    border-radius: 14px;
+    background: row-ta.has-hover ? MobileTheme.hover : transparent;
+
+    if (root.rank >= 0) : Text {
+        x: 4px;
+        width: 22px;
+        height: 100%;
+        text: root.rank + 1;
+        color: root.rank < 3 ? MobileTheme.primary : MobileTheme.text-faint;
+        font-size: 15px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Rectangle {
+        x: root.rank >= 0 ? 30px : 2px;
+        y: (parent.height - self.height) / 2;
+        width: 60px;
+        height: 60px;
+        border-radius: 12px;
+        clip: true;
+        background: @linear-gradient(135deg, MobileTheme.primary.with-alpha(0.55) 0%, MobileTheme.secondary.with-alpha(0.45) 100%);
+
+        if (root.item.cover.width > 0) : Image {
+            width: 100%;
+            height: 100%;
+            source: root.item.cover;
+        }
+    }
+
+    Text {
+        x: (root.rank >= 0 ? 30px : 2px) + 72px;
+        y: 16px;
+        width: parent.width - self.x - 10px;
+        text: root.item.name;
+        color: MobileTheme.text;
+        font-size: 14px;
+        font-weight: 600;
+        overflow: elide;
+    }
+    Text {
+        x: (root.rank >= 0 ? 30px : 2px) + 72px;
+        y: 40px;
+        width: parent.width - self.x - 10px;
+        height: 16px;
+        text: root.item.sub;
+        color: MobileTheme.text-faint;
+        font-size: 11px;
+        overflow: elide;
+    }
+
+    row-ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pressed-id = root.item.id;
+            }
+            EventResult.reject
+        }
+        clicked => { root.opened(root.pressed-id); }
+    }
+}
+
+export component BrowsePage inherits Rectangle {
+    in property <int> kind: 0;
+    in property <string> title: "";
+    in property <[BrowseItem]> items;
+    in property <[string]> cats;
+    in property <int> active-cat: 0;
+    in property <bool> loading: false;
+    in property <string> error: "";
+    in property <bool> has-more: false;
+    callback back();
+    callback cat-changed(int);
+    callback item-opened(int);
+    callback load-more();
+    callback retry();
+
+    // 排行榜/电台用列表形态，信息密度更合适
+    property <bool> list-mode: root.kind >= 2;
+    property <int> cols: Math.max(2, Math.floor((root.width - 32px) / 180px));
+    property <length> gap: 14px;
+    property <length> card-w: (root.width - MobileTheme.safe-left - MobileTheme.safe-right - 32px - root.gap * (root.cols - 1)) / root.cols;
+    property <length> card-h: root.card-w + 46px;
+    property <length> row-h: root.card-w + 60px;
+    property <string> unit: root.kind == 1 ? "张专辑" : (root.kind == 2 ? "个榜单" : (root.kind == 3 ? "个电台" : "个歌单"));
+    property <string> subtitle: root.items.length > 0
+        ? ("共 " + root.items.length + (root.has-more ? "+ " : " ") + root.unit)
+        : "";
+
+    // 骨架屏呼吸动画：仅加载中使用
+    property <float> pulse: 0.0;
+    animate pulse { duration: 900ms; easing: ease-in-out; }
+    Timer {
+        interval: 900ms;
+        running: root.loading;
+        triggered => { root.pulse = root.pulse > 0.5 ? 0.0 : 1.0; }
+    }
+
+    // 透明根背景：让 AppWindow 的氛围渐层透出（此前用不透明 page-bg 会把极光完全盖住）
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 6px;
+        padding-top: MobileTheme.safe-top + 6px;
+        padding-left: MobileTheme.safe-left + 16px;
+        padding-right: MobileTheme.safe-right + 16px;
+
+        // ---- 头部：返回 + 标题 + 数量 ----
+        HorizontalLayout {
+            height: 52px;
+            spacing: 12px;
+            cross-axis-alignment: center;
+
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: back-ta.has-hover ? MobileTheme.primary.with-alpha(0.18) : MobileTheme.glass-capsule;
+                border-width: 1px;
+                border-color: MobileTheme.glass-stroke;
+
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 20px;
+                    height: 20px;
+                    source: @image-url("../../assets/icons/arrow-back-up.svg");
+                    colorize: MobileTheme.text;
+                }
+                back-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.back(); }
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+
+                Text {
+                    text: root.title;
+                    color: MobileTheme.text;
+                    font-size: 23px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                if (root.subtitle != "") : Text {
+                    text: root.subtitle;
+                    color: MobileTheme.text-faint;
+                    font-size: 11px;
+                }
+            }
+        }
+
+        // ---- 分类胶囊：宽度随文字，选中填充主题色 ----
+        if (root.cats.length > 0) : ScrollView {
+            height: 42px;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+
+            HorizontalLayout {
+                height: 38px;
+                spacing: 8px;
+                padding-right: 8px;
+
+                for cat[i] in root.cats : Rectangle {
+                    width: chip-label.preferred-width + 30px;
+                    height: 34px;
+                    border-radius: 17px;
+                    background: root.active-cat == i
+                        ? MobileTheme.primary
+                        : MobileTheme.glass-capsule;
+                    border-width: 1px;
+                    border-color: root.active-cat == i
+                        ? MobileTheme.primary.with-alpha(0.85)
+                        : MobileTheme.glass-stroke;
+
+                    chip-label := Text {
+                        x: 15px;
+                        y: (parent.height - self.height) / 2;
+                        text: cat;
+                        color: root.active-cat == i ? #ffffff : MobileTheme.text-secondary;
+                        font-size: 12px;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.cat-changed(i); }
+                    }
+                }
+            }
+        }
+
+        // ---- 滚动内容区 ----
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 0px;
+            clip: true;
+
+            ScrollView {
+                width: 100%;
+                height: 100%;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    width: 100%;
+                    spacing: 8px;
+                    padding-top: 2px;
+                    padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                    // 空态 / 错误重试
+                    if (!root.loading && root.items.length == 0) : Rectangle {
+                        height: 300px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 14px;
+
+                            Image {
+                                width: 44px;
+                                height: 44px;
+                                source: @image-url("../../assets/icons/playlist-gray.svg");
+                                colorize: MobileTheme.text-faint.with-alpha(0.7);
+                            }
+                            Text {
+                                text: root.error != "" ? root.error : "这里还没有内容";
+                                color: MobileTheme.text-secondary;
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                            }
+                            if (root.error != "") : Rectangle {
+                                width: 116px;
+                                height: 38px;
+                                border-radius: 19px;
+                                background: MobileTheme.primary.with-alpha(retry-ta.has-hover ? 0.9 : 0.78);
+
+                                Text {
+                                    width: 100%;
+                                    height: 100%;
+                                    text: "重新加载";
+                                    color: #ffffff;
+                                    font-size: 13px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                retry-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.retry(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // 骨架屏：列表形态
+                    if (root.loading && root.items.length == 0 && root.list-mode) : VerticalLayout {
+                        for i in 5 : Rectangle {
+                            height: 76px;
+
+                            Rectangle {
+                                x: 2px;
+                                y: 8px;
+                                width: 60px;
+                                height: 60px;
+                                border-radius: 12px;
+                                background: MobileTheme.text.with-alpha(0.06 + root.pulse * 0.05);
+                            }
+                            Rectangle {
+                                x: 74px;
+                                y: 20px;
+                                width: 52%;
+                                height: 14px;
+                                border-radius: 7px;
+                                background: MobileTheme.text.with-alpha(0.06 + root.pulse * 0.05);
+                            }
+                            Rectangle {
+                                x: 74px;
+                                y: 44px;
+                                width: 32%;
+                                height: 11px;
+                                border-radius: 6px;
+                                background: MobileTheme.text.with-alpha(0.05 + root.pulse * 0.05);
+                            }
+                        }
+                    }
+
+                    // 骨架屏：网格形态
+                    if (root.loading && root.items.length == 0 && !root.list-mode) : Rectangle {
+                        height: Math.ceil(6 / root.cols) * root.row-h;
+
+                        for i in 6 : Rectangle {
+                            x: Math.mod(i, root.cols) * (root.card-w + root.gap);
+                            y: Math.floor(i / root.cols) * root.row-h;
+                            width: root.card-w;
+                            height: root.card-h;
+
+                            Rectangle {
+                                width: 100%;
+                                height: root.card-w;
+                                border-radius: 14px;
+                                background: MobileTheme.text.with-alpha(0.06 + root.pulse * 0.05);
+                            }
+                            Rectangle {
+                                y: root.card-w + 10px;
+                                width: 72%;
+                                height: 12px;
+                                border-radius: 6px;
+                                background: MobileTheme.text.with-alpha(0.05 + root.pulse * 0.05);
+                            }
+                            Rectangle {
+                                y: root.card-w + 28px;
+                                width: 44%;
+                                height: 10px;
+                                border-radius: 5px;
+                                background: MobileTheme.text.with-alpha(0.04 + root.pulse * 0.05);
+                            }
+                        }
+                    }
+
+                    // 网格内容
+                    if (root.items.length > 0 && !root.list-mode) : Rectangle {
+                        height: Math.ceil(root.items.length * 1.0 / root.cols) * root.row-h - 14px;
+
+                        for item[i] in root.items : BrowseCard {
+                            x: Math.mod(i, root.cols) * (root.card-w + root.gap);
+                            y: Math.floor(i / root.cols) * root.row-h;
+                            width: root.card-w;
+                            height: root.card-h;
+                            item: item;
+                            opened(id) => { root.item-opened(id); }
+                        }
+                    }
+
+                    // 列表内容
+                    if (root.items.length > 0 && root.list-mode) : VerticalLayout {
+                        for item[i] in root.items : BrowseRow {
+                            item: item;
+                            rank: root.kind == 2 ? i : -1;
+                            opened(id) => { root.item-opened(id); }
+                        }
+                    }
+
+                    // 追页加载态
+                    if (root.loading && root.items.length > 0) : Text {
+                        height: 34px;
+                        text: "加载中…";
+                        color: MobileTheme.text-faint;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if (root.error != "" && root.items.length > 0) : Text {
+                        height: 30px;
+                        text: root.error;
+                        color: MobileTheme.text-secondary;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    // 加载更多
+                    if (root.has-more && !root.loading && root.items.length > 0) : Rectangle {
+                        height: 44px;
+                        border-radius: 22px;
+                        background: more-ta.has-hover
+                            ? MobileTheme.primary.with-alpha(0.18)
+                            : MobileTheme.glass-capsule;
+                        border-width: 1px;
+                        border-color: MobileTheme.glass-stroke;
+
+                        HorizontalLayout {
+                            width: 100%;
+                            height: 100%;
+                            alignment: center;
+                            spacing: 6px;
+
+                            Image {
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../assets/icons/arrow-big-down-lines.svg");
+                                colorize: MobileTheme.text-secondary;
+                            }
+                            Text {
+                                text: "加载更多";
+                                color: MobileTheme.text;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+                        more-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.load-more(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -3,12 +3,52 @@ name = "zplayer-music"
 version = "0.2.7"
 edition = "2024"
 description = "ZPlayer Music 播放器的 Slint demo（紫色主题，对齐现有前端；无边框自定义标题栏 + 启动动画 + 真实数据对接）"
-# 进程名显示说明：任务管理器名称列 = exe 文件名。cargo 的 bin 名会同时用作 crate 名
-# （禁止空格，"ZPlayer Music" 编译报 invalid character），因此 bin 保持默认 zplayer-music，
-# 由 build.ps1 在构建后把产物复制为 "ZPlayer Music.exe"（文件带 .exe，任务管理器即显示该名）。
+# 进程名显示说明：任务管理器名称列取 exe 内嵌 VERSIONINFO 的 FileDescription（见 build.rs），
+# 因此 bin 名保持 zplayer-music 即可（cargo bin 名同时用作 crate 名，禁止空格）。
+# 若任务管理器仍显示 zplayer-music.exe，多半是 Windows 首次运行缓存的旧友好名
+# （HKCU\...\Shell\MuiCache 下 <exe路径>.FriendlyAppName），删除该值后重新启动即可。
 [package.metadata.winres]
 FileDescription = "ZPlayer Music"
 ProductName = "ZPlayer Music"
+
+# cargo-apk 实际打包配置：复用 Android 资源目录，提供桌面同款 Logo、启动背景与应用名。
+[package.metadata.android]
+resources = "android/app/src/main/res"
+apk_name = "zplayer-music"
+# 应用包名（applicationId）：默认 rust.zplayer_music，改为正式包名
+package = "com.zplayer.music"
+
+# targetSdk 34：启用 Android 12+ 系统 SplashScreen（系统启动窗口会保持到应用首帧，
+# 避免旧 preview window 在 SurfaceView 首帧前被移除导致的纯黑帧）。
+# targetSdk 31+ 的 exported 由 cargo-apk 自动补全，无需手写。
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "ZPlayer Music"
+icon = "@mipmap/ic_launcher"
+theme = "@style/AppTheme"
+
+# 主 Activity（NativeActivity）属性：
+# launch_mode=singleTask：从桌面图标再次进入时复用现有实例，不重新冷启动（否则会闪黑屏且数据重新拉取）
+# config_changes：覆盖深/浅色、密度、分屏尺寸等变化，避免 Activity 被系统重建
+[package.metadata.android.application.activity]
+launch_mode = "singleTask"
+always_retain_task_state = true
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode|density"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+# release 包签名：cargo-apk 要求 release 构建必须显式配置 keystore。
+# 复用本机 debug keystore（公开默认凭据 android/androiddebugkey），
+# 与 debug 包同签名可直接覆盖安装；正式发布时替换为私有 release keystore。
+[package.metadata.android.signing.release]
+path = 'C:\Users\93453\.android\debug.keystore'
+keystore_password = "android"
+key_alias = "androiddebugkey"
+key_password = "android"
 
 [lib]
 name = "zplayer_music"
@@ -74,7 +114,10 @@ toml = "0.8"
 # shellapi: DragAcceptFiles/DragQueryFile/DragFinish（文件拖拽）
 # commctrl: SetWindowSubclass/DefSubclassProc/RemoveWindowSubclass（窗口子类化）
 # winuser: WM_DROPFILES 等消息常量
-winapi = { version = "0.3.9", features = ["winbase", "shellapi", "commctrl", "winuser", "windef"], optional = true }
+# winuser: LoadImageW/SendMessageW/WM_SETICON（窗口图标从 exe 内嵌 ICO 取帧）
+# libloaderapi: GetModuleHandleW（定位内嵌资源所在模块）
+# processthreadsapi/timeapi：音频抗抢占（进程/线程优先级、timeBeginPeriod）
+winapi = { version = "0.3.9", features = ["winbase", "shellapi", "commctrl", "winuser", "windef", "libloaderapi", "processthreadsapi", "timeapi"], optional = true }
 # 内嵌 QuickJS + UNM（desktop feature 专属；web 不解析，避免其 reqwest ^0.11
 # 触发 web-sys/ReadableStream 与 web 端 Cargo.lock 冲突）
 rquickjs = { version = "0.13", optional = true }
@@ -110,10 +153,20 @@ semver = { version = "1", optional = true }
 #   to build with the winit backend")。Android 不需要 winit（src 里 winit_030 的用法
 #   全在 not(feature = "mobile") 下），故 Android 不启用该 feature。
 [target.'cfg(not(target_os = "android"))'.dependencies]
-slint = { version = "1.18.1", features = ["unstable-winit-030"] }
+# 1.19 的 backdrop-blur 在 Skia 与 FemtoVG 下均生效（见 1.19 发布说明）。桌面用默认
+# FemtoVG 即可预览液态玻璃模糊，无需编译 Skia（Windows 上 skia-bindings 源码构建会触发
+# symlink 特权问题）。
+slint = { version = "1.19", features = ["unstable-winit-030"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-slint = { version = "1.18.1" }
+# 用默认 FemtoVG：支持 backdrop-blur 且比 Skia 轻量，避免 Windows 交叉编译时的
+# skia-bindings symlink 问题。首帧黑屏由自定义 MainActivity 的“启动屏保持到首帧”解决。
+slint = { version = "1.19" }
+# 移动端日志输出到 logcat（桌面用 simplelog；此前移动端无 logger，log 宏全是 no-op）
+android_logger = "0.14"
+# JNI：从 Rust 回调自定义 MainActivity（首帧已渲染 / 同步主题底色）
+jni = "0.21"
+ndk-context = "0.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # 桌面/mobile 共享的网络与异步运行时（web 不拉）
@@ -182,7 +235,7 @@ tray-icon = "0.26"
 tauri-winrt-notification = "0.8"
 
 [build-dependencies]
-slint-build = "1.18.1"
+slint-build = "1.19"
 # Windows 资源（app.ico 图标 + 版本信息）嵌入 exe 二进制
 winres = "0.1"
 [profile.release]

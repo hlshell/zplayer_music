@@ -145,8 +145,18 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_tray_play(g("tray-play"));
     l.set_tray_pause(g("tray-pause"));
     l.set_tray_next(g("tray-next"));
+    l.set_tray_dl_lock(g("tray-dl-lock"));
+    l.set_tray_dl_unlock(g("tray-dl-unlock"));
+    l.set_tray_dl_show(g("tray-dl-show"));
+    l.set_tray_dl_hide(g("tray-dl-hide"));
     l.set_tray_language(g("tray-language"));
     l.set_tray_quit(g("tray-quit"));
+    // 歌曲列表右键菜单
+    l.set_songmenu_play(g("songmenu-play"));
+    l.set_songmenu_play_next(g("songmenu-play-next"));
+    l.set_songmenu_favorite(g("songmenu-favorite"));
+    l.set_songmenu_unfavorite(g("songmenu-unfavorite"));
+    l.set_songmenu_remove(g("songmenu-remove"));
     // 导航
     l.set_nav_home(g("nav-home"));
     l.set_nav_search(g("nav-search"));
@@ -218,6 +228,14 @@ fn apply(ui: &crate::AppWindow, map: &HashMap<String, String>) {
     l.set_app_lyrics_desc(g("app-lyrics-desc"));
     l.set_app_lyrics_cover(g("app-lyrics-cover"));
     l.set_app_lyrics_side(g("app-lyrics-side"));
+    l.set_app_desktop_lyrics(g("app-desktop-lyrics"));
+    l.set_app_desktop_lyrics_desc(g("app-desktop-lyrics-desc"));
+    l.set_app_desktop_lyrics_lock(g("app-desktop-lyrics-lock"));
+    l.set_app_desktop_lyrics_lock_desc(g("app-desktop-lyrics-lock-desc"));
+    l.set_app_desktop_lyrics_sung(g("app-desktop-lyrics-sung"));
+    l.set_app_desktop_lyrics_unsung(g("app-desktop-lyrics-unsung"));
+    l.set_app_desktop_lyrics_outline(g("app-desktop-lyrics-outline"));
+    l.set_app_desktop_lyrics_outline_desc(g("app-desktop-lyrics-outline-desc"));
     l.set_app_close_behavior(g("app-close-behavior"));
     l.set_app_close_desc(g("app-close-desc"));
     l.set_app_close_ask(g("app-close-ask"));

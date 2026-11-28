@@ -56,6 +56,11 @@ scripts/web-test/dist/
 playwright-report/
 test-results/
 
+# 本地 AI 工具目录（不入库）
+.trae/
+.superpowers/
+.trae-html-share-packages/
+
 # Android 构建产物（cargo-ndk 产出的 .so 与 Gradle 缓存）
 android/.gradle/
 android/build/

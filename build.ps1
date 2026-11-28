@@ -1,4 +1,4 @@
-# 构建发布版
+﻿# 构建发布版
 # 任务管理器「进程」页显示名 = exe 内嵌 VERSIONINFO 的 FileDescription
 # （resources/app.rc），无需复制改名 exe；「详细信息」页恒显示裸文件名。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 [-Run]

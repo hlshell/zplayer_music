@@ -5,8 +5,8 @@
 // 门面 API：阶段 1 移动切片尚无业务调用者，待阶段 3 接入播放后启用
 #[allow(unused_imports)]
 pub use super::common_rodio::{
-    active, begin_switch, end_switch, finished, get_volume, play_at, set_volume, status, stop,
-    switching, toggle,
+    active, begin_switch, clear_failure, end_switch, finished, get_volume, paused, play_at,
+    play_stream, set_volume, status, stop, switching, take_failure, toggle,
 };
 
 /// 移动端不提供输出设备枚举。

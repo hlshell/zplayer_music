@@ -95,6 +95,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
             duration_sec: d.duration_sec,
             url: d.url.clone().into(),
             liked: liked::is_liked(d.id as u32 as i64),
+            bad: false,
         }).collect();
         // 同一份模型挂到两个属性：全量源与显示列表初始等值，
         // 共享 ModelRc 避免把整页歌曲复制两遍（详情页内存/构造各减半）。
@@ -435,6 +436,7 @@ pub(crate) fn setup_detail(ctx: &Ctx) {
                         duration_sec: d.duration_sec,
                         url: d.url.clone().into(),
                         liked: liked::is_liked(d.id as u32 as i64),
+                        bad: false,
                     }).collect();
                     // 同 76-80 行：两个属性共享同一模型，避免整页歌曲复制两遍
                     let model: Rc<VecModel<Song>> = Rc::new(VecModel::from(songs));

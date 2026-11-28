@@ -5,17 +5,92 @@
 import { SectionHeader } from "../../components/cards.slint";
 import { SettingRow } from "setting-row.slint";
 import { SettingSelectRow } from "setting-select-row.slint";
+import { SettingToggleRow } from "setting-toggle-row.slint";
+import { LyricsInk } from "../../components/lyrics-ink.slint";
 import { Theme } from "../../../shared/theme.slint";
 import { Language } from "../../../shared/language.slint";
+
+// 配色色块：左右两半显示 from/to，选中态描边
+component SwatchButton inherits Rectangle {
+    in property <color> from: #ffffff;
+    in property <color> to: #ffffff;
+    in property <bool> selected: false;
+    callback picked();
+
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    background: ta.has-hover ? Theme.palette.hover : transparent;
+    border-width: root.selected ? 2px : 0px;
+    border-color: Theme.palette.primary;
+
+    Rectangle {
+        width: 18px; height: 18px; border-radius: 9px;
+        x: (parent.width - 18px) / 2;
+        y: (parent.height - 18px) / 2;
+        border-width: 1px;
+        border-color: rgba(0, 0, 0, 0.12);
+        background: @linear-gradient(135deg, root.from 0%, root.to 100%);
+        drop-shadow-blur: 2px;
+        drop-shadow-color: rgba(0, 0, 0, 0.18);
+        drop-shadow-offset-y: 1px;
+    }
+    ta := TouchArea {
+        clicked => { root.picked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// 一行配色预设（已唱 / 未唱各一行）
+component InkRow inherits Rectangle {
+    in property <string> label: "";
+    in property <[color]> froms;
+    in property <[color]> tos;
+    in property <int> current: 0;
+    callback picked(int);
+
+    height: 48px;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 10px;
+        cross-axis-alignment: center;
+
+        Text {
+            width: 96px;
+            text: root.label;
+            color: Theme.palette.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        for c[i] in root.froms : SwatchButton {
+            from: c;
+            to: root.tos[i];
+            selected: i == root.current;
+            picked => { root.picked(i); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
 
 export component AppTab inherits VerticalLayout {
     in-out property <int> theme-color-index;
     in-out property <bool> lyrics-style;
     in-out property <int> close-behavior-index;
+    // 桌面歌词悬浮窗：开关 / 锁定（= 鼠标穿透）
+    in-out property <bool> desktop-lyrics: false;
+    in-out property <bool> desktop-lyrics-lock: false;
+    // 桌面歌词配色预设（已唱 / 未唱）
+    in-out property <int> desktop-lyrics-sung: 0;
+    in-out property <int> desktop-lyrics-unsung: 0;
+    in-out property <bool> desktop-lyrics-outline: true;
     // 平台标识：web（wasm）下隐藏桌面专属行（关闭行为/快捷键）
     in property <bool> is-web: false;
     callback open-select(int, string, [string], int);
     callback clicked(int);
+    callback toggle-changed(int, bool);
+    callback lyrics-color-changed(int, int);
 
     spacing: 18px;
     padding-left: 26px; padding-right: 26px;
@@ -39,6 +114,8 @@ export component AppTab inherits VerticalLayout {
                 }
             }
             ly := SettingSelectRow {
+                // web：歌词布局无消费方（桌面亦未生效），隐藏避免误导
+                visible: !root.is-web;
                 label: Language.app-lyrics-layout;
                 desc: Language.app-lyrics-desc;
                 icon: @image-url("../../../assets/icons/layout-rows-gray.svg");
@@ -47,6 +124,49 @@ export component AppTab inherits VerticalLayout {
                 open-requested() => {
                     root.open-select(14, Language.app-lyrics-layout, [Language.app-lyrics-cover, Language.app-lyrics-side], root.lyrics-style ? 0 : 1);
                 }
+            }
+            dl := SettingToggleRow {
+                // web：桌面歌词为独立原生悬浮窗，web 端无消费方
+                visible: !root.is-web;
+                label: Language.app-desktop-lyrics;
+                desc: Language.app-desktop-lyrics-desc;
+                icon: @image-url("../../../assets/icons/clef-staff.svg");
+                checked <=> root.desktop-lyrics;
+                toggled(c) => { root.toggle-changed(28, c); }
+            }
+            dll := SettingToggleRow {
+                // 未开启桌面歌词时无意义；web 端同样隐藏
+                visible: !root.is-web && root.desktop-lyrics;
+                label: Language.app-desktop-lyrics-lock;
+                desc: Language.app-desktop-lyrics-lock-desc;
+                icon: @image-url("../../../assets/icons/pip-on-gray.svg");
+                checked <=> root.desktop-lyrics-lock;
+                toggled(c) => { root.toggle-changed(29, c); }
+            }
+            // 已唱 / 未唱配色：纯色 + 渐变预设（左右两半即 from → to）
+            InkRow {
+                visible: !root.is-web && root.desktop-lyrics;
+                label: Language.app-desktop-lyrics-sung;
+                froms: LyricsInk.sung-from;
+                tos: LyricsInk.sung-to;
+                current: root.desktop-lyrics-sung;
+                picked(i) => { root.lyrics-color-changed(0, i); }
+            }
+            InkRow {
+                visible: !root.is-web && root.desktop-lyrics;
+                label: Language.app-desktop-lyrics-unsung;
+                froms: LyricsInk.unsung-from;
+                tos: LyricsInk.unsung-to;
+                current: root.desktop-lyrics-unsung;
+                picked(i) => { root.lyrics-color-changed(1, i); }
+            }
+            SettingToggleRow {
+                visible: !root.is-web && root.desktop-lyrics;
+                label: Language.app-desktop-lyrics-outline;
+                desc: Language.app-desktop-lyrics-outline-desc;
+                icon: @image-url("../../../assets/icons/clef-staff.svg");
+                checked <=> root.desktop-lyrics-outline;
+                toggled(c) => { root.toggle-changed(30, c); }
             }
             cb := SettingSelectRow {
                 visible: !root.is-web;

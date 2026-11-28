@@ -74,6 +74,7 @@ pub(crate) fn fill_liked(u: &AppWindow) {
             duration_sec: s.duration_sec,
             url: s.cover.into(),
             liked: true,
+            bad: false,
         })
         .collect();
     u.set_liked_song_list(Rc::new(VecModel::from(songs)).into());
@@ -126,6 +127,7 @@ pub(crate) fn fill_recent(u: &AppWindow) {
             duration_sec: e.duration_sec,
             url: e.cover.clone().into(),
             liked: liked::is_liked(e.id),
+            bad: false,
         })
         .collect();
     u.set_recent_song_list(Rc::new(VecModel::from(songs)).into());
@@ -145,6 +147,7 @@ pub(crate) fn fill_recent(u: &AppWindow) {
             duration_sec: e.duration_sec,
             url: e.cover.clone().into(),
             liked: false,
+            bad: false,
         })
         .collect();
     u.set_recent_mv_list(Rc::new(VecModel::from(mvs)).into());

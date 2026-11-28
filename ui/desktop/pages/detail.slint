@@ -6,6 +6,7 @@
 //  MV/电台等类型只做标签兜底，数据后续再补。
 // ============================================================================
 import { Song } from "../../shared/models.slint";
+import { SongMenuState } from "../components/song-menu.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../../shared/theme.slint";
 import { Language } from "../../shared/language.slint";
@@ -417,7 +418,28 @@ export component DetailPage inherits Rectangle {
                                 pl1-ta := TouchArea { mouse-cursor: pointer; clicked => { root.play-song(song.id); } }
                             }
                         }
-                        row-ta := TouchArea { clicked => { root.play-song(song.id); } mouse-cursor: pointer; }
+                        row-ta := TouchArea {
+                            clicked => { root.play-song(song.id); }
+                            mouse-cursor: pointer;
+                            // 右键：打开歌曲操作菜单（定位用行绝对坐标 + 行内点击位置）
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                                    SongMenuState.song-id = song.id;
+                                    SongMenuState.song-name = song.name;
+                                    SongMenuState.song-artist = song.artist;
+                                    SongMenuState.song-cover = song.cover;
+                                    SongMenuState.liked = song.liked;
+                                    SongMenuState.show-at(
+                                        row-ta.absolute-position.x + row-ta.mouse-x,
+                                        row-ta.absolute-position.y + row-ta.mouse-y,
+                                        false
+                                    );
+                                    EventResult.accept
+                                } else {
+                                    EventResult.reject
+                                }
+                            }
+                        }
                     }
                 }
             }

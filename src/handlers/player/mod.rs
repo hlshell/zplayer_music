@@ -95,6 +95,9 @@ pub fn make_resolver(ctx: &Ctx) -> Resolver {
                 crate::core::fetch::fetch_song_bytes(&client, uid, &name, &artist, dur_sec as u64).await
             };
             if let Some(b) = bytes_opt {
+                // #region debug-point H3:resolver-success
+                crate::platform::audio::debug_event("H3", "player/mod.rs:resolver", "audio bytes resolved", serde_json::json!({"song_id":uid,"bytes":b.len(),"duration_sec":dur_sec,"offset_sec":offset_sec,"is_local":is_local}));
+                // #endregion
                 // 3) 播放（可选续播位置；play_at 会停旧流并解除过渡态）
                 crate::platform::audio::play_at(b, dur_sec, offset_sec);
                 // 播放开始即同步 playing=true + 解除加载中；连续失败计数清零
@@ -107,6 +110,9 @@ pub fn make_resolver(ctx: &Ctx) -> Resolver {
                     }
                 });
             } else {
+                // #region debug-point H4:resolver-failure
+                crate::platform::audio::debug_event("H4", "player/mod.rs:resolver", "audio resolution failed", serde_json::json!({"song_id":uid,"duration_sec":dur_sec,"offset_sec":offset_sec,"is_local":is_local,"snapshot":crate::platform::audio::debug_snapshot()}));
+                // #endregion
                 // 获取失败：解除过渡态；按播放模式自动跳下一首兜底（连续失败上限 5 后停止）
                 crate::platform::audio::end_switch();
                 let n = fail_c.fetch_add(1, Ordering::Relaxed) + 1;
@@ -133,12 +139,17 @@ pub fn make_resolver(ctx: &Ctx) -> Resolver {
                         if let Some(lrc) = v.get("lrc").and_then(|x| x.get("lyric")).and_then(|x| x.as_str()) {
                             let parsed = lyrics::parse_lrc(lrc);
                             log::info!("[lyrics] 歌曲 {uid} 解析到 {} 行歌词", parsed.len());
+                            if parsed.is_empty() {
+                                log::warn!("[lyrics] 歌曲 {uid} 歌词解析为 0 行，lrc 长度={}", lrc.len());
+                            }
                             // LYRICS 存一份（进度定位高亮行）；parsed 本体进 invoke 闭包，
                             // 在 UI 线程构造 LyricLine 模型（LyricLine 含 ModelRc 非 Send）
                             *lyrics::LYRICS.lock().unwrap() = parsed.clone();
                             let weak2 = ui_task.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(u) = weak2.upgrade() {
+                                    // 新歌歌词到位：先清空桌面歌词悬浮窗当前行，避免显示上一首残留
+                                    crate::platform::desktop_lyrics::reset();
                                     u.set_lyrics(Rc::new(VecModel::from(lyrics::build_lyric_lines(&parsed))).into());
                                 }
                             });

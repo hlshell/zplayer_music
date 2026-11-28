@@ -1,0 +1,373 @@
+// ============================================================================
+//  recent.slint — 移动端「最近」页：最近播放 / 我的最爱 双 Tab
+//  顶部分段控件切换（默认最近播放）；固定头部（统计 / 清空或播放全部）+ 独立滚动列表。
+//  行内操作按钮绝对定位，避免被整行 TouchArea 盖住（与桌面 recent.slint 同一套 z 序规则）。
+// ============================================================================
+import { ScrollView } from "std-widgets.slint";
+import { MobileTheme } from "../theme.slint";
+import { Song } from "../../shared/models.slint";
+
+component RecentRow inherits Rectangle {
+    in property <Song> song;
+    callback play(int);
+    callback more(int);
+
+    height: 62px;
+    border-radius: 12px;
+    background: row-ta.has-hover ? MobileTheme.hover : transparent;
+
+    // 列表重建时行实例可能被复用为相邻行数据：按下时快照 id，回调一律用快照
+    property <int> pressed-id: 0;
+    property <bool> pressing: false;
+    property <bool> long-fired: false;
+
+    // 整行点击声明在内容之前（z 序更低）：文字/封面不拦截事件，右侧按钮仍可点
+    row-ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pressed-id = root.song.id;
+                root.pressing = true;
+                root.long-fired = false;
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.pressing = false;
+            }
+            EventResult.reject
+        }
+        clicked => {
+            if (root.long-fired) {
+                root.long-fired = false;
+            } else {
+                root.play(root.pressed-id);
+            }
+        }
+    }
+
+    // 长按 450ms → 操作抽屉
+    Timer {
+        interval: 450ms;
+        running: root.pressing && !root.long-fired;
+        triggered => {
+            root.long-fired = true;
+            root.more(root.pressed-id);
+        }
+    }
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 12px;
+        padding-left: 4px;
+        padding-right: 48px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            clip: true;
+            background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+
+            if (root.song.cover.width > 0) : Image {
+                width: 100%;
+                height: 100%;
+                source: root.song.cover;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.song.name;
+                color: MobileTheme.text;
+                font-size: 14px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.song.bad ? root.song.artist + " · 无法播放" : root.song.artist;
+                color: root.song.bad ? MobileTheme.danger : MobileTheme.text-faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            width: 40px;
+            text: root.song.duration;
+            color: MobileTheme.text-secondary;
+            font-size: 11px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    // 三点按钮：与长按同一入口（操作项在底部抽屉按来源提供）
+    Rectangle {
+        x: parent.width - 40px;
+        y: (parent.height - 34px) / 2;
+        width: 34px;
+        height: 34px;
+        border-radius: 17px;
+        background: more-ta.has-hover ? MobileTheme.hover : transparent;
+
+        // 手绘三点：不依赖字体字形（嵌入字体缺 U+22EF 会渲染成方框）
+        Rectangle {
+            x: (parent.width - 16px) / 2;
+            y: (parent.height - 4px) / 2;
+            width: 16px;
+            height: 4px;
+            background: transparent;
+
+            Rectangle { x: 0px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 6px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 12px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+        }
+
+        more-ta := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.pressed-id = root.song.id;
+                }
+                EventResult.reject
+            }
+            clicked => { root.more(root.pressed-id); }
+        }
+    }
+}
+
+// 分段控件中的一段
+component SegmentCell inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    callback selected();
+
+    height: 100%;
+    horizontal-stretch: 1;
+    border-radius: 16px;
+    background: root.active
+        ? MobileTheme.primary.with-alpha(0.22)
+        : (seg-ta.has-hover ? MobileTheme.hover : transparent);
+
+    Text {
+        text: root.label;
+        color: root.active ? MobileTheme.primary : MobileTheme.text-secondary;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    seg-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.selected(); }
+    }
+}
+
+export component RecentPage inherits Rectangle {
+    in property <[Song]> songs;
+    in property <[Song]> liked-songs;
+    callback song-played(int);
+    callback clear();
+    callback liked-played(int);
+    callback liked-play-all();
+    // 歌曲行长按 / ⋯：id + 来源（2=最近播放 3=我的最爱）
+    callback song-more(int, int);
+
+    // 0 = 最近播放（默认）1 = 我的最爱
+    in-out property <int> tab: 0;
+
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 10px;
+        padding-top: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-top) + 12px;
+        padding-left: 16px;
+        padding-right: MobileTheme.safe-right + 16px;
+
+        // ---- 分段控件：最近播放 / 我的最爱 ----
+        Rectangle {
+            height: 38px;
+            border-radius: 19px;
+            background: MobileTheme.glass-capsule;
+            border-width: 1px;
+            border-color: MobileTheme.glass-stroke;
+
+            HorizontalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 3px;
+                padding: 3px;
+
+                SegmentCell {
+                    label: "最近播放";
+                    active: root.tab == 0;
+                    selected => { root.tab = 0; }
+                }
+                SegmentCell {
+                    label: "我的最爱";
+                    active: root.tab == 1;
+                    selected => { root.tab = 1; }
+                }
+            }
+        }
+
+        // ---- 统计 / 操作行（不随列表滚动）----
+        HorizontalLayout {
+            height: 32px;
+            spacing: 12px;
+            cross-axis-alignment: center;
+
+            Text {
+                horizontal-stretch: 1;
+                text: "共 " + (root.tab == 0 ? root.songs.length : root.liked-songs.length) + " 首";
+                color: MobileTheme.text-faint;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            // 最近播放：清空记录
+            if (root.tab == 0 && root.songs.length > 0) : Rectangle {
+                width: 64px;
+                height: 32px;
+                border-radius: 16px;
+                background: clear-ta.has-hover ? MobileTheme.primary.with-alpha(0.22) : MobileTheme.glass-capsule;
+                border-width: 1px;
+                border-color: MobileTheme.glass-stroke;
+
+                Text {
+                    text: "清空";
+                    color: MobileTheme.text-secondary;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                clear-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.clear(); }
+                }
+            }
+
+            // 我的最爱：整表播放
+            if (root.tab == 1 && root.liked-songs.length > 0) : Rectangle {
+                width: 88px;
+                height: 32px;
+                border-radius: 16px;
+                background: all-ta.has-hover ? MobileTheme.primary.with-alpha(0.28) : MobileTheme.primary.with-alpha(0.18);
+                border-width: 1px;
+                border-color: MobileTheme.glass-stroke;
+
+                Text {
+                    text: "播放全部";
+                    color: MobileTheme.primary;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                all-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.liked-play-all(); }
+                }
+            }
+        }
+
+        // ---- 滚动内容区（仅列表滚动）----
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 0px;
+            clip: true;
+            background: transparent;
+
+            // 最近播放空态
+            if (root.tab == 0 && root.songs.length == 0) : VerticalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 8px;
+                alignment: center;
+
+                Text {
+                    text: "还没有播放记录";
+                    color: MobileTheme.text-secondary;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "播放过的歌曲会出现在这里";
+                    color: MobileTheme.text-faint;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // 我的最爱空态
+            if (root.tab == 1 && root.liked-songs.length == 0) : VerticalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 8px;
+                alignment: center;
+
+                Text {
+                    text: "还没有收藏歌曲";
+                    color: MobileTheme.text-secondary;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "在播放页点红心，收藏的歌曲会出现在这里";
+                    color: MobileTheme.text-faint;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if (root.tab == 0 && root.songs.length > 0) : ScrollView {
+                width: 100%;
+                height: 100%;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    width: 100%;
+                    spacing: 2px;
+                    padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                    for s in root.songs : RecentRow {
+                        song: s;
+                        play(id) => { root.song-played(id); }
+                        more(id) => { root.song-more(id, 2); }
+                    }
+                }
+            }
+
+            if (root.tab == 1 && root.liked-songs.length > 0) : ScrollView {
+                width: 100%;
+                height: 100%;
+                vertical-scrollbar-policy: always-off;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    width: 100%;
+                    spacing: 2px;
+                    padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                    for s in root.liked-songs : RecentRow {
+                        song: s;
+                        play(id) => { root.liked-played(id); }
+                        more(id) => { root.song-more(id, 3); }
+                    }
+                }
+            }
+        }
+    }
+}

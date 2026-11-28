@@ -18,12 +18,17 @@ export struct LyricWord {
 }
 
 export struct LyricLine {
+    text: string,
     words: [LyricWord],
     start-ms: int,
     end-ms: int,
 }
 
-// ---------- 单行（三阶段效果） ----------
+// ---------- 单行（整行平滑点亮） ----------
+// 高亮方式：整行文本一个裁剪层，按 (播放位置 - 行起始) / 行时长 从左向右平滑推进。
+// 已唱过的字保持亮色，正在唱的字只点亮已过部分 —— 即卡拉OK 式顺序扫过。
+// 不再使用「逐字独立填充 + 滚动光条」：旧实现每个字各有一束光块来回滚动，
+// 观感像光条在文字上乱窜而不是歌词被顺序点亮。
 component LyricLineView inherits Rectangle {
     in property <LyricLine> line;
     in property <int> current-time-ms: 0;
@@ -31,82 +36,63 @@ component LyricLineView inherits Rectangle {
     in property <bool> is-past: false;
     in property <bool> immersive: false;   // 沉浸模式时字号更大
 
-    private property <float> breath: 1.0;
-
-    changed is-current => {
-        if (root.is-current) {
-            root.breath = 1.045;
-        } else {
-            root.breath = 1.0;
+    // 行内进度（0..1）：未开始 0，已结束 1
+    private property <float> line-progress: {
+        if (root.current-time-ms <= root.line.start-ms) { 0.0 }
+        else if (root.current-time-ms >= root.line.end-ms) { 1.0 }
+        else {
+            (root.current-time-ms - root.line.start-ms) * 1.0
+            / max(1, root.line.end-ms - root.line.start-ms)
         }
-    }
+    };
 
     horizontal-stretch: 1;
+    // 行高直接切换：不做高度/字号补间，避免切到下一行时上一行“收缩”的观感
     height: root.is-current
         ? (root.immersive ? 44px : 36px)
         : (root.immersive ? 32px : 28px);
-    animate height { duration: 240ms; easing: ease-out; }
 
-    HorizontalLayout {
-        alignment: center;
-        spacing: 0px;
-
-        for word[i] in root.line.words : Rectangle {
-            private property <float> progress: {
-                if (root.current-time-ms < word.start-ms) { 0.0 }
-                else if (root.current-time-ms >= word.end-ms) { 1.0 }
-                else {
-                    (root.current-time-ms - word.start-ms) * 1.0
-                    / max(1, word.end-ms - word.start-ms)
-                }
-            };
-
-            // 底层文字
-            Text {
-                text: word.text;
-                color: Theme.palette.text-secondary;
-                opacity: root.is-current ? 0.42 : (root.is-past ? 0.30 : 0.26);
-                font-size: root.is-current
-                    ? (root.immersive ? 22px : 18px)
-                    : (root.immersive ? 15px : 13px);
-                font-weight: root.is-current ? 600 : 400;
-                horizontal-alignment: center;
-                animate font-size { duration: 220ms; easing: ease-out; }
-                animate opacity { duration: 220ms; easing: ease-out; }
-            }
-
-            // Progressive Fill
-            if (root.is-current && progress > 0.0) : Rectangle {
-                x: 0; y: 0;
-                width: parent.width * progress;
-                height: 100%;
-                clip: true;
-                Text {
-                    text: word.text;
-                    color: Theme.palette.primary;
-                    font-size: root.immersive ? 22px : 18px;
-                    font-weight: 700;
-                    horizontal-alignment: left;
-                }
-            }
-
-            // 扫光（位置随逐词进度从词左外扫到词右外，无需定时器）
-            if (root.is-current && progress > 0.0 && progress < 1.0) : Rectangle {
-                x: -70px + (parent.width + 140px) * progress;
-                width: 70px;
-                height: 100%;
-                background: @linear-gradient(90deg,
-                    transparent 0%,
-                    Theme.palette.primary.with-alpha(0.28) 40%,
-                    Theme.palette.primary.with-alpha(0.55) 50%,
-                    Theme.palette.primary.with-alpha(0.28) 60%,
-                    transparent 100%);
-            }
-        }
+    // 底层整行文字（未唱部分）
+    base := Text {
+        width: 100%;
+        height: 100%;
+        text: root.line.text;
+        color: #ffffff;
+        opacity: root.is-current ? 0.48 : (root.is-past ? 0.36 : 0.52);
+        font-size: root.is-current
+            ? (root.immersive ? 22px : 18px)
+            : (root.immersive ? 15px : 13px);
+        font-weight: root.is-current ? 600 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        animate opacity { duration: 220ms; easing: ease-out; }
     }
 
-    transform-scale: root.is-current ? root.breath : 1.0;
-    animate transform-scale { duration: 900ms; easing: ease-in-out; }
+    // 高亮层：与底层同字号/字重/宽度，按行内进度从左缘裁切。
+    // 宽度加线性动画：播放进度约 100ms 回调一次，直接跳变会呈现字块闪动，
+    // 补间后是连续的「写字」效果。
+    if (root.is-current && root.line-progress > 0.0) : Rectangle {
+        x: max(0px, (root.width - base.preferred-width) / 2);
+        y: 0;
+        width: min(root.width, base.preferred-width) * root.line-progress;
+        height: 100%;
+        clip: true;
+        animate width { duration: 140ms; easing: linear; }
+
+        Text {
+            x: 0;
+            width: min(root.width, base.preferred-width);
+            height: parent.height;
+            text: root.line.text;
+            color: Theme.palette.primary;
+            font-size: base.font-size;
+            font-weight: base.font-weight;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
 }
 
 // ---------- 滚动歌词区 ----------
@@ -166,7 +152,7 @@ component LyricsScroll inherits Rectangle {
 
     // 当前行变化：把当前行中心滚动到可视区中央（钳制在可滚范围内）。
     // 前 N 行累计高 = current-lyric × (line-base + spacing)，当前行半高 line-cur/2
-    changed current-lyric => {
+    function recenter() {
         if (root.lyrics.length > 0) {
             sv.content-y = -min(
                 max(0px, sv.content-height - sv.visible-height),
@@ -174,6 +160,10 @@ component LyricsScroll inherits Rectangle {
             );
         }
     }
+
+    // 实时定位当前行；切换布局模式会重建本组件，init 时同样立即定位，不会回到顶部
+    changed current-lyric => { root.recenter(); }
+    init => { root.recenter(); }
 
     // 歌词列表换新：复位滚动到顶部（当前行随新歌曲回到 0）
     changed lyrics => {
@@ -210,7 +200,7 @@ component SongInfoBlock {
                 source: @image-url("../../assets/icons/playlist-gray.svg");
                 width: root.icon-size; height: root.icon-size;
                 horizontal-alignment: center; vertical-alignment: center;
-                colorize: Theme.palette.icon-faint;
+                colorize: rgba(255, 255, 255, 0.48);
             }
         }
 
@@ -219,13 +209,13 @@ component SongInfoBlock {
             spacing: 2px;
             Text {
                 text: root.song.name;
-                color: Theme.palette.text;
+                color: #ffffff;
                 font-size: 15px; font-weight: 700;
                 horizontal-alignment: center; overflow: elide;
             }
             Text {
                 text: root.song.artist;
-                color: Theme.palette.text-secondary;
+                color: rgba(255, 255, 255, 0.68);
                 font-size: 12px;
                 horizontal-alignment: center; overflow: elide;
             }
@@ -235,7 +225,7 @@ component SongInfoBlock {
 
 // ---------- 主面板 ----------
 export component LyricsPanel inherits Rectangle {
-    // 0 = 封面模式, 1 = 分栏模式, 2 = 沉浸模式
+    // 0 = 封面模式, 1 = 分栏模式（深沉/沉浸模式暂时移除）
     in-out property <int> mode: 0;
     in-out property <bool> open: false;
 
@@ -245,9 +235,12 @@ export component LyricsPanel inherits Rectangle {
     in property <int> current-time-ms: 0;
     in property <length> win-width: 0px;
     in property <length> win-height: 0px;
+    // 桌面悬浮歌词是否已开启（仅用于图标高亮）
+    in property <bool> desktop-lyrics-on: false;
 
     callback mode-cycle();          // 点击切换下一模式
     callback close-clicked();
+    callback desktop-lyrics-clicked();   // 开关桌面悬浮歌词窗
 
     y: root.open ? 48px : root.win-height - 76px;
     height: root.open ? root.win-height - 48px - 76px : 0px;
@@ -256,10 +249,17 @@ export component LyricsPanel inherits Rectangle {
     animate height { duration: 260ms; easing: ease-out; }
     clip: true;
 
-    // ===== 背景：所有模式都用模糊专辑（沉浸模式更强） =====
+    // 空白区域吞掉点击：抽屉内任意位置点击都不再触发底层遮罩收起抽屉，
+    // 只有右上角按钮等特定入口才能关闭；滚动事件继续向下传递（隐藏滚动条也可滚）
+    TouchArea {
+        width: 100%; height: 100%;
+        clicked => { }
+        scroll-event(e) => { return EventResult.reject; }
+    }
+
+    // ===== 背景：封面底图不透明，再叠加一层深色半透明遮罩 =====
     if (root.open && root.current-song.cover.width > 0) : Rectangle {
         width: 100%; height: 100%;
-        // 不透明底层：遮挡下方主界面，再叠加模糊封面与压暗层营造氛围
         background: Theme.palette.surface-solid;
         Image {
             source: root.current-song.cover;
@@ -267,23 +267,11 @@ export component LyricsPanel inherits Rectangle {
             // x/y 不接受百分比（% 仅 width/height 可用），放大居中用负偏移表达式
             x: parent.width * -0.25; y: parent.height * -0.25;
             image-fit: ImageFit.cover;
-            opacity: root.mode == 2 ? 0.18 : 0.22;
+            opacity: 1.0;
         }
         Rectangle {
             width: 100%; height: 100%;
-            background: Theme.palette.surface-solid.with-alpha(
-                root.mode == 2 ? 0.72 : 0.78
-            );
-        }
-        // 上下渐变压暗
-        Rectangle {
-            width: 100%; height: 70px;
-            background: @linear-gradient(180deg, Theme.palette.surface-solid 0%, transparent 100%);
-        }
-        Rectangle {
-            y: parent.height - 80px;
-            width: 100%; height: 80px;
-            background: @linear-gradient(0deg, Theme.palette.surface-solid 0%, transparent 100%);
+            background: rgba(0, 0, 0, 0.62);
         }
     }
     if (!root.open || root.current-song.cover.width == 0) : Rectangle {
@@ -292,7 +280,7 @@ export component LyricsPanel inherits Rectangle {
     }
 
     // 顶部分割线
-    Rectangle { y: 0; width: 100%; height: 1px; background: Theme.palette.divider-strong; }
+    Rectangle { y: 0; width: 100%; height: 1px; background: rgba(255, 255, 255, 0.14); }
 
     VerticalLayout {
         padding-left: 18px; padding-right: 18px;
@@ -305,7 +293,23 @@ export component LyricsPanel inherits Rectangle {
             cross-axis-alignment: center;
             Rectangle { horizontal-stretch: 1; }
 
-            // 模式切换按钮（循环 0→1→2→0）
+            // 桌面歌词：开关桌面悬浮歌词窗（不影响抽屉），位于模式切换左侧
+            Rectangle {
+                width: 30px; height: 30px; border-radius: 15px;
+                background: lyr-ta.has-hover ? Theme.palette.primary.with-alpha(0.15) : transparent;
+                Image {
+                    source: @image-url("../../assets/icons/clef-staff.svg");
+                    width: 17px; height: 17px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    colorize: root.desktop-lyrics-on ? Theme.palette.primary : rgba(255, 255, 255, 0.82);
+                }
+                lyr-ta := TouchArea {
+                    clicked => { root.desktop-lyrics-clicked(); }
+                    mouse-cursor: pointer;
+                }
+            }
+
+            // 模式切换按钮（封面模式 ↔ 分栏模式）
             Rectangle {
                 width: 128px; height: 30px; border-radius: 15px;
                 background: mode-ta.has-hover ? Theme.palette.primary.with-alpha(0.15) : transparent;
@@ -322,17 +326,14 @@ export component LyricsPanel inherits Rectangle {
                     Image {
                         source: root.mode == 0
                             ? @image-url("../../assets/icons/mode-updown-gray.svg")
-                            : root.mode == 1
-                                ? @image-url("../../assets/icons/mode-leftright-gray.svg")
-                                : @image-url("../../assets/icons/typography.svg");
+                            : @image-url("../../assets/icons/mode-leftright-gray.svg");
                         width: 15px; height: 15px;
                         vertical-alignment: center;
                         colorize: Theme.palette.primary;
                     }
                     Text {
                         text: root.mode == 0 ? Language.lyrics-cover-mode
-                            : root.mode == 1 ? Language.lyrics-split-mode
-                            : Language.lyrics-immersive-mode;
+                            : Language.lyrics-split-mode;
                         color: Theme.palette.primary;
                         font-size: 12px;
                         horizontal-alignment: center; vertical-alignment: center;
@@ -347,12 +348,12 @@ export component LyricsPanel inherits Rectangle {
             // 关闭
             Rectangle {
                 width: 30px; height: 30px; border-radius: 15px;
-                background: cl-ta.has-hover ? Theme.palette.divider : transparent;
+                background: cl-ta.has-hover ? rgba(255, 255, 255, 0.12) : transparent;
                 Image {
                     source: @image-url("../../assets/icons/pip-on-gray.svg");
                     width: 19px; height: 19px;
                     horizontal-alignment: center; vertical-alignment: center;
-                    colorize: Theme.palette.icon;
+                    colorize: rgba(255, 255, 255, 0.82);
                 }
                 cl-ta := TouchArea {
                     clicked => { root.close-clicked(); }
@@ -416,57 +417,6 @@ export component LyricsPanel inherits Rectangle {
                 current-lyric: root.current-lyric;
                 current-time-ms: root.current-time-ms;
                 immersive: false;
-            }
-        }
-
-        // ============================================================
-        //  模式 2：沉浸模式（Lyrics Focus）
-        //  几乎全屏歌词，字号更大，行距更疏
-        //  左下角放置极小封面浮标（可点击切回封面模式）
-        // ============================================================
-        if (root.mode == 2) : Rectangle {
-            width: 100%; height: 100%;
-
-            // 主歌词（最大化）
-            LyricsScroll {
-                x: 0; y: 0;
-                width: 100%; height: 100%;
-                lyrics: root.lyrics;
-                current-lyric: root.current-lyric;
-                current-time-ms: root.current-time-ms;
-                immersive: true;
-            }
-
-            // 左下角迷你封面浮标
-            Rectangle {
-                x: 4px;
-                y: parent.height - 78px;
-                width: 64px; height: 64px;
-                border-radius: 12px;
-                clip: true;
-                drop-shadow-blur: 16px;
-                drop-shadow-color: rgba(0, 0, 0, 0.35);
-                drop-shadow-offset-y: 4px;
-                background: Theme.palette.surface-solid;
-
-                if (root.current-song.cover.width > 0) : Image {
-                    source: root.current-song.cover;
-                    image-fit: ImageFit.cover;
-                    width: 100%; height: 100%;
-                }
-                if (root.current-song.cover.width == 0) : Image {
-                    source: @image-url("../../assets/icons/playlist-gray.svg");
-                    width: 28px; height: 28px;
-                    horizontal-alignment: center; vertical-alignment: center;
-                    colorize: Theme.palette.icon-faint;
-                }
-
-                // 点击浮标 → 切回封面模式（mode 为双向绑定，赋值即同步外部；
-                // 不要再发 mode-cycle，否则会立刻被外部回调推进到模式 1）
-                TouchArea {
-                    clicked => { root.mode = 0; }
-                    mouse-cursor: pointer;
-                }
             }
         }
     }

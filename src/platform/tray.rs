@@ -175,6 +175,24 @@ fn wire_menu_callbacks(menu: &crate::TrayMenu, app: slint::Weak<crate::AppWindow
             u.invoke_settings_select_changed(2, idx);
         }
     });
+    // 桌面歌词锁定切换（锁定后悬浮窗鼠标穿透，无法自行点击，托盘是解锁入口）
+    let a = app.clone();
+    menu.on_action_desktop_lyrics_lock(move || {
+        if let Some(u) = a.upgrade() {
+            let locked = !u.get_desktop_lyrics_lock();
+            u.set_desktop_lyrics_lock(locked);
+            crate::platform::desktop_lyrics::set_locked(locked);
+            u.invoke_desktop_lyrics_lock_changed(locked);
+        }
+    });
+    // 显示/隐藏桌面歌词：复用设置页开关（id=28），持久化与悬浮窗显隐都由其处理
+    let a = app.clone();
+    menu.on_action_desktop_lyrics_toggle(move || {
+        if let Some(u) = a.upgrade() {
+            let on = !u.get_desktop_lyrics();
+            u.invoke_settings_toggle_changed(28, on);
+        }
+    });
     let a = app;
     menu.on_action_quit(move || {
         if let Some(u) = a.upgrade() {
@@ -216,6 +234,8 @@ fn show_menu(app: slint::Weak<crate::AppWindow>, px: f64, py: f64) {
         menu.set_liked(song.liked);
         menu.set_dark(u.get_dark());
         menu.set_theme_color_index(u.get_theme_color_index());
+        menu.set_desktop_lyrics_on(u.get_desktop_lyrics());
+        menu.set_desktop_lyrics_locked(u.get_desktop_lyrics_lock());
         let names: Vec<slint::SharedString> = u.get_language_options().iter().collect();
         menu.set_lang_names(std::rc::Rc::new(slint::VecModel::from(names)).into());
         menu.set_lang_index(u.get_language_index());
@@ -228,6 +248,10 @@ fn show_menu(app: slint::Weak<crate::AppWindow>, px: f64, py: f64) {
         dst.set_tray_play(src.get_tray_play());
         dst.set_tray_pause(src.get_tray_pause());
         dst.set_tray_next(src.get_tray_next());
+        dst.set_tray_dl_lock(src.get_tray_dl_lock());
+        dst.set_tray_dl_unlock(src.get_tray_dl_unlock());
+        dst.set_tray_dl_show(src.get_tray_dl_show());
+        dst.set_tray_dl_hide(src.get_tray_dl_hide());
         dst.set_tray_language(src.get_tray_language());
         dst.set_tray_quit(src.get_tray_quit());
 

@@ -82,6 +82,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
                         duration_sec: d.duration_sec,
                         url: d.url.clone().into(),
                         liked: liked::is_liked(id as u32 as i64),
+                        bad: false,
                     };
                     let q = u.get_queue();
                     let mut list: Vec<Song> = (0..q.row_count()).filter_map(|i| q.row_data(i)).collect();
@@ -92,7 +93,33 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
             }
         }
         if found.is_none() {
-            // 兜底 4：我的最爱 / 最近播放列表（行点击播放，队列/详情页/搜索/Hero 池均无此歌时）
+            // 兜底 4：首页新歌速递池（行点击或右键播放，其他列表均无此歌时）
+            let pool = crate::load::NEW_SONG_POOL.lock().unwrap().clone();
+            if let Some(d) = pool.iter().find(|d| d.id == id) {
+                if let Some(u) = ui.upgrade() {
+                    let cover_img = crate::load::cover_now(&d.url);
+                    let song = Song {
+                        id,
+                        name: d.name.clone(),
+                        artist: d.artist.clone(),
+                        album: d.album.clone(),
+                        cover: cover_img.clone(),
+                        duration: d.duration.clone(),
+                        duration_sec: d.duration_sec,
+                        url: d.url.clone().into(),
+                        liked: liked::is_liked(id as u32 as i64),
+                        bad: false,
+                    };
+                    let q = u.get_queue();
+                    let mut list: Vec<Song> = (0..q.row_count()).filter_map(|i| q.row_data(i)).collect();
+                    list.push(song);
+                    u.set_queue(Rc::new(VecModel::from(list)).into());
+                    found = Some((d.name.clone(), d.artist.clone(), d.album.clone(), d.duration_sec as u64, cover_img, d.url.clone().into()));
+                }
+            }
+        }
+        if found.is_none() {
+            // 兜底 5：我的最爱 / 最近播放列表（行点击播放，队列/详情页/搜索/Hero/新歌池均无此歌时）
             if let Some(u) = ui.upgrade() {
                 for model in [u.get_liked_song_list(), u.get_recent_song_list()] {
                     let mut hit = None;
@@ -113,7 +140,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
             }
         }
         if found.is_none() {
-            // 兜底 5：本地资源歌曲列表（行点击播放，上述列表均无此歌时）
+            // 兜底 6：本地资源歌曲列表（行点击播放，上述列表均无此歌时）
             if let Some(u) = ui.upgrade() {
                 let m = u.get_local_song_list();
                 let mut hit = None;
@@ -147,6 +174,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
                 duration_sec: dur_sec as f32,
                 url: cover_url.clone(),
                 liked: liked::is_liked(id as u32 as i64),
+                bad: false,
             };
             u.set_current_song(song);
             liked::sync_liked(&u);
@@ -202,6 +230,70 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
         }
     });
 
+    // ---- 右键菜单「下一首播放」：插入到当前曲之后（队内已有则先移除再插入）----
+    let ui_weak = ctx.ui.clone();
+    let toast_pn = ctx.toast.clone();
+    ctx.app.clone_strong().on_play_next(move |id| {
+        let Some(u) = ui_weak.upgrade() else { return; };
+        let cur_id = u.get_current_song().id;
+        let q = u.get_queue();
+        let mut list: Vec<Song> = (0..q.row_count()).filter_map(|i| q.row_data(i)).collect();
+        // 目标歌曲：优先取队内行（保留封面等现有状态），否则从各列表补元数据
+        let mut target: Option<Song> = list.iter().find(|s| s.id == id).cloned();
+        if target.is_none() {
+            for m in [
+                u.get_detail_songs(),
+                u.get_search_results(),
+                u.get_liked_song_list(),
+                u.get_recent_song_list(),
+                u.get_local_song_list(),
+            ] {
+                for i in 0..m.row_count() {
+                    let Some(s) = m.row_data(i) else { continue; };
+                    if s.id == id {
+                        target = Some(s);
+                        break;
+                    }
+                }
+                if target.is_some() {
+                    break;
+                }
+            }
+        }
+        if target.is_none() {
+            // 首页新歌速递不在上述 UI 列表中，从歌曲池补齐元数据
+            let pool = crate::load::NEW_SONG_POOL.lock().unwrap().clone();
+            if let Some(d) = pool.iter().find(|d| d.id == id) {
+                target = Some(Song {
+                    id: d.id,
+                    name: d.name.clone(),
+                    artist: d.artist.clone(),
+                    album: d.album.clone(),
+                    cover: crate::load::cover_now(&d.url),
+                    duration: d.duration.clone(),
+                    duration_sec: d.duration_sec,
+                    url: d.url.clone().into(),
+                    liked: liked::is_liked(id as u32 as i64),
+                    bad: false,
+                });
+            }
+        }
+        let Some(song) = target else {
+            toast_pn.show(&crate::i18n::t("toast-not-found-song"), "info");
+            return;
+        };
+        let name = song.name.to_string();
+        list.retain(|s| s.id != id);
+        let pos = list
+            .iter()
+            .position(|s| s.id == cur_id)
+            .map(|p| p + 1)
+            .unwrap_or(list.len());
+        list.insert(pos, song);
+        u.set_queue(Rc::new(VecModel::from(list)).into());
+        toast_pn.show(&format!("{}{}", crate::i18n::t("toast-play-next-prefix"), name), "info");
+    });
+
     // ---- 首页 Hero"播放全部"：池内不在队列的歌曲追加进播放列表，播放第一首 ----
     let ui_weak = ctx.ui.clone();
     let toast_hero = ctx.toast.clone();
@@ -231,6 +323,7 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
                 duration_sec: d.duration_sec,
                 url: d.url.clone().into(),
                 liked: liked::is_liked(xid),
+                bad: false,
             });
             added += 1;
         }
@@ -374,17 +467,50 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
     let prog_timer = Rc::new(RefCell::new(slint::Timer::default()));
     let tick = Rc::new(Cell::new(0u32));
     let tick_cb = tick.clone();
+    // #region debug-point H5:polling-state
+    let debug_last_state = Rc::new(RefCell::new(None));
+    let debug_state_cb = debug_last_state.clone();
+    // #endregion
     prog_timer.borrow().start(slint::TimerMode::Repeated, Duration::from_millis(250), move || {
         let Some(u) = ui_weak.upgrade() else { return; };
+        // #region debug-point H5:polling-transition
+        let debug_snap = crate::platform::audio::debug_snapshot();
+        let debug_key = (
+            debug_snap.get("stream_id").and_then(|v| v.as_u64()),
+            debug_snap.get("active").and_then(|v| v.as_bool()),
+            debug_snap.get("playing").and_then(|v| v.as_bool()),
+            debug_snap.get("paused").and_then(|v| v.as_bool()),
+            debug_snap.get("empty").and_then(|v| v.as_bool()),
+            debug_snap.get("switching").and_then(|v| v.as_bool()),
+            debug_snap.get("finished").and_then(|v| v.as_bool()),
+        );
+        if debug_state_cb.borrow().as_ref() != Some(&debug_key) {
+            debug_state_cb.replace(Some(debug_key));
+            crate::platform::audio::debug_event("H5", "play.rs:progress_tick", "polling state changed", serde_json::json!({"snapshot":debug_snap,"auto_was_playing":auto_wp.get(),"retry_cnt":retry_cb.get()}));
+        }
+        // #endregion
         let (p, playing) = crate::platform::audio::status();
         let sec = p * u.get_current_song().duration_sec;
         if crate::platform::audio::switching() {
             // 切歌/seek 过渡期：保持 UI 现状，避免闪回 0/播放态
         } else if crate::platform::audio::active() {
-            auto_wp.set(playing);
-            if playing { retry_cb.set(0); } // 正常出声即复位失败重试计数
+            let paused = crate::platform::audio::paused();
+            if playing {
+                auto_wp.set(true);
+                retry_cb.set(0); // 正常出声即复位失败重试计数
+                u.set_playing(true);
+            } else if !paused {
+                // playing=false 但非暂停：sink 已播空、音频线程尚未清理 CURRENT 的结束过渡态
+                // （UI 250ms 轮询可能先于音频线程 100ms 清理踩中这一窗口）。
+                // 保留 auto_wp=true 且不刷为暂停态，让下一轮 active=false 时按 finished 自动切下一首。
+                // 若在此窗口清零 auto_wp，下一轮会落到 active=false 且 awp=false 的 else 分支，
+                // 不触发切歌 → 歌曲停在当前曲不动（已由运行时事件证实的竞态根因）。
+            } else {
+                // 用户主动暂停：清零自动播放记忆并同步 UI 为暂停态
+                auto_wp.set(false);
+                u.set_playing(false);
+            }
             u.set_progress(p);
-            u.set_playing(playing);
             // 当前行定位：歌词按时间升序（parse_lrc 已排序），用二分取代线性扫描；
             // 无任何行时间 <= 当前进度时回落第 0 行（与旧线性实现一致）
             let idx = {
@@ -394,6 +520,27 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
             u.set_current_lyric(idx as i32);
             // 逐词歌词：推送当前播放毫秒（250ms 周期），驱动行内进度填充
             u.set_current_time_ms((sec * 1000.0) as i32);
+            // 桌面歌词悬浮窗：推送当前行文本与起止毫秒（窗口未开启时内部空转）
+            {
+                let (line_text, start_ms, end_ms) = {
+                    let lyr = lyrics::LYRICS.lock().unwrap();
+                    match lyr.get(idx) {
+                        Some((t, txt)) => {
+                            let end = lyr.get(idx + 1).map(|(t2, _)| *t2).unwrap_or(*t + 5.0);
+                            (txt.clone(), (*t * 1000.0) as i32, (end * 1000.0) as i32)
+                        }
+                        None => (String::new(), 0, 0),
+                    }
+                };
+                let name = u.get_current_song().name.to_string();
+                crate::platform::desktop_lyrics::update_line(
+                    &name,
+                    &line_text,
+                    start_ms,
+                    end_ms,
+                    (sec * 1000.0) as i32,
+                );
+            }
         } else {
             // 同值 set 会反复脏化属性触发重绘，空闲时先判再写
             if u.get_progress() != 0.0 { u.set_progress(0.0); }
@@ -405,11 +552,17 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
                 auto_wp.set(false);
                 if crate::platform::audio::finished() {
                     // 真播完（sink 播空）→ 按播放模式自动切下一首
+                    // #region debug-point H5:finished-next
+                    crate::platform::audio::debug_event("H5", "play.rs:progress_tick", "auto next after finished", serde_json::json!({"song_id":u.get_current_song().id,"progress":p,"seconds":sec,"snapshot":crate::platform::audio::debug_snapshot()}));
+                    // #endregion
                     if let Some(idx) = queue::pick_queue_target(&u, u.get_play_mode(), 1) {
                         queue::play_queue_index(&u, idx, &auto_shared, &*resolver_cb);
                     }
                 } else if retry_cb.get() < 2 {
                     // 中途失败（解码/流断，未播完）→ 换源重播当前歌；连续 2 次仍失败才切下一首
+                    // #region debug-point H5:retry-current
+                    crate::platform::audio::debug_event("H5", "play.rs:progress_tick", "retry current song", serde_json::json!({"song_id":u.get_current_song().id,"retry":retry_cb.get()+1,"progress":p,"seconds":sec,"snapshot":crate::platform::audio::debug_snapshot()}));
+                    // #endregion
                     retry_cb.set(retry_cb.get() + 1);
                     let song = u.get_current_song();
                     let rid = song.id as u32 as i64;
@@ -424,6 +577,9 @@ pub(crate) fn setup_play(ctx: &Ctx, resolver: &Resolver) {
                     );
                 } else {
                     // 连续重播失败：真正无法播放 → 切下一首（由 resolver 失败分支 Toast/计数）
+                    // #region debug-point H5:retry-exhausted
+                    crate::platform::audio::debug_event("H5", "play.rs:progress_tick", "auto next after retries exhausted", serde_json::json!({"song_id":u.get_current_song().id,"progress":p,"seconds":sec,"snapshot":crate::platform::audio::debug_snapshot()}));
+                    // #endregion
                     retry_cb.set(0);
                     if let Some(idx) = queue::pick_queue_target(&u, u.get_play_mode(), 1) {
                         queue::play_queue_index(&u, idx, &auto_shared, &*resolver_cb);

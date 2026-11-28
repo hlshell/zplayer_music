@@ -1,0 +1,111 @@
+// 移动端启动页：与原生 splash 共用同一"静态锚帧"（纯色 #171329 + 居中 logo），
+// 首帧 logo 即完整可见（无二次淡入），渐变氛围与文案随后淡入，实现原生→Slint 视觉无缝。
+export component MobileSplash inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    clip: true;
+
+    in property <float> t: 0.0;
+    in property <bool> fade-out: false;
+
+    // 锚帧：纯色底，与原生 splash_background / SplashScreen 一致
+    background: #171329;
+    opacity: root.fade-out ? 0.0 : 1.0;
+    animate opacity { duration: 260ms; easing: ease-in; }
+
+    // 拦截启动期间的触摸，避免误点后方的首页或导航。
+    TouchArea { width: 100%; height: 100%; }
+
+    // 渐变氛围：首帧（t≈0）不可见，约 0.15s 后淡入，避免与原生切换时跳变
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        opacity: min(1.0, max(0.0, (root.t - 0.06) / 0.34));
+        background: @linear-gradient(155deg, #171329 0%, #251a49 52%, #112f46 100%);
+    }
+    Rectangle {
+        width: 140%;
+        height: 70%;
+        x: -root.width * 0.30 + 12px * sin(360deg * root.t / 3.2);
+        y: -root.height * 0.18;
+        opacity: min(1.0, max(0.0, (root.t - 0.06) / 0.34));
+        background: @linear-gradient(135deg, rgba(126, 86, 255, 0.34) 0%, rgba(126, 86, 255, 0.0) 62%);
+    }
+    Rectangle {
+        width: 130%;
+        height: 66%;
+        x: -root.width * 0.04 - 10px * sin(360deg * root.t / 3.6);
+        y: root.height * 0.48;
+        opacity: min(1.0, max(0.0, (root.t - 0.06) / 0.34));
+        background: @linear-gradient(315deg, rgba(32, 202, 238, 0.24) 0%, rgba(32, 202, 238, 0.0) 62%);
+    }
+
+    // logo：首帧即完整（opacity=1、基准缩放 1，仅保留呼吸），位置与原生居中图标一致（屏幕中心）
+    Image {
+        source: @image-url("../../assets/splash.png");
+        width: 144px;
+        height: 144px;
+        x: (root.width - self.width) / 2;
+        y: root.height / 2 - 72px;
+        image-fit: contain;
+        transform-scale-x: 100% * (1.0 + 0.018 * sin(360deg * root.t / 1.4));
+        transform-scale-y: 100% * (1.0 + 0.018 * sin(360deg * root.t / 1.4));
+    }
+
+    // 外圈光环：首帧不可见，淡入后呼吸
+    Rectangle {
+        width: 160px;
+        height: 160px;
+        x: (root.width - self.width) / 2;
+        y: root.height / 2 - 80px;
+        border-radius: 80px;
+        border-width: 1.5px;
+        border-color: rgba(168, 139, 255, 0.42);
+        opacity: min(1.0, max(0.0, (root.t - 0.12) / 0.34)) * (0.36 + 0.40 * abs(sin(360deg * root.t / 1.6)));
+        transform-scale-x: 100% * (1.0 + 0.06 * sin(360deg * root.t / 1.6));
+        transform-scale-y: 100% * (1.0 + 0.06 * sin(360deg * root.t / 1.6));
+    }
+
+    Text {
+        text: "ZPlayer Music";
+        width: 100%;
+        height: 44px;
+        y: root.height / 2 + 96px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: #ffffff;
+        font-size: 29px;
+        font-weight: 700;
+        opacity: min(1.0, max(0.0, (root.t - 0.18) / 0.32));
+    }
+    Text {
+        text: "FEEL THE SOUND";
+        width: 100%;
+        height: 24px;
+        y: root.height / 2 + 141px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: #bdb5d8;
+        font-size: 12px;
+        opacity: min(1.0, max(0.0, (root.t - 0.28) / 0.32));
+    }
+
+    Rectangle {
+        width: 132px;
+        height: 3px;
+        x: (root.width - self.width) / 2;
+        y: root.height / 2 + 184px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.15);
+        clip: true;
+        opacity: min(1.0, max(0.0, (root.t - 0.40) / 0.28));
+
+        Rectangle {
+            width: 44px;
+            height: 100%;
+            x: (parent.width - self.width) * (0.5 + 0.5 * sin(360deg * root.t / 1.15));
+            border-radius: 2px;
+            background: @linear-gradient(90deg, #8f7bff 0%, #42d8f2 100%);
+        }
+    }
+}

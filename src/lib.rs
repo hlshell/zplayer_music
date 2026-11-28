@@ -43,10 +43,12 @@ pub use persist::{cache, config, liked, recent, state};
 // 移动端阶段 3：持久化全部子模块（桌面 UI 耦合函数在模块内部按 feature 门控）
 #[cfg(feature = "mobile")]
 mod persist {
+    pub mod bad;
     pub mod cache;
     pub mod config;
     pub mod history;
     pub mod liked;
+    pub mod queue;
     pub mod recent;
     pub mod state;
 }

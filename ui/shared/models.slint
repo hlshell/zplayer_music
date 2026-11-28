@@ -25,6 +25,15 @@ export struct Playlist {
     to: color,
 }
 
+// 移动端分类浏览条目（歌单/专辑/排行榜/电台共用；url 保存封面地址供异步补图）
+export struct BrowseItem {
+    id: int,
+    name: string,
+    sub: string,
+    cover: image,
+    url: string,
+}
+
 // 歌手（圆形头像）
 export struct Artist {
     id: int,
@@ -138,6 +147,8 @@ export struct Song {
     url: string,
     // 是否已收藏：抽屉行内爱心显示源；点击切换时 Rust 侧 set_row_data 刷新对应行
     liked: bool,
+    // 是否已标记为无法播放（播放失败后置位；列表行据此显示「无法播放」，切歌时自动跳过）
+    bad: bool,
 }
 
 // 搜索建议（下拉联想项）

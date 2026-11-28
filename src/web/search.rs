@@ -127,6 +127,7 @@ pub fn setup(ui: &crate::AppWindow) {
                         duration_sec: 0.0,
                         url: SharedString::new(),
                         liked: gd::liked_contains(id),
+                        bad: false,
                     }
                 })
                 .collect();

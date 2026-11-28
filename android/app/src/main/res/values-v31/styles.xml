@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Android 12+（targetSdk 31+）系统 SplashScreen：
+      splash_logo 已改为 288dp 画布 + 居中 144dp logo（与 Slint 启动页 logo 同尺寸），
+      系统按 288dp 容器 1:1 展示后，logo 的实际视觉尺寸与位置和 Slint 首帧完全一致。
+      图标背景设为透明，去掉系统默认的深色圆盘，避免切换时出现"圆盘消失"的跳变。
+    -->
+    <style name="AppTheme" parent="AppTheme.Base">
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_icon_background</item>
+        <!-- 拉长系统启动画面停留时间（上限 1000ms），给 Slint 首帧留出衔接余量 -->
+        <item name="android:windowSplashScreenAnimationDuration">1000</item>
+    </style>
+</resources>

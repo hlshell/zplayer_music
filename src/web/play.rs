@@ -173,6 +173,7 @@ fn restore_session(ui: &crate::AppWindow) {
                 duration_sec: it.duration_sec,
                 url: it.cover_url.into(),
                 liked: gd::liked_contains(id),
+                bad: false,
             }
         })
         .collect();
@@ -201,6 +202,7 @@ fn restore_session(ui: &crate::AppWindow) {
             duration_sec: row.duration_sec,
             url: row.url.clone(),
             liked,
+            bad: false,
         });
         ui.set_liked(liked);
         ui.set_playing(false);
@@ -214,39 +216,6 @@ fn restore_session(ui: &crate::AppWindow) {
 fn fmt_dur(sec: f32) -> String {
     let s = sec.max(0.0) as u64;
     format!("{:02}:{:02}", s / 60, s % 60)
-}
-
-/// 解析 LRC 为 (秒, 文本) 列表。
-/// 时间标签格式 [mm:ss.xx]；[ti:]/[ar:]/[al:]/[offset:] 等元数据标签（冒号前非数字）直接忽略。
-fn parse_lrc(raw: &str) -> Vec<(f32, String)> {
-    let mut out: Vec<(f32, String)> = Vec::new();
-    for line in raw.lines() {
-        let mut rest = line;
-        let mut times: Vec<f32> = Vec::new();
-        while let Some(open) = rest.find('[') {
-            if let Some(close_off) = rest[open..].find(']') {
-                let tag = rest[open + 1..open + close_off].trim();
-                rest = &rest[open + close_off + 1..];
-                // 仅接受 mm:ss[.xx] 两段式数字时间标签
-                let mut parts = tag.split(':');
-                if let (Some(mm_s), Some(ss_s), None) = (parts.next(), parts.next(), parts.next()) {
-                    if let (Ok(mm), Ok(ss)) =
-                        (mm_s.trim().parse::<f32>(), ss_s.trim().parse::<f32>())
-                    {
-                        times.push(mm * 60.0 + ss);
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-        let text = rest.trim().to_string();
-        for t in times {
-            out.push((t, text.clone()));
-        }
-    }
-    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    out
 }
 
 /// 按播放模式在队列中选上一/下一首目标索引。
@@ -308,6 +277,7 @@ fn start_play(u: &crate::AppWindow, id: i32) {
         duration_sec: dur,
         url: cover_url.into(),
         liked,
+        bad: false,
     });
     u.set_liked(liked);
     gd::recent_push(id, &name, &artist, &album);
@@ -348,7 +318,7 @@ fn fetch_lyrics(u: &crate::AppWindow, id: i32, open_panel: bool) {
     wasm_bindgen_futures::spawn_local(async move {
         match gd::lyric(&gd_id).await {
             Some(lrc) => {
-                let parsed = parse_lrc(&lrc);
+                let parsed = crate::core::lyrics::parse_lrc(&lrc);
                 LRC.with(|c| *c.borrow_mut() = (id, parsed.clone()));
                 if let Some(u) = weak.upgrade() {
                     u.set_lyrics(Rc::new(VecModel::from(
@@ -441,6 +411,7 @@ pub fn setup(ui: &crate::AppWindow) {
             duration_sec: dur,
             url: old_url.into(),
             liked: gd::liked_contains(id),
+            bad: false,
         };
         if cur_id != 0 {
             let pos = list.iter().position(|s| s.id == cur_id).unwrap_or(list.len());
@@ -600,6 +571,7 @@ pub fn setup(ui: &crate::AppWindow) {
                     duration_sec: dur,
                     url: "".into(),
                     liked: gd::liked_contains(h.id),
+                    bad: false,
                 });
             }
         }

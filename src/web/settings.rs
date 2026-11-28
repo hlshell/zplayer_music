@@ -20,6 +20,10 @@
 //! - web 无能力项（输出设备枚举、洛雪音源脚本、缓存统计/清理、代理、realip、开机自启、文件选择）：
 //!   一律 toast "Web 端待补充"，不造假数据；对应 root 属性大多已在 slint 侧 <=> 双向绑定自翻转，
 //!   UI 自然保持一致，Rust 侧无需再 set。
+//! - 另有若干"仅桌面生效"项已在 slint 侧按 is-web 隐藏，web 端不会显示：
+//!   语言（无运行时 i18n 重载）、字体（无 font_family 应用）、音质（gd 固定 br=320）、
+//!   自动播放（web 不读 auto_play）、歌词布局（无消费方）；以及整个播放/网络/系统 tab。
+//!   下方 match 中 2/3/4/14 分支因此在 web 不可达，保留仅作属性兜底。
 //! - version 已由 web_main 注入。
 
 use slint::ComponentHandle;

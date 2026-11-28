@@ -1,20 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Gradle 构建使用的真正 manifest。
+  历史上项目用 cargo-apk 打包（不读取此文件，由 Cargo.toml 的 metadata 生成）；
+  现在为消除 SurfaceView 黑帧，改为 Gradle 构建并引入自定义 MainActivity，
+  以使用 androidx SplashScreen 保持系统启动屏到 Slint 首帧。
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:label="ZPlayer Music"
-        android:hasCode="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        android:theme="@style/AppTheme">
 
-        <!-- 无 Java/Kotlin 代码：NativeActivity 直接加载 libzplayer_music.so 并调用 android_main -->
+        <!--
+          自定义 MainActivity 继承 android.app.NativeActivity：
+          由平台按 meta-data 的 lib_name 加载 libzplayer_music.so 并调用 android_main，
+          而我们额外获得 Java 生命周期钩子（保持系统启动屏 / 切回遮盖）。
+          launchMode=singleTask + alwaysRetainTaskState：从桌面图标再次进入复用同一实例，
+          不重新冷启动、不丢数据。
+        -->
         <activity
-            android:name="android.app.NativeActivity"
+            android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|keyboardHidden|screenSize"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+            android:launchMode="singleTask"
+            android:alwaysRetainTaskState="true"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode|density"
+            android:theme="@style/AppTheme">
 
             <meta-data
                 android:name="android.app.lib_name"

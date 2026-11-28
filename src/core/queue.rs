@@ -52,6 +52,7 @@ pub(crate) fn play_queue_index<F: Fn(i64, String, String, f32, f32) + ?Sized>(
             cover: s.cover.clone(), duration: dur_str.into(), duration_sec: s.duration_sec,
             url: s.url.clone(),
             liked: is_liked(s.id as u32 as i64),
+            bad: false,
         };
         u.set_current_song(song);
         sync_liked(u);

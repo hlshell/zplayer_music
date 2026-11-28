@@ -20,7 +20,7 @@ mod newsongs;
 mod toptracks;
 
 // ---- 供 main.rs 按原 crate::load::X 路径访问的公共符号 ----
-pub use covers::{cover_now, cover_warm, fetch_covers, set_runtime, warm_rows};
+pub use covers::{cover_now, cover_warm, fetch_covers, runtime, set_runtime, warm_rows};
 use crate::persist::cache::CoverType;
 pub use crate::core::song_util::{from, model, parse_tracks, to, SongBase};
 
@@ -289,11 +289,15 @@ async fn apply_home_data(
             duration: d.duration.clone(), duration_sec: d.duration_sec,
             url: d.url.clone().into(),
             liked: crate::persist::liked::is_liked(d.id as u32 as i64),
+            bad: false,
         }).collect();
-        if !songs.is_empty() {
+        // 移动端已有上次队列快照（queue.json）时不覆盖，交由移动端 handlers 恢复；
+        // 桌面/Web 不写该文件，行为不变。
+        let keep_queue = crate::persist::queue::has_saved();
+        if !songs.is_empty() && !keep_queue {
             ui.set_queue(model(songs));
         }
-        if let Some(r) = current_first {
+        if let Some(r) = current_first.filter(|_| !keep_queue) {
             // 启动恢复：按收藏集合同步当前歌曲爱心状态（不自动播放）；
             // 封面先占位，后台线程磁盘缓存解码完成后补图（id 防护）
             let song = Song {
@@ -302,6 +306,7 @@ async fn apply_home_data(
                 duration: r.duration.clone(), duration_sec: r.duration_sec,
                 url: r.url.into(),
                 liked: crate::persist::liked::is_liked(r.id as u32 as i64),
+                bad: false,
             };
             let liked = crate::persist::liked::is_liked(song.id as u32 as i64);
             ui.set_current_song(song);

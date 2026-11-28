@@ -3,6 +3,7 @@
 //  固定头部（蓝色主题 + 统计 + 清空按钮） + 分类 Tab（歌曲/MV） + 滚动列表
 // ============================================================================
 import { Song } from "../../../shared/models.slint";
+import { SongMenuState } from "../../components/song-menu.slint";
 import { PlaceholderPage } from "../placeholder/placeholder.slint";
 import { Theme } from "../../../shared/theme.slint";
 import { Language } from "../../../shared/language.slint";
@@ -60,7 +61,28 @@ component RecentRow inherits Rectangle {
             rm-ta := TouchArea { mouse-cursor: pointer; clicked => { root.remove(song.id); } }
         }
     }
-    row-ta := TouchArea { clicked => { root.play(song.id); } mouse-cursor: pointer; }
+    row-ta := TouchArea {
+        clicked => { root.play(song.id); }
+        mouse-cursor: pointer;
+        // 右键：歌曲操作菜单（最近播放行不提供「从播放列表移除」）
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                SongMenuState.song-id = song.id;
+                SongMenuState.song-name = song.name;
+                SongMenuState.song-artist = song.artist;
+                SongMenuState.song-cover = song.cover;
+                SongMenuState.liked = song.liked;
+                SongMenuState.show-at(
+                    row-ta.absolute-position.x + row-ta.mouse-x,
+                    row-ta.absolute-position.y + row-ta.mouse-y,
+                    false
+                );
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+    }
 }
 
 // ---- 最近播放 MV 行（封面 + 名称 + 歌手 + MV 徽标 + 单条删除） ----

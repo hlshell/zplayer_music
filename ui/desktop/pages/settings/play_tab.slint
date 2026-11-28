@@ -38,6 +38,8 @@ export component PlayTab inherits VerticalLayout {
         border-width: 1px; border-color: Theme.palette.divider;
         VerticalLayout { spacing: 2px;
             q := SettingSelectRow {
+                // web：音源 URL 固定 br=320，音质选择不生效
+                visible: !root.is-web;
                 label: Language.play-quality;
                 desc: Language.play-quality-desc;
                 icon: @image-url("../../../assets/icons/circuit-battery.svg");
@@ -56,6 +58,8 @@ export component PlayTab inherits VerticalLayout {
                 clicked() => { root.show-sources(); }
             }
             ap := SettingToggleRow {
+                // web：启动自动播放仅桌面实现（读 cfg.play.auto_play）
+                visible: !root.is-web;
                 label: Language.play-auto-play;
                 desc: Language.play-auto-play-desc;
                 icon: @image-url("../../../assets/icons/circle-play.svg");

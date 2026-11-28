@@ -311,6 +311,7 @@ fn load_songs_page(
                     duration: d.duration, duration_sec: d.duration_sec,
                     url: d.url.into(),
                     liked: crate::persist::liked::is_liked(d.id as u32 as i64),
+                    bad: false,
                 }).collect();
                 if append {
                     // 追加：底层模型是 VecModel，downcast 后 push（自动通知视图）

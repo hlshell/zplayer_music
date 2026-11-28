@@ -18,12 +18,17 @@ export component SearchPage inherits Rectangle {
     in property <int> search-type: 0;
     in property <bool> loading: false;
     in property <string> error: "";
+    // 搜索历史（本地持久化，最新在前）
+    in property <[string]> history;
 
     callback submitted(string, int);
     callback type-changed(int);
     callback song-played(int);
+    callback song-more(int);
     callback playlist-opened(int);
     callback album-opened(int);
+    callback history-remove(string);
+    callback history-clear();
 
     // 当前类型下结果为空（空关键词时不算"没有找到"，避免初始页误报）
     property <bool> no-result: root.search-type == 0
@@ -51,8 +56,26 @@ export component SearchPage inherits Rectangle {
                 height: 48px;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: search-input.has-focus ? MobileTheme.primary : MobileTheme.divider;
-                background: MobileTheme.surface;
+                border-color: search-input.has-focus ? MobileTheme.primary : MobileTheme.glass-stroke;
+                background: MobileTheme.surface-bg;
+                backdrop-blur: MobileTheme.surface-blur-radius;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: MobileTheme.glass-shade;
+                clip: true;
+
+                // 顶边镜面高光：两端渐隐，避免在圆角处形成贯穿硬直线
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    height: 1px;
+                    background: @linear-gradient(90deg,
+                        rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                        MobileTheme.glass-shine 12%,
+                        MobileTheme.glass-shine 88%,
+                        rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+                }
 
                 // 占位提示：TextInput 无内置 placeholder，用条件 Text 叠加
                 if (root.keyword == "") : Text {
@@ -76,7 +99,13 @@ export component SearchPage inherits Rectangle {
                     color: MobileTheme.text;
                     font-size: 14px;
                     single-line: true;
-                    edited => { root.keyword = self.text; }
+                    edited => {
+                        root.keyword = self.text;
+                        // 手动清空输入框时同步清空结果，避免历史与旧结果混排
+                        if (root.keyword == "") {
+                            root.submitted("", root.search-type);
+                        }
+                    }
                     accepted => { root.submitted(root.keyword, root.search-type); }
                 }
             }
@@ -85,13 +114,15 @@ export component SearchPage inherits Rectangle {
                 width: 64px;
                 height: 48px;
                 border-radius: 12px;
-                background: search-btn.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+                border-width: 1px;
+                border-color: MobileTheme.glass-stroke;
+                background: search-btn.has-hover ? MobileTheme.primary.with-alpha(0.22) : MobileTheme.glass-capsule;
 
                 Text {
                     width: 100%;
                     height: 100%;
                     text: "搜索";
-                    color: Theme.palette.icon-white;
+                    color: MobileTheme.primary;
                     font-size: 14px;
                     font-weight: 600;
                     horizontal-alignment: center;
@@ -114,13 +145,17 @@ export component SearchPage inherits Rectangle {
                 horizontal-stretch: 1;
                 height: 40px;
                 border-radius: 20px;
-                background: idx == root.search-type ? MobileTheme.primary : MobileTheme.surface;
+                border-width: idx == root.search-type ? 1px : 0px;
+                border-color: MobileTheme.glass-stroke;
+                background: idx == root.search-type
+                    ? MobileTheme.glass-capsule
+                    : (chip-ta.has-hover ? rgba(255, 255, 255, 0.14) : MobileTheme.glass-fill);
 
                 Text {
                     width: 100%;
                     height: 100%;
                     text: name;
-                    color: idx == root.search-type ? Theme.palette.icon-white : MobileTheme.text-secondary;
+                    color: idx == root.search-type ? MobileTheme.text : MobileTheme.text-secondary;
                     font-size: 13px;
                     font-weight: idx == root.search-type ? 600 : 400;
                     horizontal-alignment: center;
@@ -148,7 +183,119 @@ export component SearchPage inherits Rectangle {
                 VerticalLayout {
                     width: 100%;
                     spacing: 4px;
-                    padding-bottom: MobileTheme.safe-bottom + 24px;
+                    padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                    // ===== 搜索历史：无关键词时展示（点击重搜 / 单条删除 / 清空）=====
+                    if (root.keyword == "" && root.history.length > 0) : VerticalLayout {
+                        width: 100%;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            height: 36px;
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: "搜索历史";
+                                color: MobileTheme.text-secondary;
+                                font-size: 13px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Rectangle {
+                                width: 52px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: hclear-ta.has-hover ? MobileTheme.hover : transparent;
+
+                                Text {
+                                    width: 100%;
+                                    height: 100%;
+                                    text: "清空";
+                                    color: MobileTheme.text-faint;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                hclear-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.history-clear(); }
+                                }
+                            }
+                        }
+
+                        for w in root.history : Rectangle {
+                            height: 44px;
+                            border-radius: 10px;
+                            background: hrow-ta.has-hover ? MobileTheme.hover : transparent;
+
+                            Text {
+                                x: 4px;
+                                width: parent.width - 48px;
+                                height: 100%;
+                                text: w;
+                                color: MobileTheme.text;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            hrow-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.keyword = w;
+                                    root.submitted(w, root.search-type);
+                                }
+                            }
+
+                            Rectangle {
+                                x: parent.width - 36px;
+                                y: (parent.height - 28px) / 2;
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: hdel-ta.has-hover ? MobileTheme.hover : transparent;
+
+                                Text {
+                                    width: 100%;
+                                    height: 100%;
+                                    text: "×";
+                                    color: MobileTheme.text-faint;
+                                    font-size: 16px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                hdel-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.history-remove(w); }
+                                }
+                            }
+                        }
+                    }
+
+                    // ===== 未搜索且无历史：引导提示 =====
+                    if (root.keyword == "" && root.history.length == 0) : VerticalLayout {
+                        width: 100%;
+                        height: 140px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text {
+                            text: "搜索歌曲 / 歌单 / 专辑";
+                            color: MobileTheme.text-secondary;
+                            font-size: 15px;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "搜索过的关键词会保留在这里";
+                            color: MobileTheme.text-faint;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                        }
+                    }
 
                     if (root.loading) : Text {
                         text: "搜索中…";
@@ -160,7 +307,27 @@ export component SearchPage inherits Rectangle {
                     if (!root.loading && root.error != "") : Rectangle {
                         height: 96px;
                         border-radius: 14px;
-                        background: MobileTheme.surface;
+                        border-width: 1px;
+                        border-color: MobileTheme.glass-stroke;
+                        background: MobileTheme.surface-bg;
+                        backdrop-blur: MobileTheme.surface-blur-radius;
+                        drop-shadow-blur: 24px;
+                        drop-shadow-offset-y: 8px;
+                        drop-shadow-color: MobileTheme.glass-shade;
+                        clip: true;
+
+                        // 顶边镜面高光
+                        Rectangle {
+                            x: 0;
+                            y: 0;
+                            width: 100%;
+                            height: 1px;
+                            background: @linear-gradient(90deg,
+                                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                                MobileTheme.glass-shine 12%,
+                                MobileTheme.glass-shine 88%,
+                                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+                        }
 
                         VerticalLayout {
                             width: 100%;
@@ -179,13 +346,15 @@ export component SearchPage inherits Rectangle {
                                 width: 96px;
                                 height: 40px;
                                 border-radius: 20px;
-                                background: retry-ta.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+                                border-width: 1px;
+                                border-color: MobileTheme.glass-stroke;
+                                background: retry-ta.has-hover ? rgba(255, 255, 255, 0.24) : MobileTheme.glass-capsule;
 
                                 Text {
                                     width: 100%;
                                     height: 100%;
                                     text: "重试";
-                                    color: Theme.palette.icon-white;
+                                    color: MobileTheme.text;
                                     font-size: 13px;
                                     font-weight: 600;
                                     horizontal-alignment: center;
@@ -212,6 +381,7 @@ export component SearchPage inherits Rectangle {
                     if (root.search-type == 0) : VerticalLayout {
                         for s[i] in root.results : SongRow {
                             index: i;
+                            song-id: s.id;
                             rank: "";
                             title: s.name;
                             subtitle: s.artist;
@@ -219,6 +389,7 @@ export component SearchPage inherits Rectangle {
                             from: Theme.palette.primary;
                             to: Theme.palette.secondary;
                             clicked => { root.song-played(s.id); }
+                            more(id) => { root.song-more(id); }
                         }
                     }
 
@@ -226,6 +397,7 @@ export component SearchPage inherits Rectangle {
                     if (root.search-type == 1) : VerticalLayout {
                         for p[i] in root.playlists : SongRow {
                             index: i;
+                            song-actions: false;
                             rank: "";
                             title: p.name;
                             subtitle: p.plays;
@@ -240,6 +412,7 @@ export component SearchPage inherits Rectangle {
                     if (root.search-type == 2) : VerticalLayout {
                         for a[i] in root.albums : SongRow {
                             index: i;
+                            song-actions: false;
                             rank: "";
                             title: a.name;
                             subtitle: a.year == "" ? a.artist : (a.artist + " · " + a.year);

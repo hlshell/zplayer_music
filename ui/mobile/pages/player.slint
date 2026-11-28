@@ -1,13 +1,12 @@
 // ============================================================================
-//  player.slint — 移动端播放层（全屏）
-//  竖屏：顶栏 + 封面 + 曲目信息 + 可拖动进度 + 控制区 + 歌词/队列；
-//  横屏/平板：左侧 46%（封面与控制）+ 右侧 54%（歌词/队列），互不挤压。
-//  数据全部由 AppWindow 属性驱动；进度只读，拖动时本地预览，松手才回调 seek。
+//  player.slint — 移动端播放层（QQ 音乐风格双页）
+//  唱片页：圆形封面 + 左对齐曲目信息 + 局部歌词 + 共用底部控制；
+//  左滑进入完整歌词，右滑返回；宽屏直接左右分栏。队列复用现有数据与回调。
 // ============================================================================
 import { ScrollView } from "std-widgets.slint";
 import { MobileTheme } from "../theme.slint";
 import { Song } from "../../shared/models.slint";
-import { GlassRectangle, CoverBackdrop } from "../components/glass.slint";
+import { CoverBackdrop } from "../components/glass.slint";
 import { PlayBarButton } from "../components/playbar.slint";
 
 // 歌词行（start-ms/end-ms 由 Rust 依据 LRC 相邻时间戳生成）
@@ -17,7 +16,6 @@ export struct LyricRow {
     end-ms: int,
 }
 
-// 秒 → "mm:ss"（与桌面/平板播放栏同一格式）
 component TimeText inherits Text {
     in property <float> sec: 0.0;
     in property <string> literal: "";
@@ -31,42 +29,59 @@ component TimeText inherits Text {
     }
 }
 
-// 封面：空图回退主题渐变
+// 圆形唱片封面：外圈与中心孔保留唱片观感，空图回退主题渐变
 component PlayerCover inherits Rectangle {
     in property <image> cover;
     in property <length> size: 240px;
 
     width: root.size;
     height: root.size;
-    border-radius: 24px;
+    border-radius: root.size / 2;
     clip: true;
     background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+    drop-shadow-blur: 24px;
+    drop-shadow-color: rgba(30, 24, 70, 0.22);
+    drop-shadow-offset-y: 8px;
 
     if (root.cover.width > 0) : Image {
         width: 100%;
         height: 100%;
         source: root.cover;
     }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.size * 0.12;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: rgba(255, 255, 255, 0.72);
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.82);
+    }
 }
 
-// 可拖动进度条：命中区 20px，视觉 4px；拖动中显示本地预览位置，松手回调 seek
+// 可拖动进度条：命中区 22px，视觉 3px；松手后才回调 seek
 component PlayerSlider inherits Rectangle {
     in property <float> ratio: 0.0;
+    // 加载中：显示来回滑动的 indeterminate 条，且不可拖动
+    in property <bool> loading: false;
+    in property <float> indet: 0.0;
     callback seek(float);
 
     property <bool> dragging: false;
     property <float> preview: 0.0;
     property <float> shown: min(1.0, max(0.0, root.dragging ? root.preview : root.ratio));
 
-    height: 20px;
+    height: 22px;
     background: transparent;
 
     Rectangle {
-        y: (parent.height - 4px) / 2;
+        y: (parent.height - 3px) / 2;
         width: 100%;
-        height: 4px;
+        height: 3px;
         border-radius: 2px;
-        background: rgba(255, 255, 255, 0.18);
+        background: rgba(MobileTheme.text.red, MobileTheme.text.green, MobileTheme.text.blue, 0.13);
 
         Rectangle {
             x: 0;
@@ -74,22 +89,37 @@ component PlayerSlider inherits Rectangle {
             width: parent.width * root.shown;
             height: 100%;
             border-radius: 2px;
-            background: MobileTheme.secondary;
+            background: MobileTheme.primary;
+            visible: !root.loading;
         }
-        // 拖动圆点：贴边时夹在轨道内，避免溢出
+
+        // 加载中：一段 28% 宽的高亮条在轨道上往返滑动
+        if (root.loading) : Rectangle {
+            x: (parent.width - self.width) * (1.0 - abs(2.0 * root.indet - 1.0));
+            y: 0;
+            width: parent.width * 0.28;
+            height: 100%;
+            border-radius: 2px;
+            background: MobileTheme.primary;
+        }
+
         Rectangle {
-            x: min(parent.width - 12px, max(0px, parent.width * root.shown - 6px));
-            y: (parent.height - 12px) / 2;
-            width: 12px;
-            height: 12px;
-            border-radius: 6px;
-            background: MobileTheme.secondary;
+            x: min(parent.width - 10px, max(0px, parent.width * root.shown - 5px));
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background: MobileTheme.primary;
+            drop-shadow-blur: 5px;
+            drop-shadow-color: rgba(MobileTheme.primary.red, MobileTheme.primary.green, MobileTheme.primary.blue, 0.28);
+            visible: !root.loading;
         }
     }
 
     slider-ta := TouchArea {
         width: 100%;
         height: 100%;
+        enabled: !root.loading;
 
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down) {
@@ -107,19 +137,23 @@ component PlayerSlider inherits Rectangle {
                 }
                 root.dragging = false;
                 EventResult.accept
-            } else { EventResult.reject }
+            } else {
+                EventResult.reject
+            }
         }
     }
 }
 
-// 歌词行：落在 [start-ms, end-ms) 内高亮
+// 完整歌词行：当前行放大高亮，激活时通知列表重新居中
 component LyricLineView inherits Rectangle {
+    in property <int> index: 0;
     in property <LyricRow> lyric;
     in property <float> pos-ms: 0.0;
+    callback activated(int);
 
     property <bool> active: root.pos-ms >= root.lyric.start-ms && root.pos-ms < root.lyric.end-ms;
 
-    height: 44px;
+    height: 58px;
     background: transparent;
 
     Text {
@@ -127,11 +161,23 @@ component LyricLineView inherits Rectangle {
         height: 100%;
         text: root.lyric.text;
         color: root.active ? MobileTheme.primary : MobileTheme.text-faint;
-        font-size: root.active ? 16px : 14px;
+        font-size: root.active ? 20px : 15px;
         font-weight: root.active ? 700 : 400;
-        horizontal-alignment: left;
+        horizontal-alignment: center;
         vertical-alignment: center;
-        overflow: elide;
+        wrap: word-wrap;
+        animate color, font-size { duration: 180ms; }
+    }
+
+    init => {
+        if (root.active) {
+            root.activated(root.index);
+        }
+    }
+    changed active => {
+        if (root.active) {
+            root.activated(root.index);
+        }
     }
 }
 
@@ -139,8 +185,122 @@ component LyricsList inherits Rectangle {
     in property <[LyricRow]> lyrics;
     in property <float> pos-ms: 0.0;
 
+    property <int> current-index: 0;
+    property <length> row-height: 58px;
+
     background: transparent;
     clip: true;
+
+    sv := ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+        animate content-y { duration: 280ms; easing: ease-out; }
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 0px;
+            padding-top: max(0px, (sv.visible-height - root.row-height) / 2);
+            padding-bottom: max(0px, (sv.visible-height - root.row-height) / 2);
+
+            for l[i] in root.lyrics : LyricLineView {
+                index: i;
+                lyric: l;
+                pos-ms: root.pos-ms;
+                activated(index) => {
+                    root.current-index = index;
+                    root.recenter();
+                }
+            }
+        }
+    }
+
+    if (root.lyrics.length == 0) : Text {
+        width: 100%;
+        height: 100%;
+        text: "暂无歌词";
+        color: MobileTheme.text-faint;
+        font-size: 15px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    function recenter() {
+        if (root.lyrics.length > 0) {
+            sv.content-y = -min(
+                max(0px, sv.content-height - sv.visible-height),
+                max(0px, root.current-index * root.row-height)
+            );
+        }
+    }
+
+    init => { root.recenter(); }
+    changed lyrics => {
+        root.current-index = 0;
+        sv.content-y = 0px;
+    }
+}
+
+// 局部歌词行：激活行高亮，并通知父级把窗口中心移到该行
+component LyricPeekRow inherits Text {
+    in property <int> index: 0;
+    in property <LyricRow> lyric;
+    in property <float> pos-ms: 0.0;
+    callback activated(int);
+
+    property <bool> active: root.pos-ms >= root.lyric.start-ms && root.pos-ms < root.lyric.end-ms;
+
+    text: root.lyric.text;
+    color: root.active ? MobileTheme.text : MobileTheme.text-faint;
+    font-size: root.active ? 15px : 12px;
+    font-weight: root.active ? 700 : 400;
+    horizontal-alignment: left;
+    vertical-alignment: center;
+    overflow: elide;
+    animate color, font-size { duration: 160ms; }
+
+    init => { if (root.active) { root.activated(root.index); } }
+    changed active => { if (root.active) { root.activated(root.index); } }
+}
+
+// 唱片页局部歌词：滚动到当前行居中，只露出窗口内几行，当前行高亮
+component LyricPeek inherits Rectangle {
+    in property <[LyricRow]> lyrics;
+    in property <float> pos-ms: 0.0;
+
+    property <int> current-index: 0;
+    // 26→28：让 140px 高的视口正好容纳 5 行整，避免边缘出现半行裁切
+    property <length> row-height: 28px;
+
+    background: transparent;
+    clip: true;
+
+    sv := ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: always-off;
+        horizontal-scrollbar-policy: always-off;
+        animate content-y { duration: 200ms; easing: ease-out; }
+
+        VerticalLayout {
+            width: 100%;
+            spacing: 0px;
+            padding-top: max(0px, (sv.visible-height - root.row-height) / 2);
+            padding-bottom: max(0px, (sv.visible-height - root.row-height) / 2);
+
+            for l[i] in root.lyrics : LyricPeekRow {
+                height: root.row-height;
+                index: i;
+                lyric: l;
+                pos-ms: root.pos-ms;
+                activated(idx) => {
+                    root.current-index = idx;
+                    root.recenter();
+                }
+            }
+        }
+    }
 
     if (root.lyrics.length == 0) : Text {
         width: 100%;
@@ -148,44 +308,46 @@ component LyricsList inherits Rectangle {
         text: "暂无歌词";
         color: MobileTheme.text-faint;
         font-size: 13px;
-        horizontal-alignment: center;
         vertical-alignment: center;
     }
 
-    if (root.lyrics.length > 0) : ScrollView {
-        width: 100%;
-        height: 100%;
-        vertical-scrollbar-policy: always-off;
-        horizontal-scrollbar-policy: always-off;
-
-        VerticalLayout {
-            width: 100%;
-            spacing: 0px;
-
-            for l in root.lyrics : LyricLineView {
-                lyric: l;
-                pos-ms: root.pos-ms;
-            }
+    function recenter() {
+        if (root.lyrics.length > 0) {
+            sv.content-y = -min(
+                max(0px, sv.content-height - sv.visible-height),
+                max(0px, root.current-index * root.row-height)
+            );
         }
+    }
+
+    init => { root.recenter(); }
+    changed lyrics => {
+        root.current-index = 0;
+        sv.content-y = 0px;
     }
 }
 
-// 队列行：序号 + 歌名/歌手，当前曲目高亮；整行点播
+// 队列行：序号 + 歌名/歌手，当前曲目高亮；整行点播，⋯（或长按）呼出操作抽屉
 component QueueRowView inherits Rectangle {
     in property <int> index: 0;
     in property <Song> song;
     in property <bool> active: false;
     callback clicked();
+    callback more(int);
 
-    height: 56px;
+    property <bool> pressing: false;
+    property <bool> long-fired: false;
+
+    height: 58px;
     background: row-ta.has-hover ? MobileTheme.hover : transparent;
+    border-radius: 12px;
 
     HorizontalLayout {
         width: 100%;
         height: 100%;
         spacing: 12px;
-        padding-left: 4px;
-        padding-right: 4px;
+        padding-left: 8px;
+        padding-right: 40px;
         cross-axis-alignment: center;
 
         Text {
@@ -199,7 +361,7 @@ component QueueRowView inherits Rectangle {
 
         VerticalLayout {
             horizontal-stretch: 1;
-            spacing: 2px;
+            spacing: 3px;
             alignment: center;
 
             Text {
@@ -210,8 +372,8 @@ component QueueRowView inherits Rectangle {
                 overflow: elide;
             }
             Text {
-                text: root.song.artist;
-                color: MobileTheme.text-faint;
+                text: root.song.bad ? root.song.artist + " · 无法播放" : root.song.artist;
+                color: root.song.bad ? MobileTheme.danger : MobileTheme.text-faint;
                 font-size: 11px;
                 overflow: elide;
             }
@@ -220,7 +382,61 @@ component QueueRowView inherits Rectangle {
 
     row-ta := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pressing = true;
+                root.long-fired = false;
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.pressing = false;
+            }
+            EventResult.reject
+        }
+        clicked => {
+            if (root.long-fired) {
+                root.long-fired = false;
+            } else {
+                root.clicked();
+            }
+        }
+    }
+
+    // 长按 450ms → 操作抽屉
+    Timer {
+        interval: 450ms;
+        running: root.pressing && !root.long-fired;
+        triggered => {
+            root.long-fired = true;
+            root.more(root.song.id);
+        }
+    }
+
+    // 三点按钮：与长按同一入口
+    Rectangle {
+        x: parent.width - 38px;
+        y: (parent.height - 34px) / 2;
+        width: 34px;
+        height: 34px;
+        border-radius: 17px;
+        background: more-ta.has-hover ? MobileTheme.hover : transparent;
+
+        // 手绘三点：不依赖字体字形（嵌入字体缺 U+22EF 会渲染成方框）
+        Rectangle {
+            x: (parent.width - 16px) / 2;
+            y: (parent.height - 4px) / 2;
+            width: 16px;
+            height: 4px;
+            background: transparent;
+
+            Rectangle { x: 0px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 6px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 12px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+        }
+
+        more-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.more(root.song.id); }
+        }
     }
 }
 
@@ -228,6 +444,7 @@ component QueueList inherits Rectangle {
     in property <[Song]> queue;
     in property <int> current-id: 0;
     callback played(int);
+    callback more(int);
 
     background: transparent;
     clip: true;
@@ -237,7 +454,7 @@ component QueueList inherits Rectangle {
         height: 100%;
         text: "队列为空";
         color: MobileTheme.text-faint;
-        font-size: 13px;
+        font-size: 14px;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -250,121 +467,115 @@ component QueueList inherits Rectangle {
 
         VerticalLayout {
             width: 100%;
-            spacing: 0px;
+            spacing: 2px;
+            padding-top: 8px;
+            padding-bottom: 12px;
 
             for s[i] in root.queue : QueueRowView {
                 index: i;
                 song: s;
                 active: s.id == root.current-id;
                 clicked => { root.played(s.id); }
+                more(id) => { root.more(id); }
             }
         }
     }
 }
 
-// 顶栏：「正在播放」+ 48px 关闭按钮
+// 顶栏：收起、双页指示点、歌词/唱片切换；队列态显示标题与关闭按钮
 component PlayerTopBar inherits Rectangle {
-    in property <string> title: "正在播放";
+    in property <int> page: 0;
+    in property <bool> wide: false;
+    in property <bool> queue-open: false;
+    in property <int> queue-count: 0;
+    in property <bool> liked: false;
     callback closed();
+    callback page-toggled();
+    callback queue-closed();
+    callback like-clicked();
 
     height: 48px;
     background: transparent;
 
-    HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        spacing: 8px;
-        cross-axis-alignment: center;
+    PlayBarButton {
+        x: 0;
+        y: 4px;
+        size: 40px;
+        icon: @image-url("../../assets/icons/arrow-down-s-gray.svg");
+        icon-color: MobileTheme.text;
+        clicked => { root.closed(); }
+    }
 
-        Text {
-            text: root.title;
-            horizontal-stretch: 1;
-            color: MobileTheme.text-secondary;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
+    if (!root.wide && !root.queue-open) : Rectangle {
+        x: (parent.width - 40px) / 2;
+        y: 0;
+        width: 40px;
+        height: 48px;
 
         Rectangle {
-            width: 48px;
-            height: 48px;
-            border-radius: 24px;
-            background: close-ta.has-hover ? MobileTheme.hover : rgba(255, 255, 255, 0.10);
-
-            Image {
-                source: @image-url("../../assets/icons/arrow-big-down-lines.svg");
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                width: 20px;
-                height: 20px;
-                colorize: MobileTheme.text;
-            }
-
-            close-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.closed(); }
-            }
+            x: 7px;
+            y: 21px;
+            width: root.page == 0 ? 14px : 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.page == 0 ? MobileTheme.primary : MobileTheme.text-faint;
+            animate width, background { duration: 180ms; }
+        }
+        Rectangle {
+            x: 27px;
+            y: 21px;
+            width: root.page == 1 ? 14px : 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.page == 1 ? MobileTheme.primary : MobileTheme.text-faint;
+            animate width, background { duration: 180ms; }
         }
     }
-}
 
-// 歌词 / 队列切换的单个页签
-component PlayerTab inherits Rectangle {
-    in property <string> text: "";
-    in property <bool> active: false;
-    callback clicked();
-
-    height: 44px;
-    background: transparent;
-
-    Text {
-        width: 100%;
-        height: 100%;
-        text: root.text;
-        color: root.active ? MobileTheme.text : MobileTheme.text-faint;
-        font-size: 14px;
-        font-weight: root.active ? 600 : 400;
+    if (root.wide || root.queue-open) : Text {
+        x: 48px;
+        width: parent.width - 96px;
+        height: 48px;
+        text: root.queue-open ? "播放队列 · " + root.queue-count + " 首" : "正在播放";
+        color: MobileTheme.text-secondary;
+        font-size: 13px;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
-    Rectangle {
-        x: (parent.width - 24px) / 2;
-        y: parent.height - 2px;
-        width: 24px;
-        height: 2px;
-        border-radius: 1px;
-        background: root.active ? MobileTheme.primary : transparent;
+    if (root.queue-open) : PlayBarButton {
+        x: parent.width - 40px;
+        y: 4px;
+        size: 40px;
+        icon: @image-url("../../assets/icons/win-close-gray.svg");
+        icon-color: MobileTheme.text-secondary;
+        clicked => { root.queue-closed(); }
     }
 
-    tab-ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+    if (!root.queue-open) : PlayBarButton {
+        x: parent.width - 84px;
+        y: 4px;
+        size: 40px;
+        icon: root.liked
+            ? @image-url("../../assets/icons/heart-fill-red.svg")
+            : @image-url("../../assets/icons/heart-gray.svg");
+        icon-color: root.liked ? #e03131 : MobileTheme.text-secondary;
+        clicked => { root.like-clicked(); }
     }
-}
 
-// 歌词 / 队列切换
-component PlayerTabs inherits HorizontalLayout {
-    in property <int> tab: 0;
-    callback changed(int);
-
-    height: 44px;
-    spacing: 0px;
-
-    PlayerTab {
-        horizontal-stretch: 1;
-        text: "歌词";
-        active: root.tab == 0;
-        clicked => { root.changed(0); }
-    }
-    PlayerTab {
-        horizontal-stretch: 1;
-        text: "队列";
-        active: root.tab == 1;
-        clicked => { root.changed(1); }
+    if (!root.wide && !root.queue-open) : PlayBarButton {
+        x: parent.width - 40px;
+        y: 4px;
+        size: 40px;
+        icon: root.page == 0
+            ? @image-url("../../assets/icons/clef-staff.svg")
+            : @image-url("../../assets/icons/album-gray.svg");
+        icon-color: MobileTheme.text-secondary;
+        clicked => { root.page-toggled(); }
     }
 }
 
-// 曲目信息：歌名 + 歌手
+// 左对齐曲目信息
 component PlayerTitles inherits VerticalLayout {
     in property <Song> song;
 
@@ -373,65 +584,220 @@ component PlayerTitles inherits VerticalLayout {
     Text {
         text: root.song.name == "" ? "歌曲标题" : root.song.name;
         color: MobileTheme.text;
-        font-size: 20px;
+        font-size: 24px;
         font-weight: 700;
-        horizontal-alignment: center;
+        horizontal-alignment: left;
         overflow: elide;
     }
     Text {
         text: root.song.name == "" ? "歌手 · 专辑" : root.song.artist;
         color: MobileTheme.text-secondary;
         font-size: 13px;
-        horizontal-alignment: center;
+        horizontal-alignment: left;
         overflow: elide;
     }
 }
 
-// 控制区玻璃面板：模式 / 上一首 / 播放暂停 / 下一首
-component PlayerControls inherits GlassRectangle {
+// 唱片页内容：氛围光环、圆形封面、简洁唱臂、歌曲信息与局部歌词
+// show-lyric-peek：横屏/平板分栏时右侧已常驻完整歌词，左侧关掉局部歌词避免重复，
+// 并让唱片+标题整体垂直居中、尺寸更饱满。
+component RecordContent inherits Rectangle {
+    in property <Song> song;
+    in property <[LyricRow]> lyrics;
+    in property <float> pos-ms: 0.0;
+    in property <bool> show-lyric-peek: true;
+
+    property <length> cover-size: root.show-lyric-peek
+        ? min(min(root.width * 0.62, root.height * 0.52), 280px)
+        : min(min(root.width * 0.74, root.height * 0.58), 300px);
+    property <length> disc-x: (root.width - root.cover-size) / 2;
+    property <length> disc-y: root.show-lyric-peek
+        ? max(18px, (root.height * 0.58 - root.cover-size) / 2)
+        : max(12px, (root.height - root.cover-size - 76px) / 2);
+    property <length> titles-y: root.show-lyric-peek
+        ? root.height * 0.58 + 8px
+        : root.disc-y + root.cover-size + 12px;
+    property <length> peek-y: root.height * 0.58 + 56px;
+
+    background: transparent;
+
+    Rectangle {
+        x: root.disc-x - 20px;
+        y: root.disc-y - 20px;
+        width: root.cover-size + 40px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: rgba(MobileTheme.cover-color.red, MobileTheme.cover-color.green, MobileTheme.cover-color.blue, 0.09);
+    }
+    Rectangle {
+        x: root.disc-x - 8px;
+        y: root.disc-y - 8px;
+        width: root.cover-size + 16px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: rgba(255, 255, 255, 0.15);
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.20);
+    }
+
+    PlayerCover {
+        x: root.disc-x;
+        y: root.disc-y;
+        size: root.cover-size;
+        cover: root.song.cover;
+    }
+
+    // 静态唱臂：与参考图一致的右侧视觉重心，不引入额外交互状态
+    Rectangle {
+        x: root.disc-x + root.cover-size * 0.82;
+        y: root.disc-y - 12px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
+        background: rgba(255, 255, 255, 0.52);
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.68);
+
+        Rectangle {
+            x: 10px;
+            y: 10px;
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background: rgba(MobileTheme.primary.red, MobileTheme.primary.green, MobileTheme.primary.blue, 0.32);
+        }
+    }
+    Rectangle {
+        x: root.disc-x + root.cover-size * 0.84;
+        y: root.disc-y + 12px;
+        width: 6px;
+        height: root.cover-size * 0.56;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.66);
+        border-width: 1px;
+        border-color: rgba(180, 180, 200, 0.28);
+        transform-rotation: 13deg;
+    }
+    Rectangle {
+        x: root.disc-x + root.cover-size * 0.70;
+        y: root.disc-y + root.cover-size * 0.63;
+        width: 22px;
+        height: 34px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.76);
+        transform-rotation: 13deg;
+    }
+
+    PlayerTitles {
+        x: 0;
+        y: root.titles-y;
+        width: 100%;
+        height: 62px;
+        song: root.song;
+    }
+
+    LyricPeek {
+        visible: root.show-lyric-peek;
+        x: 0;
+        y: root.peek-y;
+        width: 100%;
+        height: max(0px, min(140px, root.height - root.peek-y - 8px));
+        lyrics: root.lyrics;
+        pos-ms: root.pos-ms;
+    }
+}
+
+// 底部播放控制：模式 / 上一首 / 播放暂停 / 下一首 / 队列
+component PlayerControls inherits Rectangle {
     in property <bool> playing: false;
+    in property <bool> loading: false;
     in property <int> play-mode: 0;
+    in property <bool> queue-open: false;
     callback mode-clicked();
     callback prev-clicked();
     callback toggle-clicked();
     callback next-clicked();
+    callback queue-clicked();
 
-    height: 88px;
-    border-radius: 26px;
-    blur-radius: MobileTheme.surface-blur-radius;
-    border-width: 1px;
-    highlight-alpha: MobileTheme.highlight-alpha;
+    height: 64px;
+    background: transparent;
+
+    // 液态玻璃底座：进度条仍在底座上方，控制键落进玻璃胶囊里
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 26px;
+        background: MobileTheme.surface-bg;
+        border-width: 1px;
+        border-color: MobileTheme.glass-stroke;
+        backdrop-blur: MobileTheme.surface-blur-radius;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MobileTheme.glass-shade;
+        clip: true;
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 
     HorizontalLayout {
         width: 100%;
         height: 100%;
-        spacing: 12px;
-        padding: 12px;
+        spacing: 0px;
+        padding: 4px;
+        cross-axis-alignment: center;
 
+        Rectangle { horizontal-stretch: 1; }
         PlayBarButton {
-            size: 44px;
-            icon: @image-url("../../assets/icons/repeat-gray.svg");
-            icon-color: root.play-mode == 0 ? MobileTheme.icon : MobileTheme.primary;
+            size: 46px;
+            icon: root.play-mode == 1
+                ? @image-url("../../assets/icons/repeat-once-gray.svg")
+                : (root.play-mode == 2
+                    ? @image-url("../../assets/icons/shuffle-gray.svg")
+                    : @image-url("../../assets/icons/repeat-gray.svg"));
+            icon-color: root.play-mode == 0 ? MobileTheme.text-secondary : MobileTheme.primary;
             clicked => { root.mode-clicked(); }
         }
         Rectangle { horizontal-stretch: 1; }
         PlayBarButton {
+            size: 46px;
             icon: @image-url("../../assets/icons/prev-gray.svg");
-            icon-color: MobileTheme.icon;
+            icon-color: MobileTheme.text;
             clicked => { root.prev-clicked(); }
         }
+        Rectangle { horizontal-stretch: 1; }
         PlayBarButton {
-            size: 52px;
+            size: 56px;
             accent: true;
+            // 加载中保持"暂停"语义（可点击取消加载），降低不透明度提示未就绪
+            opacity: root.loading ? 0.72 : 1.0;
             icon: root.playing
                 ? @image-url("../../assets/icons/pause-white.svg")
                 : @image-url("../../assets/icons/play-white.svg");
             clicked => { root.toggle-clicked(); }
         }
+        Rectangle { horizontal-stretch: 1; }
         PlayBarButton {
+            size: 46px;
             icon: @image-url("../../assets/icons/next-gray.svg");
-            icon-color: MobileTheme.icon;
+            icon-color: MobileTheme.text;
             clicked => { root.next-clicked(); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        PlayBarButton {
+            size: 46px;
+            icon: @image-url("../../assets/icons/playlist-gray.svg");
+            icon-color: root.queue-open ? MobileTheme.primary : MobileTheme.text-secondary;
+            clicked => { root.queue-clicked(); }
         }
         Rectangle { horizontal-stretch: 1; }
     }
@@ -443,85 +809,239 @@ export component PlayerPage inherits Rectangle {
     in property <bool> playing: false;
     in property <float> progress: 0.0;
     in property <int> play-mode: 0;
+    in property <bool> liked: false;
     in property <[LyricRow]> lyrics;
     in property <[Song]> queue;
     in property <bool> wide: false;
+    // 音频加载中：进度条切换为往返滑动指示，时间标签显示"正在加载…"
+    in property <bool> loading: false;
+    // 当前曲目无法播放：进度条上方显示错误提示
+    in property <bool> play-error: false;
+    property <float> indet: 0.0;
 
     callback close();
     callback toggle();
     callback prev();
     callback next();
     callback mode();
+    callback like();
     callback seek(float);
     callback queue-played(int);
+    callback song-more(int);
 
-    // 0 歌词 / 1 队列
-    property <int> tab: 0;
+    // 0 唱片 / 1 完整歌词；队列是覆盖内容区的独立状态，底部控制始终可用
+    property <int> page: 0;
+    property <bool> queue-open: false;
     property <float> dur-sec: max(0.0, root.song.duration-sec);
     property <float> pos-ms: root.progress * root.dur-sec * 1000.0;
-    // 封面尺寸：竖屏受宽高约束（最大 240px）；宽屏左栏更小，保证控制区可见
-    property <length> cover-size: min(min(root.width * 0.62, root.height * 0.30), 240px);
-    property <length> wide-cover-size: min(min(root.width * 0.20, root.height * 0.26), 220px);
 
     background: transparent;
 
-    // 背景：封面色氛围渐变 + 页面底色半透明叠加（无实时模糊，静态降级）
-    CoverBackdrop {
+    // 加载中：每帧推进 indeterminate 位置（仅 loading 时运行）
+    Timer {
+        interval: 16ms;
+        running: root.loading;
+        triggered => {
+            root.indet = Math.mod(root.indet + 0.018, 1.0);
+        }
+    }
+
+    // 封面沉浸背景（对齐 iOS 参考稿方案 B）：封面图放大铺满 → 全屏 backdrop-blur 雾化
+    // → 柔和 veil 保可读；无封面时退化为封面色渐变。去掉原先 0.86 的死黑遮罩。
+    if (root.song.cover.width > 0) : Image {
+        width: 100%;
+        height: 100%;
+        source: root.song.cover;
+        image-fit: cover;
+    }
+    if (root.song.cover.width <= 0) : CoverBackdrop {
         width: 100%;
         height: 100%;
     }
     Rectangle {
         width: 100%;
         height: 100%;
-        background: rgba(MobileTheme.page-bg.red, MobileTheme.page-bg.green, MobileTheme.page-bg.blue, 0.72);
+        backdrop-blur: 30px;
+    }
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg, MobileTheme.veil-top 0%, MobileTheme.veil-bottom 100%);
     }
 
-    // ===== 竖屏：单列全屏 =====
-    if (!root.wide) : VerticalLayout {
+    VerticalLayout {
         width: 100%;
         height: 100%;
         spacing: 0px;
         padding-top: MobileTheme.safe-top + 8px;
         padding-bottom: MobileTheme.safe-bottom + 10px;
-        padding-left: MobileTheme.safe-left + 20px;
-        padding-right: MobileTheme.safe-right + 20px;
+        padding-left: MobileTheme.safe-left + 22px;
+        padding-right: MobileTheme.safe-right + 22px;
 
         PlayerTopBar {
+            page: root.page;
+            wide: root.wide;
+            queue-open: root.queue-open;
+            queue-count: root.queue.length;
+            liked: root.liked;
             closed => { root.close(); }
+            page-toggled => { root.page = root.page == 0 ? 1 : 0; }
+            queue-closed => { root.queue-open = false; }
+            like-clicked => { root.like(); }
         }
 
-        Rectangle { vertical-stretch: 1; min-height: 0px; }
-
         Rectangle {
-            height: root.cover-size;
+            vertical-stretch: 1;
+            min-height: 0px;
             background: transparent;
 
-            PlayerCover {
-                x: (parent.width - self.width) / 2;
-                size: root.cover-size;
-                cover: root.song.cover;
+            // 手机竖屏：唱片页与歌词页横向跟手切换（左滑进歌词，右滑回唱片）
+            if (!root.wide && !root.queue-open) : gesture := SwipeGestureHandler {
+                width: 100%;
+                height: 100%;
+                handle-swipe-left: root.page == 0;
+                handle-swipe-right: root.page == 1;
+
+                swiped => {
+                    if (self.current-position.x < self.pressed-position.x - self.width / 5) {
+                        root.page = 1;
+                    } else if (self.current-position.x > self.pressed-position.x + self.width / 5) {
+                        root.page = 0;
+                    }
+                }
+
+                page-view := Rectangle {
+                    width: 100%;
+                    height: 100%;
+                    clip: true;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        property <length> position: -root.page * page-view.width;
+                        property <length> swipe-offset;
+                        x: self.position + self.swipe-offset;
+                        spacing: 0px;
+                        animate position { duration: 240ms; easing: ease-in-out; }
+
+                        RecordContent {
+                            width: page-view.width;
+                            height: 100%;
+                            song: root.song;
+                            lyrics: root.lyrics;
+                            pos-ms: root.pos-ms;
+                        }
+                        LyricsList {
+                            width: page-view.width;
+                            height: 100%;
+                            lyrics: root.lyrics;
+                            pos-ms: root.pos-ms;
+                        }
+
+                        states [
+                            swiping when gesture.swiping : {
+                                swipe-offset: gesture.current-position.x - gesture.pressed-position.x;
+                                out {
+                                    animate swipe-offset { duration: 220ms; easing: ease-in-out; }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+
+            if (!root.wide && root.queue-open) : QueueList {
+                width: 100%;
+                height: 100%;
+                queue: root.queue;
+                current-id: root.song.id;
+                played(id) => { root.queue-played(id); }
+                more(id) => { root.song-more(id); }
+            }
+
+            // 横屏/平板：左侧唱片信息，右侧常驻歌词或队列，无需再切页
+            if (root.wide) : HorizontalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 28px;
+
+                RecordContent {
+                    horizontal-stretch: 46;
+                    song: root.song;
+                    lyrics: root.lyrics;
+                    pos-ms: root.pos-ms;
+                    show-lyric-peek: false;
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 54;
+                    spacing: 0px;
+
+                    Text {
+                        height: 36px;
+                        text: root.queue-open ? "播放队列" : "歌词";
+                        color: MobileTheme.text-secondary;
+                        font-size: 14px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        min-height: 0px;
+                        clip: true;
+
+                        LyricsList {
+                            visible: !root.queue-open;
+                            width: 100%;
+                            height: 100%;
+                            lyrics: root.lyrics;
+                            pos-ms: root.pos-ms;
+                        }
+                        QueueList {
+                            visible: root.queue-open;
+                            width: 100%;
+                            height: 100%;
+                            queue: root.queue;
+                            current-id: root.song.id;
+                            played(id) => { root.queue-played(id); }
+                            more(id) => { root.song-more(id); }
+                        }
+                    }
+                }
             }
         }
 
-        Rectangle { height: 16px; }
-
-        PlayerTitles { song: root.song; }
-
-        Rectangle { vertical-stretch: 1; min-height: 0px; }
+        // 无法播放提示：位于进度条正上方（用户明确要求的位置）
+        if (root.play-error) : Text {
+            height: 16px;
+            text: "该曲无法播放，请更换歌曲";
+            color: MobileTheme.danger;
+            font-size: 11px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
 
         PlayerSlider {
             ratio: root.progress;
+            loading: root.loading;
+            indet: root.indet;
             seek(r) => { root.seek(r); }
         }
 
-        Rectangle { height: 6px; }
-
         HorizontalLayout {
             height: 14px;
-            TimeText {
+            if (!root.loading) : TimeText {
                 sec: root.progress * root.dur-sec;
                 color: MobileTheme.text-faint;
                 font-size: 10px;
+            }
+            if (root.loading) : Text {
+                text: "正在加载音频…";
+                color: MobileTheme.primary;
+                font-size: 10px;
+                font-weight: 600;
             }
             Rectangle { horizontal-stretch: 1; }
             TimeText {
@@ -532,151 +1052,16 @@ export component PlayerPage inherits Rectangle {
             }
         }
 
-        Rectangle { height: 14px; }
-
         PlayerControls {
             playing: root.playing;
+            loading: root.loading;
             play-mode: root.play-mode;
+            queue-open: root.queue-open;
             mode-clicked => { root.mode(); }
             prev-clicked => { root.prev(); }
             toggle-clicked => { root.toggle(); }
             next-clicked => { root.next(); }
-        }
-
-        Rectangle { height: 10px; }
-
-        PlayerTabs {
-            tab: root.tab;
-            changed(t) => { root.tab = t; }
-        }
-
-        Rectangle {
-            vertical-stretch: 2;
-            min-height: 80px;
-            background: transparent;
-            clip: true;
-
-            LyricsList {
-                visible: root.tab == 0;
-                width: 100%;
-                height: 100%;
-                lyrics: root.lyrics;
-                pos-ms: root.pos-ms;
-            }
-            QueueList {
-                visible: root.tab == 1;
-                width: 100%;
-                height: 100%;
-                queue: root.queue;
-                current-id: root.song.id;
-                played(id) => { root.queue-played(id); }
-            }
-        }
-    }
-
-    // ===== 横屏 / 平板：左 46% 信息与控制，右 54% 歌词/队列 =====
-    if (root.wide) : HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        spacing: 24px;
-        padding-top: MobileTheme.safe-top + 12px;
-        padding-bottom: MobileTheme.safe-bottom + 12px;
-        padding-left: MobileTheme.safe-left + 28px;
-        padding-right: MobileTheme.safe-right + 28px;
-
-        VerticalLayout {
-            horizontal-stretch: 46;
-            spacing: 0px;
-
-            PlayerTopBar {
-                closed => { root.close(); }
-            }
-
-            Rectangle { vertical-stretch: 1; min-height: 0px; }
-
-            Rectangle {
-                height: root.wide-cover-size;
-                background: transparent;
-
-                PlayerCover {
-                    x: (parent.width - self.width) / 2;
-                    size: root.wide-cover-size;
-                    cover: root.song.cover;
-                }
-            }
-
-            Rectangle { height: 14px; }
-
-            PlayerTitles { song: root.song; }
-
-            Rectangle { vertical-stretch: 1; min-height: 0px; }
-
-            PlayerSlider {
-                ratio: root.progress;
-                seek(r) => { root.seek(r); }
-            }
-
-            Rectangle { height: 6px; }
-
-            HorizontalLayout {
-                height: 14px;
-                TimeText {
-                    sec: root.progress * root.dur-sec;
-                    color: MobileTheme.text-faint;
-                    font-size: 10px;
-                }
-                Rectangle { horizontal-stretch: 1; }
-                TimeText {
-                    sec: root.dur-sec;
-                    literal: root.song.duration;
-                    color: MobileTheme.text-faint;
-                    font-size: 10px;
-                }
-            }
-
-            Rectangle { height: 14px; }
-
-            PlayerControls {
-                playing: root.playing;
-                play-mode: root.play-mode;
-                mode-clicked => { root.mode(); }
-                prev-clicked => { root.prev(); }
-                toggle-clicked => { root.toggle(); }
-                next-clicked => { root.next(); }
-            }
-        }
-
-        VerticalLayout {
-            horizontal-stretch: 54;
-            spacing: 0px;
-            padding-top: 4px;
-
-            PlayerTabs {
-                tab: root.tab;
-                changed(t) => { root.tab = t; }
-            }
-
-            Rectangle {
-                vertical-stretch: 1;
-                background: transparent;
-                clip: true;
-
-                LyricsList {
-                    visible: root.tab == 0;
-                    width: 100%;
-                    height: 100%;
-                    lyrics: root.lyrics;
-                    pos-ms: root.pos-ms;
-                }
-                QueueList {
-                    visible: root.tab == 1;
-                    width: 100%;
-                    height: 100%;
-                    queue: root.queue;
-                    current-id: root.song.id;
-                    played(id) => { root.queue-played(id); }
-                }
-            }
+            queue-clicked => { root.queue-open = !root.queue-open; }
         }
     }
 }

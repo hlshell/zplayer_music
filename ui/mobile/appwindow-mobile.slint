@@ -4,23 +4,31 @@
 //  竖屏：底部导航 + 迷你播放条；横屏：左侧 72px 窄栏 + 迷你播放条；
 //  平板：224px 侧栏 + 内容区（宽 >= 840 双栏）+ 底部播放栏。
 // ============================================================================
+// 中文字体：Android 精简镜像未必带 CJK 字形，系统回退会渲染成方框（tofu）。
+// 与 web 入口（appwindow.web.slint）同一方案——编译期嵌入 SimHei，供下面
+// default-font-family 使用；桌面预览同样可用（不依赖本机是否安装该字体）。
+import "../../src/fonts/simhei.ttf";
 import { Theme } from "../shared/theme.slint";
 import { MobileTheme } from "theme.slint";
 // 平台/封面取色 token：Rust 侧需 global::<crate::MobileTheme>() 写入，须在编译根显式 re-export
 export { MobileTheme } from "theme.slint";
 import { NavBottomBar, NavRail, NavSidebar } from "components/nav.slint";
 import { MiniPlayer } from "components/mini-player.slint";
+import { SongSheet } from "components/song-sheet.slint";
 import { PlayBar, PlayBarButton } from "components/playbar.slint";
-import { GlassRectangle, CoverBackdrop } from "components/glass.slint";
+import { GlassRectangle, CoverBackdrop, AuroraBackground } from "components/glass.slint";
 // 首页/队列数据模型（与桌面共用同一份 struct 定义，Rust 侧 load 直接填充）
-import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song } from "../shared/models.slint";
+import { HotSong, Playlist, HeroSong, Artist, Album, NewSong, Song, BrowseItem } from "../shared/models.slint";
 import { HomePage } from "pages/home.slint";
 import { SearchPage } from "pages/search.slint";
 import { DetailPage } from "pages/detail.slint";
+import { BrowsePage } from "pages/browse.slint";
 import { SettingsPage } from "pages/settings.slint";
+import { RecentPage } from "pages/recent.slint";
 import { PlayerPage, LyricRow } from "pages/player.slint";
+import { MobileSplash } from "components/splash.slint";
 
-// 内容区：nav==0 渲染首页，nav==1 渲染搜索页，nav==2 渲染设置页。
+// 内容区：nav==0 渲染首页，nav==1 渲染搜索页，nav==2 渲染最近播放，nav==3 渲染设置页。
 // 三种形态（竖屏/横屏/平板单列）共用同一份内容与数据属性。
 component ContentArea inherits Rectangle {
     in property <int> nav: 0;
@@ -39,6 +47,7 @@ component ContentArea inherits Rectangle {
     in property <int> search-type: 0;
     in property <bool> search-loading: false;
     in property <string> search-error;
+    in property <[string]> search-history;
     // 详情页数据与状态
     in property <bool> wide: false;
     in property <bool> detail-open: false;
@@ -49,27 +58,52 @@ component ContentArea inherits Rectangle {
     in property <[Song]> detail-songs;
     in property <bool> detail-loading: false;
     in property <string> detail-error;
+    // 最近播放页数据
+    in property <[Song]> recent-songs;
+    in property <[Song]> liked-songs;
     // 设置页数据与状态
     in property <bool> dark: false;
-    in property <int> theme-color: 0;
     in property <int> settings-language: 0;
     in property <int> settings-quality: 0;
     in property <int> settings-source: 0;
     in property <string> cache-usage;
     in property <string> data-dir;
+    // 分类浏览页（歌单/专辑/排行榜/电台，nav>=4）
+    in property <int> browse-kind: 0;
+    in property <string> browse-title;
+    in property <[BrowseItem]> browse-items;
+    in property <[string]> browse-cats;
+    in property <int> browse-active-cat: 0;
+    in property <bool> browse-loading: false;
+    in property <string> browse-error;
+    in property <bool> browse-has-more: false;
     callback song-played(int);
+    callback song-more(int, int);
     callback playlist-opened(int);
     callback album-opened(int);
+    callback browse-opened(int);
+    callback search-opened();
+    callback hero-opened();
+    callback hero-song-played(int);
     callback search-submitted(string, int);
     callback search-type-changed(int);
+    callback search-history-remove(string);
+    callback search-history-clear();
     callback detail-back();
     callback detail-play-all();
+    callback recent-clear();
+    callback liked-played(int);
+    callback liked-play-all();
     callback dark-changed(bool);
-    callback theme-changed(int);
     callback settings-language-changed(int);
     callback settings-quality-changed(int);
     callback settings-source-changed(int);
     callback settings-clear-cache();
+    callback browse-back();
+    callback browse-cat-changed(int);
+    callback browse-load-more();
+    callback browse-retry();
+    callback radio-opened(int);
 
     background: transparent;
 
@@ -87,6 +121,7 @@ component ContentArea inherits Rectangle {
         wide: root.wide;
         back => { root.detail-back(); }
         song-played(id) => { root.song-played(id); }
+        song-more(id) => { root.song-more(id, 1); }
         play-all => { root.detail-play-all(); }
     }
     if (!root.detail-open && root.nav == 0) : HomePage {
@@ -100,7 +135,12 @@ component ContentArea inherits Rectangle {
         hero-count: root.hero-count;
         loading: root.loading;
         song-played(id) => { root.song-played(id); }
+        song-more(id) => { root.song-more(id, 0); }
         playlist-opened(id) => { root.playlist-opened(id); }
+        browse-opened(kind) => { root.browse-opened(kind); }
+        search-opened => { root.search-opened(); }
+        hero-opened => { root.hero-opened(); }
+        hero-song-played(id) => { root.hero-song-played(id); }
     }
     if (!root.detail-open && root.nav == 1) : SearchPage {
         width: 100%;
@@ -112,65 +152,129 @@ component ContentArea inherits Rectangle {
         search-type: root.search-type;
         loading: root.search-loading;
         error: root.search-error;
+        history: root.search-history;
         submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
         type-changed(ty) => { root.search-type-changed(ty); }
+        history-remove(w) => { root.search-history-remove(w); }
+        history-clear => { root.search-history-clear(); }
         song-played(id) => { root.song-played(id); }
+        song-more(id) => { root.song-more(id, 4); }
         playlist-opened(id) => { root.playlist-opened(id); }
         album-opened(id) => { root.album-opened(id); }
     }
-    if (!root.detail-open && root.nav == 2) : SettingsPage {
+    if (!root.detail-open && root.nav == 2) : RecentPage {
+        width: 100%;
+        height: 100%;
+        songs: root.recent-songs;
+        liked-songs: root.liked-songs;
+        song-played(id) => { root.song-played(id); }
+        clear => { root.recent-clear(); }
+        song-more(id, src) => { root.song-more(id, src); }
+        liked-played(id) => { root.liked-played(id); }
+        liked-play-all => { root.liked-play-all(); }
+    }
+    if (!root.detail-open && root.nav == 3) : SettingsPage {
         width: 100%;
         height: 100%;
         dark: root.dark;
-        theme-color: root.theme-color;
         language: root.settings-language;
         quality: root.settings-quality;
         source: root.settings-source;
         cache-usage: root.cache-usage;
         data-dir: root.data-dir;
         dark-changed(v) => { root.dark-changed(v); }
-        theme-changed(i) => { root.theme-changed(i); }
         language-changed(i) => { root.settings-language-changed(i); }
         quality-changed(i) => { root.settings-quality-changed(i); }
         source-changed(i) => { root.settings-source-changed(i); }
         clear-cache => { root.settings-clear-cache(); }
     }
+    // 分类浏览作为内容页：跟随各形态容器（竖屏浮层在上 / 横屏 rail 让位 / 平板 sidebar 让位），
+    // 不再全屏覆盖导航（此前顶层覆盖导致横屏 rail 与内容重叠、竖屏迷你条被吞）。
+    if (!root.detail-open && root.nav >= 4) : BrowsePage {
+        width: 100%;
+        height: 100%;
+        kind: root.browse-kind;
+        title: root.browse-title;
+        items: root.browse-items;
+        cats: root.browse-cats;
+        active-cat: root.browse-active-cat;
+        loading: root.browse-loading;
+        error: root.browse-error;
+        has-more: root.browse-has-more;
+        back => { root.browse-back(); }
+        cat-changed(idx) => { root.browse-cat-changed(idx); }
+        item-opened(id) => {
+            if (root.browse-kind == 1) {
+                root.album-opened(id);
+            } else if (root.browse-kind == 3) {
+                root.radio-opened(id);
+            } else {
+                root.playlist-opened(id);
+            }
+        }
+        load-more => { root.browse-load-more(); }
+        retry => { root.browse-retry(); }
+    }
 }
 
 export component AppWindow inherits Window {
     title: "ZPlayer Music";
-    width: 390px;
-    height: 844px;
-    background: MobileTheme.page-bg;
+    // 初始尺寸必须用 preferred-*：直接写 width/height 会生成 min==max 约束，窗口被钉死
+    // 在 390x844（Android 实际 surface 更矮时底部导航被裁掉、更宽时右侧留白，
+    // 且 layout-kind 恒为竖屏，横屏/平板形态永远不会触发）。preferred-* 只做初始建议，
+    // 运行期跟随真实窗口尺寸（与桌面 appwindow.slint 同一处理）。
+    preferred-width: 390px;
+    preferred-height: 844px;
+    background: transparent;
+    default-font-family: "SimHei";
 
-    // ===== 会话状态（旋转/改尺寸只重组布局，不重置）=====
-    in-out property <int> current-nav: 0;      // 0 首页 / 1 搜索 / 2 设置
+    // ===== 会话状态 =====
+    in-out property <int> current-nav: 0;      // 0 首页 / 1 搜索 / 2 最近 / 3 设置；>=4 为分类浏览
     in-out property <bool> detail-open: false;
     in-out property <bool> player-open: false;
     in-out property <bool> playing: false;
+    in-out property <bool> player-loading: false;
+    // 当前曲目无法播放（进度条上方错误提示）
+    in-out property <bool> player-error: false;
     in-out property <int> play-mode: 0;
     in-out property <float> progress: 0.0;
 
-    // 主题与桌面同源：深浅色 / 主题色由 Rust 按用户配置写入 Theme，本窗口双向转发
+    // 深浅色与桌面同源，由 Rust 按用户配置写入 Theme；主题色固定为默认（功能已废除）
     in-out property <bool> dark <=> Theme.dark;
-    in-out property <int> theme-color-index <=> Theme.theme-color-index;
 
     // ===== 首页/搜索/播放回调（由 src/mobile/handlers.rs 接线）=====
     callback song-played(int);
+    callback song-more(int, int);
     callback playlist-opened(int);
     callback album-opened(int);
+    callback radio-opened(int);
+    callback browse-opened(int);
+    callback hero-opened();
+    callback hero-song-played(int);
+    callback browse-cat-changed(int);
+    callback browse-load-more();
+    callback browse-retry();
     callback search-submitted(string, int);
     callback search-type-changed(int);
+    callback search-history-remove(string);
+    callback search-history-clear();
     callback player-toggle();
     callback player-prev();
     callback player-next();
     callback player-mode();
+    callback player-like();
     callback player-seek(float);
     callback queue-played(int);
     callback detail-back();
     callback detail-play-all();
+    callback recent-clear();
+    callback liked-played(int);
+    callback liked-play-all();
+    callback sheet-play(int);
+    callback sheet-play-next(int);
+    callback sheet-toggle-like(int);
+    callback sheet-remove(int);
     callback dark-changed(bool);
-    callback theme-changed(int);
     callback settings-language-changed(int);
     callback settings-quality-changed(int);
     callback settings-source-changed(int);
@@ -188,12 +292,42 @@ export component AppWindow inherits Window {
     in-out property <[NewSong]> new-songs;
     in-out property <[Song]> queue;
     in-out property <Song> current-song;
+    // 最近播放列表（由 src/mobile/handlers.rs 按 recent.json 填充）
+    in-out property <[Song]> recent-songs;
+    in-out property <[Song]> liked-songs;
+
+    // 歌曲操作抽屉状态（长按 / ⋯ 打开）
+    in-out property <bool> sheet-open: false;
+    in-out property <Song> sheet-song;
+    in-out property <bool> sheet-liked: false;
+    in-out property <string> sheet-remove-label: "";
+    in-out property <int> sheet-source: 0;
     // 当前歌曲封面主色（由 src/mobile/handlers.rs 取色写入，播放层环境背景使用）
     in-out property <color> cover-color: #6c5ce7;
     // 当前歌曲歌词（由 src/mobile/handlers.rs 解析 LRC 后填充）
     in-out property <[LyricRow]> lyrics;
     in-out property <bool> liked: false;
     in-out property <bool> loading: false;
+
+    // 启动页由原生窗口背景无缝接管；动画结束后自动淡出，不阻塞首页网络加载。
+    property <bool> splash-visible: true;
+    property <bool> splash-fade: false;
+    property <float> splash-time: 0.0;
+    // 首帧布局完成后才开始计时：真机 .so 加载 + EGL/Skia 初始化期间不消耗动画时间，
+    // 否则动画会在用户看到之前就播完一半，看起来"跳帧"且不丝滑。
+    property <bool> splash-armed: false;
+    changed width => {
+        if (!root.splash-armed && self.width > 0) { root.splash-armed = true; }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.splash-visible && root.splash-armed;
+        triggered => {
+            root.splash-time += 0.016;
+            if (root.splash-time >= 0.95) { root.splash-fade = true; }
+            if (root.splash-time >= 1.25) { root.splash-visible = false; }
+        }
+    }
 
     // ===== 搜索页数据与状态（由 src/mobile/handlers.rs 填充）=====
     in-out property <[Song]> search-songs;
@@ -203,6 +337,7 @@ export component AppWindow inherits Window {
     in-out property <int> search-type: 0;
     in-out property <bool> search-loading: false;
     in-out property <string> search-error: "";
+    in-out property <[string]> search-history;
 
     // ===== 歌单/专辑详情（由 src/mobile/handlers.rs 填充）=====
     in-out property <int> detail-kind: 0;
@@ -212,6 +347,16 @@ export component AppWindow inherits Window {
     in-out property <[Song]> detail-songs;
     in-out property <bool> detail-loading: false;
     in-out property <string> detail-error: "";
+
+    // ===== 分类浏览页（歌单/专辑/排行榜/电台，由 src/mobile/handlers.rs 填充）=====
+    in-out property <int> browse-kind: 0;
+    in-out property <string> browse-title: "";
+    in-out property <[BrowseItem]> browse-items;
+    in-out property <[string]> browse-cats;
+    in-out property <int> browse-active-cat: 0;
+    in-out property <bool> browse-loading: false;
+    in-out property <string> browse-error: "";
+    in-out property <bool> browse-has-more: false;
 
     // ===== 设置页状态（由 src/mobile/handlers.rs 按用户配置填充）=====
     in-out property <int> settings-language: 0;
@@ -255,84 +400,119 @@ export component AppWindow inherits Window {
     changed safe-right => { MobileTheme.safe-right = root.safe-right; }
     changed cover-color => { MobileTheme.cover-color = root.cover-color; }
 
-    // ===== 手机竖屏：底部导航 + 迷你播放条 =====
-    if (root.layout-kind == 0) : VerticalLayout {
+    // 极光背景：三种形态共用，铺在最底层；各分支容器与页面保持 transparent 才能透出
+    AuroraBackground {
         width: 100%;
         height: 100%;
-        spacing: 0;
+    }
 
-        Rectangle {
-            vertical-stretch: 1;
-            clip: true;
-            ContentArea {
-                width: 100%;
-                height: 100%;
-                nav: root.current-nav;
-                loading: root.loading;
-                hot-songs: root.hot-songs;
-                new-songs: root.new-songs;
-                recommend-playlists: root.recommend-playlists;
-                hero-songs: root.hero-songs;
-                hero-cover: root.hero-cover;
-                hero-count: root.hero-count;
-                search-songs: root.search-songs;
-                search-playlists: root.search-playlists;
-                search-albums: root.search-albums;
-                search-keyword: root.search-keyword;
-                search-type: root.search-type;
-                search-loading: root.search-loading;
-                search-error: root.search-error;
-                wide: false;
-                detail-open: root.detail-open;
-                detail-kind: root.detail-kind;
-                detail-title: root.detail-title;
-                detail-desc: root.detail-desc;
-                detail-cover: root.detail-cover;
-                detail-songs: root.detail-songs;
-                detail-loading: root.detail-loading;
-                detail-error: root.detail-error;
-                dark: root.dark;
-                theme-color: root.theme-color-index;
-                settings-language: root.settings-language;
-                settings-quality: root.settings-quality;
-                settings-source: root.settings-source;
-                cache-usage: root.cache-usage;
-                data-dir: root.data-dir;
-                song-played(id) => { root.song-played(id); }
-                playlist-opened(id) => { root.playlist-opened(id); }
-                album-opened(id) => { root.album-opened(id); }
-                search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
-                search-type-changed(ty) => { root.search-type-changed(ty); }
-                detail-back => { root.detail-back(); }
-                detail-play-all => { root.detail-play-all(); }
-                dark-changed(v) => { root.dark-changed(v); }
-                theme-changed(i) => { root.theme-changed(i); }
-                settings-language-changed(i) => { root.settings-language-changed(i); }
-                settings-quality-changed(i) => { root.settings-quality-changed(i); }
-                settings-source-changed(i) => { root.settings-source-changed(i); }
-                settings-clear-cache => { root.settings-clear-cache(); }
-            }
+    // 氛围色已并入 AuroraBackground 底色渐变（theme 见 glass.slint），
+    // 不再叠加全屏"颜色→透明"渐变层，避免透明 stop 硬边形成垂直色带。
+
+    // ===== 手机竖屏：全屏内容 + 浮动迷你播放条 / 玻璃底栏 =====
+    //  内容不再被底栏挤压：歌曲列表一直铺到底栏后方，靠浮层透出（参考 mobile-layout-reference.html）
+    if (root.layout-kind == 0) : Rectangle {
+        width: 100%;
+        height: 100%;
+
+        ContentArea {
+            width: 100%;
+            height: 100%;
+            nav: root.current-nav;
+            loading: root.loading;
+            hot-songs: root.hot-songs;
+            new-songs: root.new-songs;
+            recommend-playlists: root.recommend-playlists;
+            hero-songs: root.hero-songs;
+            hero-cover: root.hero-cover;
+            hero-count: root.hero-count;
+            search-songs: root.search-songs;
+            search-playlists: root.search-playlists;
+            search-albums: root.search-albums;
+            search-keyword: root.search-keyword;
+            search-type: root.search-type;
+            search-loading: root.search-loading;
+            search-error: root.search-error;
+            search-history: root.search-history;
+            wide: false;
+            detail-open: root.detail-open;
+            detail-kind: root.detail-kind;
+            detail-title: root.detail-title;
+            detail-desc: root.detail-desc;
+            detail-cover: root.detail-cover;
+            detail-songs: root.detail-songs;
+            detail-loading: root.detail-loading;
+            detail-error: root.detail-error;
+            dark: root.dark;
+            settings-language: root.settings-language;
+            settings-quality: root.settings-quality;
+            settings-source: root.settings-source;
+            cache-usage: root.cache-usage;
+            data-dir: root.data-dir;
+            recent-songs: root.recent-songs;
+            liked-songs: root.liked-songs;
+            liked-played(id) => { root.liked-played(id); }
+            liked-play-all => { root.liked-play-all(); }
+            song-played(id) => { root.song-played(id); }
+            song-more(id, src) => { root.song-more(id, src); }
+            playlist-opened(id) => { root.playlist-opened(id); }
+            album-opened(id) => { root.album-opened(id); }
+            browse-opened(kind) => { root.browse-opened(kind); }
+            search-opened => { root.current-nav = 1; root.detail-open = false; }
+            hero-opened => { root.hero-opened(); }
+            hero-song-played(id) => { root.hero-song-played(id); }
+            search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
+            search-type-changed(ty) => { root.search-type-changed(ty); }
+            search-history-remove(w) => { root.search-history-remove(w); }
+            search-history-clear => { root.search-history-clear(); }
+            detail-back => { root.detail-back(); }
+            detail-play-all => { root.detail-play-all(); }
+            recent-clear => { root.recent-clear(); }
+            dark-changed(v) => { root.dark-changed(v); }
+            settings-language-changed(i) => { root.settings-language-changed(i); }
+            settings-quality-changed(i) => { root.settings-quality-changed(i); }
+            settings-source-changed(i) => { root.settings-source-changed(i); }
+            settings-clear-cache => { root.settings-clear-cache(); }
+            browse-kind: root.browse-kind;
+            browse-title: root.browse-title;
+            browse-items: root.browse-items;
+            browse-cats: root.browse-cats;
+            browse-active-cat: root.browse-active-cat;
+            browse-loading: root.browse-loading;
+            browse-error: root.browse-error;
+            browse-has-more: root.browse-has-more;
+            browse-back => { root.current-nav = 0; }
+            browse-cat-changed(idx) => { root.browse-cat-changed(idx); }
+            browse-load-more => { root.browse-load-more(); }
+            browse-retry => { root.browse-retry(); }
+            radio-opened(id) => { root.radio-opened(id); }
         }
 
-        // 浮动迷你播放条
-        Rectangle {
-            height: 80px;
-            HorizontalLayout {
-                width: 100%;
-                height: 100%;
-                padding: 8px;
-                MiniPlayer {
-                    title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
-                    subtitle: root.current-song.name == "" ? "点击打开播放页" : root.current-song.artist;
-                    playing: root.playing;
-                    progress: root.progress;
-                    clicked => { root.player-open = true; }
-                    toggled => { root.player-toggle(); }
-                }
-            }
+        // 浮层下方内容透过 backdrop-blur 自然雾化可见（iOS 液态玻璃），不再遮到纯背景。
+
+        // 浮动迷你播放条：底栏顶边上 10px
+        MiniPlayer {
+            x: root.safe-left + 14px;
+            y: parent.height - root.safe-bottom - 156px;
+            width: parent.width - root.safe-left - root.safe-right - 28px;
+            height: 62px;
+            title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
+            subtitle: root.current-song.name == "" ? "" : root.current-song.artist;
+            playing: root.playing;
+            progress: root.progress;
+            loading: root.player-loading;
+            clicked => { root.player-open = true; }
+            toggled => { root.player-toggle(); }
+            prev => { root.player-prev(); }
+            next => { root.player-next(); }
         }
 
+        // 浮动玻璃底栏：距底 22px + 安全区
         NavBottomBar {
+            x: root.safe-left + 14px;
+            y: parent.height - root.safe-bottom - 84px;
+            width: parent.width - root.safe-left - root.safe-right - 28px;
+            height: 62px;
             current <=> root.current-nav;
             selected(idx) => { root.current-nav = idx; root.detail-open = false; }
         }
@@ -356,6 +536,7 @@ export component AppWindow inherits Window {
             Rectangle {
                 vertical-stretch: 1;
                 clip: true;
+                background: transparent;
                 ContentArea {
                     width: 100%;
                     height: 100%;
@@ -374,6 +555,7 @@ export component AppWindow inherits Window {
                     search-type: root.search-type;
                     search-loading: root.search-loading;
                     search-error: root.search-error;
+            search-history: root.search-history;
                     wide: false;
                     detail-open: root.detail-open;
                     detail-kind: root.detail-kind;
@@ -384,25 +566,48 @@ export component AppWindow inherits Window {
                     detail-loading: root.detail-loading;
                     detail-error: root.detail-error;
                     dark: root.dark;
-                    theme-color: root.theme-color-index;
                     settings-language: root.settings-language;
                     settings-quality: root.settings-quality;
                     settings-source: root.settings-source;
                     cache-usage: root.cache-usage;
                     data-dir: root.data-dir;
+                    recent-songs: root.recent-songs;
+                    liked-songs: root.liked-songs;
+                    liked-played(id) => { root.liked-played(id); }
+                    liked-play-all => { root.liked-play-all(); }
                     song-played(id) => { root.song-played(id); }
+                    song-more(id, src) => { root.song-more(id, src); }
                     playlist-opened(id) => { root.playlist-opened(id); }
                     album-opened(id) => { root.album-opened(id); }
+                    browse-opened(kind) => { root.browse-opened(kind); }
+                    search-opened => { root.current-nav = 1; root.detail-open = false; }
+                    hero-opened => { root.hero-opened(); }
+                    hero-song-played(id) => { root.hero-song-played(id); }
                     search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
                     search-type-changed(ty) => { root.search-type-changed(ty); }
+            search-history-remove(w) => { root.search-history-remove(w); }
+            search-history-clear => { root.search-history-clear(); }
                     detail-back => { root.detail-back(); }
                     detail-play-all => { root.detail-play-all(); }
+                    recent-clear => { root.recent-clear(); }
                     dark-changed(v) => { root.dark-changed(v); }
-                    theme-changed(i) => { root.theme-changed(i); }
                     settings-language-changed(i) => { root.settings-language-changed(i); }
                     settings-quality-changed(i) => { root.settings-quality-changed(i); }
                     settings-source-changed(i) => { root.settings-source-changed(i); }
                     settings-clear-cache => { root.settings-clear-cache(); }
+                    browse-kind: root.browse-kind;
+                    browse-title: root.browse-title;
+                    browse-items: root.browse-items;
+                    browse-cats: root.browse-cats;
+                    browse-active-cat: root.browse-active-cat;
+                    browse-loading: root.browse-loading;
+                    browse-error: root.browse-error;
+                    browse-has-more: root.browse-has-more;
+                    browse-back => { root.current-nav = 0; }
+                    browse-cat-changed(idx) => { root.browse-cat-changed(idx); }
+                    browse-load-more => { root.browse-load-more(); }
+                    browse-retry => { root.browse-retry(); }
+                    radio-opened(id) => { root.radio-opened(id); }
                 }
             }
 
@@ -417,11 +622,14 @@ export component AppWindow inherits Window {
                     padding-bottom: root.safe-bottom + 4px;
                     MiniPlayer {
                         title: root.current-song.name == "" ? "未在播放" : root.current-song.name;
-                        subtitle: root.current-song.name == "" ? "点击打开播放页" : root.current-song.artist;
+                        subtitle: root.current-song.name == "" ? "" : root.current-song.artist;
                         playing: root.playing;
                         progress: root.progress;
+                        loading: root.player-loading;
                         clicked => { root.player-open = true; }
                         toggled => { root.player-toggle(); }
+                        prev => { root.player-prev(); }
+                        next => { root.player-next(); }
                     }
                 }
             }
@@ -446,6 +654,7 @@ export component AppWindow inherits Window {
             Rectangle {
                 vertical-stretch: 1;
                 clip: true;
+                background: transparent;
 
                 VerticalLayout {
                     width: 100%;
@@ -473,6 +682,7 @@ export component AppWindow inherits Window {
                         search-type: root.search-type;
                         search-loading: root.search-loading;
                         search-error: root.search-error;
+            search-history: root.search-history;
                         wide: root.use-two-column;
                         detail-open: root.detail-open;
                         detail-kind: root.detail-kind;
@@ -483,25 +693,48 @@ export component AppWindow inherits Window {
                         detail-loading: root.detail-loading;
                         detail-error: root.detail-error;
                         dark: root.dark;
-                        theme-color: root.theme-color-index;
                         settings-language: root.settings-language;
                         settings-quality: root.settings-quality;
                         settings-source: root.settings-source;
                         cache-usage: root.cache-usage;
                         data-dir: root.data-dir;
+                        recent-songs: root.recent-songs;
+                        liked-songs: root.liked-songs;
+                        liked-played(id) => { root.liked-played(id); }
+                        liked-play-all => { root.liked-play-all(); }
                         song-played(id) => { root.song-played(id); }
+                        song-more(id, src) => { root.song-more(id, src); }
                         playlist-opened(id) => { root.playlist-opened(id); }
                         album-opened(id) => { root.album-opened(id); }
+                        browse-opened(kind) => { root.browse-opened(kind); }
+                        search-opened => { root.current-nav = 1; root.detail-open = false; }
+                        hero-opened => { root.hero-opened(); }
+                        hero-song-played(id) => { root.hero-song-played(id); }
                         search-submitted(keyword, ty) => { root.search-submitted(keyword, ty); }
                         search-type-changed(ty) => { root.search-type-changed(ty); }
+            search-history-remove(w) => { root.search-history-remove(w); }
+            search-history-clear => { root.search-history-clear(); }
                         detail-back => { root.detail-back(); }
                         detail-play-all => { root.detail-play-all(); }
+                        recent-clear => { root.recent-clear(); }
                         dark-changed(v) => { root.dark-changed(v); }
-                        theme-changed(i) => { root.theme-changed(i); }
                         settings-language-changed(i) => { root.settings-language-changed(i); }
                         settings-quality-changed(i) => { root.settings-quality-changed(i); }
                         settings-source-changed(i) => { root.settings-source-changed(i); }
                         settings-clear-cache => { root.settings-clear-cache(); }
+                        browse-kind: root.browse-kind;
+                        browse-title: root.browse-title;
+                        browse-items: root.browse-items;
+                        browse-cats: root.browse-cats;
+                        browse-active-cat: root.browse-active-cat;
+                        browse-loading: root.browse-loading;
+                        browse-error: root.browse-error;
+                        browse-has-more: root.browse-has-more;
+                        browse-back => { root.current-nav = 0; }
+                        browse-cat-changed(idx) => { root.browse-cat-changed(idx); }
+                        browse-load-more => { root.browse-load-more(); }
+                        browse-retry => { root.browse-retry(); }
+                        radio-opened(id) => { root.radio-opened(id); }
                     }
                 }
             }
@@ -529,8 +762,11 @@ export component AppWindow inherits Window {
         open <=> root.player-open;
         song: root.current-song;
         playing: root.playing;
+        loading: root.player-loading;
+        play-error: root.player-error;
         progress: root.progress;
         play-mode: root.play-mode;
+        liked: root.liked;
         lyrics: root.lyrics;
         queue: root.queue;
         wide: root.layout-kind != 0;
@@ -539,8 +775,37 @@ export component AppWindow inherits Window {
         prev => { root.player-prev(); }
         next => { root.player-next(); }
         mode => { root.player-mode(); }
+        like => { root.player-like(); }
         seek(r) => { root.player-seek(r); }
         queue-played(id) => { root.queue-played(id); }
+        song-more(id) => { root.song-more(id, 5); }
+    }
+
+    // ===== 歌曲操作抽屉：长按 / ⋯ 共用，浮于所有页面与播放层之上 =====
+    SongSheet {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        open: root.sheet-open;
+        sheet-song-id: root.sheet-song.id;
+        title: root.sheet-song.name;
+        artist: root.sheet-song.artist;
+        cover: root.sheet-song.cover;
+        liked: root.sheet-liked;
+        remove-label: root.sheet-remove-label;
+        closed => { root.sheet-open = false; }
+        play(id) => { root.sheet-open = false; root.sheet-play(id); }
+        play-next(id) => { root.sheet-open = false; root.sheet-play-next(id); }
+        toggle-like(id) => { root.sheet-open = false; root.sheet-toggle-like(id); }
+        remove(id) => { root.sheet-open = false; root.sheet-remove(id); }
+    }
+
+    if (root.splash-visible) : MobileSplash {
+        width: 100%;
+        height: 100%;
+        t: root.splash-time;
+        fade-out: root.splash-fade;
     }
 }
 

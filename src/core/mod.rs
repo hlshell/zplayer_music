@@ -1,5 +1,7 @@
 //! 核心领域逻辑与基础设施：歌曲模型/格式化、歌词解析、歌曲字节下载、播放队列、日志。
 //! 均无 UI/平台依赖，供各层复用。
+// 音频无锁环（实时回调与解码线程之间传 PCM）
+pub mod audio_ring;
 pub mod fetch;
 pub mod ids;
 #[cfg(feature = "desktop")]
@@ -17,6 +19,8 @@ pub mod lyrics;
 #[cfg(feature = "desktop")]
 pub mod queue;
 pub mod song_util;
+// 流式音频缓冲：边下载边播放（移动端使用；桌面端编译但暂未接入）
+pub mod stream;
 
 // MV 播放器（内嵌自 rs-wgpu-video-player/player-core；仅 desktop）
 #[cfg(feature = "desktop")]

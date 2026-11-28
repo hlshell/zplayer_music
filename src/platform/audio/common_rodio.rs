@@ -9,7 +9,7 @@
 // 门面由 mobile.rs re-export，阶段 1 尚无业务调用者（阶段 3 接入播放后自然使用）
 #![allow(dead_code)]
 
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,21 +30,64 @@ static CURRENT: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
 static SWITCHING: AtomicBool = AtomicBool::new(false);
 /// 当前流是否"正常播放到结尾"（sink 播空退出）。
 static FINISHED: AtomicBool = AtomicBool::new(false);
+/// 播放失败标志（设备/解码创建失败、流中途断开）：UI 轮询消费后标记坏歌。
+static FAILED: AtomicBool = AtomicBool::new(false);
 /// 全局音量 0..1（跨播放持久，新建 sink 时应用）
 static VOLUME: Mutex<f32> = Mutex::new(0.8);
 
 /// 播放一段已下载的音频字节，可选从 offset_sec 处续播（seek 到该位置）。
 /// offset_sec = 0 时从头播放。无可用输出设备时静默放弃本次播放。
 pub fn play_at(bytes: Vec<u8>, total_sec: f32, offset_sec: f32) {
+    spawn_play(Cursor::new(bytes), total_sec, offset_sec, None);
+}
+
+/// 流式播放：解码端阻塞等待下载线程追加数据，首块到达即可出声。
+/// `watch` 用于在下载中断时标记播放失败（避免被当成正常播完切下一首）。
+pub fn play_stream(
+    buf: Arc<crate::core::stream::StreamBuffer>,
+    total_sec: f32,
+    offset_sec: f32,
+) {
+    let reader = buf.reader();
+    spawn_play(reader, total_sec, offset_sec, Some(buf));
+}
+
+/// 取走并复位失败标志（UI 轮询调用）。
+pub fn take_failure() -> bool {
+    FAILED.swap(false, Ordering::SeqCst)
+}
+
+/// 主动清除失败标志（发起新播放前调用，避免旧失败串到新曲目）。
+pub fn clear_failure() {
+    FAILED.store(false, Ordering::SeqCst);
+}
+
+fn spawn_play<R>(
+    reader: R,
+    total_sec: f32,
+    offset_sec: f32,
+    watch: Option<Arc<crate::core::stream::StreamBuffer>>,
+) where
+    R: Read + Seek + Send + Sync + 'static,
+{
     std::thread::spawn(move || {
         FINISHED.store(false, Ordering::SeqCst);
         let Ok((_stream, handle)) = rodio::OutputStream::try_default() else {
+            log::warn!("[audio] 无法打开输出设备，放弃本次播放");
+            FAILED.store(true, Ordering::SeqCst);
+            SWITCHING.store(false, Ordering::SeqCst);
             return;
         };
         let Ok(sink) = rodio::Sink::try_new(&handle) else {
+            log::warn!("[audio] 创建 Sink 失败，放弃本次播放");
+            FAILED.store(true, Ordering::SeqCst);
+            SWITCHING.store(false, Ordering::SeqCst);
             return;
         };
-        let Ok(mut decoder) = rodio::Decoder::new(Cursor::new(bytes)) else {
+        let Ok(mut decoder) = rodio::Decoder::new(reader) else {
+            log::warn!("[audio] 音频解码失败，放弃本次播放");
+            FAILED.store(true, Ordering::SeqCst);
+            SWITCHING.store(false, Ordering::SeqCst);
             return;
         };
         let offset = Duration::from_secs_f32(offset_sec.max(0.0));
@@ -73,14 +116,30 @@ pub fn play_at(bytes: Vec<u8>, total_sec: f32, offset_sec: f32) {
             *g = Some(shared.clone());
             SWITCHING.store(false, Ordering::SeqCst);
         }
-        // 阻塞直到播完或被 stop，随后清理自身（若仍是当前流）
+        // 阻塞直到播完、被 stop，或流式来源中途失败
         while !shared.sink.empty() {
+            if let Some(b) = &watch {
+                if b.failed() || b.is_cancelled() {
+                    FAILED.store(true, Ordering::SeqCst);
+                    shared.sink.stop();
+                    break;
+                }
+            }
             std::thread::sleep(Duration::from_millis(100));
         }
         let mut g = CURRENT.lock().unwrap();
         if g.as_ref().map(|s| Arc::ptr_eq(s, &shared)).unwrap_or(false) {
-            // sink 播空退出：正常播放到结尾 → 置"播放完成"标志（非中途失败）
-            FINISHED.store(true, Ordering::SeqCst);
+            let broke = watch
+                .as_ref()
+                .map(|b| b.failed() || b.is_cancelled())
+                .unwrap_or(false);
+            if broke {
+                // 流式来源中断：不算正常播完，UI 侧据此标记坏歌
+                FAILED.store(true, Ordering::SeqCst);
+            } else {
+                // sink 播空退出：正常播放到结尾 → 置"播放完成"标志（非中途失败）
+                FINISHED.store(true, Ordering::SeqCst);
+            }
             *g = None;
         }
     });
@@ -89,6 +148,7 @@ pub fn play_at(bytes: Vec<u8>, total_sec: f32, offset_sec: f32) {
 /// 停止当前播放并释放输出设备。
 pub fn stop() {
     FINISHED.store(false, Ordering::SeqCst);
+    FAILED.store(false, Ordering::SeqCst);
     if let Ok(mut g) = CURRENT.lock() {
         if let Some(s) = g.take() {
             s.sink.stop();
@@ -122,6 +182,11 @@ pub fn status() -> (f32, bool) {
         }
     }
     (0.0, false)
+}
+
+/// 当前流是否处于用户暂停态（区别于 sink 播空、音频线程尚未清理 CURRENT 的结束过渡态）。
+pub fn paused() -> bool {
+    CURRENT.lock().map(|g| g.as_ref().map(|s| s.sink.is_paused()).unwrap_or(false)).unwrap_or(false)
 }
 
 /// 当前是否有活动播放流（切歌/seek 过渡期为 false）。

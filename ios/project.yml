@@ -13,11 +13,14 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "18.0"
-    sources: []
+    sources:
+      - path: Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.music.zplayer
         PRODUCT_NAME: ZPlayer
+        # 应用图标源：Assets.xcassets/AppIcon.appiconset
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         # 构建脚本需要调用 cargo，必须关闭脚本沙盒
         ENABLE_USER_SCRIPT_SANDBOXING: NO

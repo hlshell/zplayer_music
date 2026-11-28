@@ -28,15 +28,40 @@ fn main() {
     // 注意：build script 按 host 编译，cfg(target_os="windows") 在 Windows host 上恒真；
     // 需再用 CARGO_CFG_TARGET_ARCH 判断真实编译目标，wasm(web) 不嵌入 winres 资源。
     #[cfg(target_os = "windows")]
-    if target_arch_env != "wasm32" && target_os_env != "android" && target_os_env != "ios" {
+    if std::env::var("SKIP_WINRES").is_err()
+        && target_arch_env != "wasm32"
+        && target_os_env != "android"
+        && target_os_env != "ios"
+    {
         let mut res = winres::WindowsResource::new();
         res.set_icon("ui/assets/app.ico");
         res.set("FileDescription", "ZPlayer Music");
         res.set("ProductName", "ZPlayer Music");
-        res.set("FileVersion", "0.2.1");
-        res.set("ProductVersion", "0.2.1");
+        // 版本号跟随 Cargo 包版本（别写死：曾固定 0.2.1 导致文件属性版本与发布版本不符）
+        res.set("FileVersion", env!("CARGO_PKG_VERSION"));
+        res.set("ProductVersion", env!("CARGO_PKG_VERSION"));
         res.set("OriginalFilename", "zplayer-music.exe");
         res.compile().expect("嵌入 Windows 资源失败（winres）");
+
+        // winres 依赖 lib.exe 把 .res 打包成 COFF 库。构建环境 PATH 中没有 VS 工具链时
+        // lib.exe 调用失败，winres 会把 .res 原样写成 resource.lib —— 它并不是库，
+        // 于是 rustc-link-lib / /WHOLEARCHIVE 都处理不了，资源（图标+版本信息）静默丢失。
+        // 这里按文件头识别：真库走 /WHOLEARCHIVE 强制整库包含；
+        // 否则复制为 .res 交给 link.exe 直接作为资源合并（按扩展名识别）。
+        if let Ok(out_dir) = std::env::var("OUT_DIR") {
+            let res_lib = std::path::Path::new(&out_dir).join("resource.lib");
+            let is_coff_lib = std::fs::read(&res_lib)
+                .map(|b| b.starts_with(b"!<arch>\n"))
+                .unwrap_or(false);
+            if is_coff_lib {
+                println!("cargo:rustc-link-arg-bins=/WHOLEARCHIVE:{}", res_lib.display());
+            } else {
+                let res_file = std::path::Path::new(&out_dir).join("resource.res");
+                if std::fs::copy(&res_lib, &res_file).is_ok() {
+                    println!("cargo:rustc-link-arg-bins={}", res_file.display());
+                }
+            }
+        }
     }
 
     // Windows：FFmpeg 静态库（vcpkg 的 .lib）里 mediacodec 部分引用了 Media Foundation

@@ -49,6 +49,8 @@ export component BaseTab inherits VerticalLayout {
                 toggled(c) => { root.toggle-changed(21, c); }
             }
             lg := SettingSelectRow {
+                // web：无 i18n 运行时重载，语言切换不生效
+                visible: !root.is-web;
                 label: Language.base-language;
                 desc: Language.base-language-desc;
                 icon: @image-url("../../../assets/icons/language.svg");
@@ -59,6 +61,8 @@ export component BaseTab inherits VerticalLayout {
                 }
             }
             ft := SettingSelectRow {
+                // web：无 font_family 应用能力，字体切换不生效
+                visible: !root.is-web;
                 label: Language.base-font;
                 desc: Language.base-font-desc;
                 icon: @image-url("../../../assets/icons/typography.svg");

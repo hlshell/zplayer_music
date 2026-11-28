@@ -35,7 +35,9 @@
 
 > 移动端说明：Android 端只考虑 `arm64-v8a`（不发布 armeabi-v7a / x86）；iOS 端最低系统版本要求 iOS 18；HarmonyOS 适配计划中。
 >
-> Web 端说明：核心播放/搜索/歌单/收藏/最近播放可用；部分设置项（缓存/代理/输出设备/开机自启等）与专辑/电台/MV/榜单详情页受限于 gdmusic API 端点，走空态或待补充。
+> Web 端说明：仅显示 Web 真实生效的设置项——「基础」保留主题模式，「应用」保留主题色，「关于」保留版本信息。
+> 桌面专属项在 web 下自动隐藏：语言/字体（无 i18n 重载与系统字体）、音质（web 固定 br=320）、自动播放、
+> 歌词布局、播放/网络/系统三个 tab（缓存/代理/输出设备/开机自启/快捷键/洛雪脚本等），以及专辑/电台/MV/榜单详情页（受 gdmusic API 端点限制）。
 
 ## 下载
 
@@ -44,7 +46,7 @@
 | 文件 | 平台 | 说明 |
 | --- | --- | --- |
 | `zplayer-music-windows-x64.zip` | Windows 10/11 x64 | 解压即用，FFmpeg 与 C 运行库均已静态内嵌，单个 exe 即可运行（无任何 DLL 依赖） |
-| `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压即得**单个可执行文件**，FFmpeg 已静态内嵌，无需额外安装 |
+| `zplayer-music-linux-x64.tar.gz` | Linux x64 | 解压得可执行文件 + `.desktop` 桌面入口 + hicolor 图标，FFmpeg 已静态内嵌，无需额外安装 |
 | `zplayer-music-macos-arm64.app.tar.gz` | macOS (Apple Silicon) | 解压得到 **`ZPlayer Music.app`** bundle（图标 / 菜单栏托盘 / 无终端窗口均正常），FFmpeg 静态内嵌，支持 VideoToolbox 硬解 |
 | `zplayer-music-macos-x64.app.tar.gz` | macOS (Intel) | 同上 |
 | `zplayer-music-web.zip` | 任意静态托管 | 解压后用任意 HTTP 服务器托管 `index.html` 即可 |
@@ -52,7 +54,15 @@
 ### 各平台运行要求
 
 - **Windows**：Windows 10 1809+（任务栏 Toast 通知依赖 WinRT）。无需安装额外依赖。
-- **Linux**：需要可用的桌面环境（X11 或 Wayland）与 ALSA 音频，系统需提供 fontconfig 等桌面基础库（主流发行版默认自带）。二进制基于 Ubuntu 22.04 构建，要求 **glibc ≥ 2.35**（Debian 12 / Ubuntu 22.04 及更新版本均可）；FFmpeg 已静态内嵌，无需安装 `ffmpeg`。
+- **Linux**：需要可用的桌面环境（X11 或 Wayland）与 ALSA 音频，系统需提供 fontconfig 等桌面基础库（主流发行版默认自带）。二进制基于 Ubuntu 22.04 构建，要求 **glibc ≥ 2.35**（Debian 12 / Ubuntu 22.04 及更新版本均可）；FFmpeg 已静态内嵌，无需安装 `ffmpeg`。解压后按下面步骤安装，应用菜单与任务栏才会显示图标：
+
+```bash
+tar -xzf zplayer-music-linux-x64.tar.gz
+mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons
+install -m755 zplayer-music ~/.local/bin/
+cp zplayer-music.desktop ~/.local/share/applications/
+cp -r icons/* ~/.local/share/icons/
+```
 - **macOS**：macOS 12+。首次运行如提示"无法验证开发者"，请在 系统设置 → 隐私与安全性 中允许，或执行 `xattr -d com.apple.quarantine "ZPlayer Music.app"`（命令作用于整个 .app bundle）。
 - **Web**：Chrome / Edge / Firefox / Safari 最新版。
 
@@ -148,7 +158,8 @@ cargo build --release --target wasm32-unknown-unknown --no-default-features --fe
 # 生成 JS 绑定并组装发布目录
 wasm-bindgen --target web --no-typescript \
   --out-dir www target/wasm32-unknown-unknown/release/zplayer-music.wasm
-cp web/index.html www/
+cp web/index.html web/manifest.webmanifest www/
+cp -r web/icons www/
 
 # 本地预览（任意静态服务器）
 python -m http.server -d www 8080

@@ -6,16 +6,19 @@
 import { Song } from "../../shared/models.slint";
 import { Theme } from "../../shared/theme.slint";
 import { Language } from "../../shared/language.slint";
+import { SongMenuState } from "song-menu.slint";
 import { ListView } from "std-widgets.slint";
 
 // ---- 歌曲行 ----
 export component SongRow inherits Rectangle {
     in property <int> index: 0;
+    in property <int> song-id: 0;
     in property <string> name;
     in property <string> artist;
     in property <string> duration;
     in property <image> cover;
     in property <bool> current: false;
+    in property <bool> liked: false;
     callback clicked;
 
     height: 52px;
@@ -89,6 +92,25 @@ export component SongRow inherits Rectangle {
     row-ta := TouchArea {
         clicked => { root.clicked(); }
         mouse-cursor: pointer;
+        // 右键：把本行歌曲信息与窗口绝对坐标写入全局状态，由 AppWindow 末尾的
+        // SongMenu 浮层渲染（absolute-position 含滚动偏移，滚动列表定位同样正确）
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                SongMenuState.song-id = root.song-id;
+                SongMenuState.song-name = root.name;
+                SongMenuState.song-artist = root.artist;
+                SongMenuState.song-cover = root.cover;
+                SongMenuState.liked = root.liked;
+                SongMenuState.show-at(
+                    row-ta.absolute-position.x + row-ta.mouse-x,
+                    row-ta.absolute-position.y + row-ta.mouse-y,
+                    false
+                );
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
     }
 }
 
@@ -123,11 +145,13 @@ export component VSongList inherits Rectangle {
             SongRow {
                 y: 0; width: 100%; height: 52px;
                 index: i;
+                song-id: s.id;
                 name: s.name;
                 artist: s.artist;
                 duration: s.duration;
                 cover: s.cover;
                 current: s.id == root.current-id;
+                liked: s.liked;
                 clicked => { root.song-clicked(s.id); }
             }
         }
@@ -166,11 +190,13 @@ export component SongList inherits Rectangle {
         spacing: 2px;
         for s[i] in root.songs : SongRow {
             index: i;
+            song-id: s.id;
             name: s.name;
             artist: s.artist;
             duration: s.duration;
             cover: s.cover;
             current: s.id == root.current-id;
+            liked: s.liked;
             clicked => { root.song-clicked(s.id); }
         }
     }

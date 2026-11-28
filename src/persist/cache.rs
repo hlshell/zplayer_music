@@ -172,6 +172,42 @@ pub async fn save_song_bg(id: i64, bytes: Vec<u8>) -> Option<Vec<u8>> {
     .ok()
 }
 
+// ===================== 流式缓存（边下边播）=====================
+
+/// 下载中的临时文件：`<song_dir>/<id>.part`，完成后 rename 为正式缓存文件。
+fn song_part_file(id: i64) -> PathBuf {
+    let (_, dir, _, _, _) = settings();
+    dir.join(format!("{id}.part"))
+}
+
+/// 为流式下载创建临时文件（边下边写）。
+pub fn open_song_stream(id: i64) -> Option<std::fs::File> {
+    let p = song_part_file(id);
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::File::create(&p).ok()
+}
+
+/// 流式下载正常结束：临时文件转正，触发容量清理。
+/// 先删目标文件再 rename：Windows 上 rename 覆盖已存在文件会失败。
+pub fn finish_song_stream(id: i64) {
+    let part = song_part_file(id);
+    let dst = song_file(id);
+    if let Some(dir) = dst.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::remove_file(&dst);
+    if std::fs::rename(&part, &dst).is_ok() {
+        enforce_limit();
+    }
+}
+
+/// 流式下载中断/失败：清理临时文件（半截音频不进入缓存命中路径）。
+pub fn abort_song_stream(id: i64) {
+    let _ = std::fs::remove_file(song_part_file(id));
+}
+
 /// 参与统计/清理的目录集合（默认 cache 根 + 歌曲/封面/歌词目录，去重）。
 fn tracked_dirs() -> Vec<PathBuf> {
     let (cover, song, lyric, _, _) = settings();

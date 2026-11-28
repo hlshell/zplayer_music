@@ -1,0 +1,266 @@
+// ============================================================================
+//  components/song-menu.slint — 歌曲列表右键操作菜单（主窗口内浮层）
+//  样式参考旧前端 SongItemDropdown：头部歌曲预览（封面 + 歌名 + 歌手）→ 分隔线 →
+//  播放 / 下一首播放 / 收藏（取消收藏）→ 可选「从播放列表移除」。
+//  240px 宽、8px 圆角、1px 描边 + 阴影、行高 34px、左侧图标。
+//  位置：SongRow（及详情页/队列行）在右键按下时把窗口绝对坐标写入 SongMenuState，
+//  本组件（AppWindow 末尾实例化）读取渲染；越界自动向左/向上翻转并钳制在窗口内。
+// ============================================================================
+import { Theme } from "../../shared/theme.slint";
+import { Language } from "../../shared/language.slint";
+
+// 右键菜单全局状态：任意列表行右键按下时写入，菜单组件读取。
+// px/py 为窗口绝对坐标 = 行元素 absolute-position + 行内点击位置（滚动列表同样正确）。
+export global SongMenuState {
+    in-out property <bool> open: false;
+    in-out property <length> px: 0;
+    in-out property <length> py: 0;
+    in-out property <int> song-id: 0;
+    in-out property <string> song-name: "";
+    in-out property <string> song-artist: "";
+    in-out property <image> song-cover;
+    in-out property <bool> liked: false;
+    // true 时显示「从播放列表移除」（仅播放队列行传入）
+    in-out property <bool> can-remove: false;
+
+    // 打开菜单：song-* 字段由调用方先写入，这里只负责定位与显示
+    public function show-at(x: length, y: length, removable: bool) {
+        self.px = x;
+        self.py = y;
+        self.can-remove = removable;
+        self.open = true;
+    }
+}
+
+// ---- 菜单行（图标 + 文本 + hover 底）----
+component MenuRow inherits Rectangle {
+    in property <image> icon;
+    in property <color> icon-color: Theme.palette.icon;
+    in property <string> label;
+    callback clicked();
+
+    height: 34px;
+    background: transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+
+    Rectangle {
+        x: 6px;
+        y: 2px;
+        width: parent.width - 12px;
+        height: parent.height - 4px;
+        border-radius: 4px;
+        background: ta.has-hover ? Theme.palette.hover : transparent;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 10px;
+            spacing: 10px;
+            cross-axis-alignment: center;
+
+            Image {
+                source: root.icon;
+                width: 15px;
+                height: 15px;
+                colorize: root.icon-color;
+            }
+            Text {
+                text: root.label;
+                color: Theme.palette.text;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// ---- 分隔线（9px 槽位，居中 1px 线）----
+component MenuSep inherits Rectangle {
+    height: 9px;
+    Rectangle {
+        x: 10px;
+        y: 4px;
+        width: parent.width - 20px;
+        height: 1px;
+        background: Theme.palette.divider;
+    }
+}
+
+// ---- 右键菜单浮层 ----
+export component SongMenu inherits Rectangle {
+    callback play(int);
+    callback play-next(int);
+    callback toggle-like(int);
+    callback remove(int);
+    // 菜单打开事件：AppWindow 转发给 Rust，用收藏库校准红心状态
+    callback opened(int);
+
+    // global 属性不能直接写 changed，镜像成本地属性后监听
+    in-out property <bool> menu-open <=> SongMenuState.open;
+    changed menu-open => {
+        if (self.menu-open) {
+            root.opened(SongMenuState.song-id);
+        }
+    }
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    private property <length> menu-w: 240px;
+    private property <length> head-h: 62px;
+    private property <length> row-h: 34px;
+    private property <length> sep-h: 9px;
+    private property <length> pad-v: 6px;
+    private property <int> action-count: SongMenuState.can-remove ? 4 : 3;
+    private property <length> menu-h: pad-v * 2 + head-h + sep-h + row-h * action-count
+        + (SongMenuState.can-remove ? sep-h : 0px);
+    private property <length> edge: 8px;
+
+    // 越界翻转（优先）→ 再钳制在窗口内
+    private property <bool> flip-x: SongMenuState.px + menu-w + edge > root.width;
+    private property <bool> flip-y: SongMenuState.py + menu-h + edge > root.height;
+    private property <length> fx: min(max(flip-x ? SongMenuState.px - menu-w : SongMenuState.px, edge),
+        max(edge, root.width - menu-w - edge));
+    private property <length> fy: min(max(flip-y ? SongMenuState.py - menu-h : SongMenuState.py, edge),
+        max(edge, root.height - menu-h - edge));
+
+    visible: SongMenuState.open;
+
+    // 全屏捕获层：左键点菜单外关闭（并吞掉该次点击，避免误触下面的列表）；
+    // 右键 reject 放行给下层歌曲行，行里会重写 SongMenuState 并把菜单移到新目标，
+    // 因此可以对不同歌曲连续右键，不必先左键关闭菜单。
+    TouchArea {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                if (e.button == PointerEventButton.right) {
+                    // 先关掉旧菜单再放行：下层行收到右键会立即重开并移动菜单；
+                    // 即便右键落在空白处（没有行接收），旧菜单也不会卡住关不掉
+                    SongMenuState.open = false;
+                    EventResult.reject
+                } else {
+                    SongMenuState.open = false;
+                    EventResult.accept
+                }
+            } else {
+                EventResult.accept
+            }
+        }
+    }
+
+    Rectangle {
+        x: root.fx;
+        y: root.fy;
+        width: root.menu-w;
+        height: root.menu-h;
+        border-radius: 8px;
+        background: Theme.palette.surface-solid;
+        border-width: 1px;
+        border-color: Theme.palette.divider;
+        drop-shadow-color: rgba(0, 0, 0, 0.22);
+        drop-shadow-offset-y: 3px;
+        drop-shadow-blur: 14px;
+
+        // 拦截菜单区域内的点击（不触发全屏层关闭）
+        TouchArea {}
+
+        VerticalLayout {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            padding-top: root.pad-v;
+            padding-bottom: root.pad-v;
+
+            // 头部：歌曲预览（封面 + 歌名 + 歌手）
+            Rectangle {
+                height: root.head-h;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 8px;
+                        clip: true;
+                        background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
+                        if (SongMenuState.song-cover.width > 0) : Image {
+                            source: SongMenuState.song-cover;
+                            width: 100%;
+                            height: 100%;
+                            image-fit: cover;
+                        }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text {
+                            text: SongMenuState.song-name;
+                            color: Theme.palette.text;
+                            font-size: 13px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: SongMenuState.song-artist;
+                            color: Theme.palette.text-faint;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+
+            MenuSep {}
+
+            MenuRow {
+                icon: @image-url("../../assets/icons/play-white.svg");
+                icon-color: Theme.palette.primary;
+                label: Language.songmenu-play;
+                clicked => {
+                    SongMenuState.open = false;
+                    root.play(SongMenuState.song-id);
+                }
+            }
+            MenuRow {
+                icon: @image-url("../../assets/icons/playlist-gray.svg");
+                label: Language.songmenu-play-next;
+                clicked => {
+                    SongMenuState.open = false;
+                    root.play-next(SongMenuState.song-id);
+                }
+            }
+            MenuRow {
+                icon: SongMenuState.liked
+                    ? @image-url("../../assets/icons/heart-fill-red.svg")
+                    : @image-url("../../assets/icons/heart-gray.svg");
+                icon-color: SongMenuState.liked ? Theme.palette.icon-danger : Theme.palette.icon;
+                label: SongMenuState.liked ? Language.songmenu-unfavorite : Language.songmenu-favorite;
+                clicked => {
+                    SongMenuState.open = false;
+                    root.toggle-like(SongMenuState.song-id);
+                }
+            }
+
+            if SongMenuState.can-remove : MenuSep {}
+            if SongMenuState.can-remove : MenuRow {
+                icon: @image-url("../../assets/icons/trash-gray.svg");
+                label: Language.songmenu-remove;
+                clicked => {
+                    SongMenuState.open = false;
+                    root.remove(SongMenuState.song-id);
+                }
+            }
+        }
+    }
+}

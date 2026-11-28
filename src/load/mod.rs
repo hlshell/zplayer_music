@@ -7,8 +7,8 @@ pub mod home;
 // re-export 保持 crate::load::X 调用路径；部分符号上层未直接使用（保留 API 兼容）。
 #[allow(unused_imports)]
 pub use home::{
-    cover_now, cover_warm, fetch_covers, from, load_initial, model, parse_tracks, set_runtime,
-    to, warm_rows, SongBase,
+    cover_now, cover_warm, fetch_covers, from, load_initial, model, parse_tracks, runtime,
+    set_runtime, to, warm_rows, SongBase,
 };
 #[allow(unused_imports)]
 pub use home::{HERO_COVER_URL, HERO_POOL, NEW_SONG_POOL};

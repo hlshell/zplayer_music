@@ -1,7 +1,7 @@
 // ============================================================================
 //  detail.slint — 移动端歌单/专辑详情页
-//  kind：0=歌单 / 1=专辑；数据与状态全部由 AppWindow 属性驱动。
-//  窄屏：顶栏 + 头部（封面/标题/描述/曲目数）+ 播放全部 + 滚动列表；
+//  kind：0=歌单 / 1=专辑 / 3=电台 / 4=每日推荐
+//  窄屏：固定顶栏（滚动后切换 compact 显示歌单名+播放icon）+ ScrollView 包裹全部内容；
 //  宽屏：头部固定左栏（300px），右侧列表独立滚动。
 // ============================================================================
 import { ScrollView } from "std-widgets.slint";
@@ -57,10 +57,13 @@ component DetailTitle inherits VerticalLayout {
     }
 }
 
-// 顶栏：48px 返回按钮 + 类型标题
+// 顶栏：48px 返回按钮 + 标题；compact=true 时显示歌单名+播放icon
 component DetailTopBar inherits Rectangle {
     in property <int> kind: 0;
+    in property <bool> compact: false;
+    in property <string> title: "";
     callback back();
+    callback play-all();
 
     height: 48px;
 
@@ -73,19 +76,20 @@ component DetailTopBar inherits Rectangle {
         cross-axis-alignment: center;
 
         Rectangle {
-            width: 48px;
-            height: 48px;
-            border-radius: 24px;
-            background: back-ta.has-hover ? Theme.palette.hover : transparent;
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
+            background: back-ta.has-hover ? MobileTheme.primary.with-alpha(0.18) : MobileTheme.glass-capsule;
+            border-width: 1px;
+            border-color: MobileTheme.glass-stroke;
 
-            Text {
-                width: 100%;
-                height: 100%;
-                text: "‹";
-                color: MobileTheme.text;
-                font-size: 26px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 20px;
+                height: 20px;
+                source: @image-url("../../assets/icons/arrow-back-up.svg");
+                colorize: MobileTheme.text;
             }
             back-ta := TouchArea {
                 mouse-cursor: pointer;
@@ -93,14 +97,44 @@ component DetailTopBar inherits Rectangle {
             }
         }
 
-        Text {
-            text: root.kind == 0 ? "歌单" : "专辑";
+        // 非 compact：显示类型（歌单/专辑/电台/每日推荐）
+        if (!root.compact) : Text {
+            text: root.kind == 0 ? "歌单" : root.kind == 3 ? "电台" : root.kind == 4 ? "每日推荐" : "专辑";
             color: MobileTheme.text;
             font-size: 15px;
             font-weight: 600;
             horizontal-stretch: 1;
             vertical-alignment: center;
             overflow: elide;
+        }
+
+        // compact：显示歌单名 + 播放全部 icon
+        if (root.compact) : Text {
+            text: root.title;
+            color: MobileTheme.text;
+            font-size: 16px;
+            font-weight: 700;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if (root.compact) : Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 18px;
+            background: play-ta.has-hover ? MobileTheme.primary.with-alpha(0.20) : MobileTheme.primary;
+
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 18px;
+                height: 18px;
+                source: @image-url("../../assets/icons/play-white.svg");
+            }
+            play-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.play-all(); }
+            }
         }
     }
 }
@@ -117,13 +151,15 @@ component DetailPlayAll inherits Rectangle {
         width: 100%;
         height: 40px;
         border-radius: 20px;
-        background: play-ta.has-hover ? MobileTheme.secondary : MobileTheme.primary;
+        border-width: 1px;
+        border-color: MobileTheme.glass-stroke;
+        background: play-ta.has-hover ? rgba(255, 255, 255, 0.24) : MobileTheme.glass-capsule;
 
         Text {
             width: 100%;
             height: 100%;
             text: "播放全部";
-            color: Theme.palette.icon-white;
+            color: MobileTheme.text;
             font-size: 14px;
             font-weight: 600;
             horizontal-alignment: center;
@@ -134,72 +170,6 @@ component DetailPlayAll inherits Rectangle {
     play-ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
-    }
-}
-
-// 歌曲列表：加载中 / 错误 / 空态 / 列表
-component DetailList inherits Rectangle {
-    in property <[Song]> songs;
-    in property <bool> loading: false;
-    in property <string> error: "";
-    callback song-played(int);
-
-    background: transparent;
-    clip: true;
-
-    ScrollView {
-        width: 100%;
-        height: 100%;
-        vertical-scrollbar-policy: always-off;
-        horizontal-scrollbar-policy: always-off;
-
-        VerticalLayout {
-            width: 100%;
-            spacing: 4px;
-            padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
-            padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
-            padding-bottom: MobileTheme.safe-bottom + 24px;
-
-            if (root.loading) : Text {
-                text: "加载中…";
-                color: MobileTheme.text-faint;
-                font-size: 13px;
-                horizontal-alignment: center;
-                height: 64px;
-                vertical-alignment: center;
-            }
-
-            if (!root.loading && root.error != "") : Text {
-                text: root.error;
-                color: MobileTheme.text-secondary;
-                font-size: 13px;
-                horizontal-alignment: center;
-                height: 64px;
-                vertical-alignment: center;
-            }
-
-            if (!root.loading && root.error == "" && root.songs.length == 0) : Text {
-                text: "暂无歌曲";
-                color: MobileTheme.text-faint;
-                font-size: 13px;
-                horizontal-alignment: center;
-                height: 64px;
-                vertical-alignment: center;
-            }
-
-            if (!root.loading && root.error == "") : VerticalLayout {
-                for s[i] in root.songs : SongRow {
-                    index: i;
-                    rank: "" + (i + 1);
-                    title: s.name;
-                    subtitle: s.artist;
-                    cover: s.cover;
-                    from: Theme.palette.primary;
-                    to: Theme.palette.secondary;
-                    clicked => { root.song-played(s.id); }
-                }
-            }
-        }
     }
 }
 
@@ -214,11 +184,12 @@ export component DetailPage inherits Rectangle {
     in property <bool> wide: false;
     callback back();
     callback song-played(int);
+    callback song-more(int);
     callback play-all();
 
     background: transparent;
 
-    // ===== 宽屏：头部固定左栏，右侧列表 =====
+    // ===== 宽屏：头部固定左栏，右侧列表独立滚动 =====
     if (root.wide) : HorizontalLayout {
         width: 100%;
         height: 100%;
@@ -245,61 +216,110 @@ export component DetailPage inherits Rectangle {
             Rectangle { vertical-stretch: 1; }
         }
 
-        DetailList {
+        ScrollView {
             horizontal-stretch: 1;
             height: 100%;
-            songs: root.songs;
-            loading: root.loading;
-            error: root.error;
-            song-played(id) => { root.song-played(id); }
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                width: 100%;
+                spacing: 4px;
+                padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                if (root.loading) : Text { text: "加载中…"; color: MobileTheme.text-faint; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+                if (!root.loading && root.error != "") : Text { text: root.error; color: MobileTheme.text-secondary; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+                if (!root.loading && root.error == "" && root.songs.length == 0) : Text { text: "暂无歌曲"; color: MobileTheme.text-faint; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+
+                if (!root.loading && root.error == "") : VerticalLayout {
+                    for s[i] in root.songs : SongRow {
+                        index: i;
+                        song-id: s.id;
+                        rank: "" + (i + 1);
+                        title: s.name;
+                        subtitle: s.artist;
+                        cover: s.cover;
+                        from: Theme.palette.primary;
+                        to: Theme.palette.secondary;
+                        clicked => { root.song-played(s.id); }
+                        more(id) => { root.song-more(id); }
+                    }
+                }
+            }
         }
     }
 
-    // ===== 窄屏：顶栏 + 头部 + 播放全部 + 列表 =====
+    // ===== 窄屏：固定顶栏 + ScrollView 包裹全部 =====
     if (!root.wide) : VerticalLayout {
         width: 100%;
         height: 100%;
-        spacing: 8px;
+        spacing: 0;
         padding-top: MobileTheme.safe-top + 4px;
 
+        // 固定顶栏：滚动时切换 compact（content-y 为负值，取反）
         DetailTopBar {
             kind: root.kind;
+            compact: -sv.content-y > 120px;
+            title: root.title;
             back => { root.back(); }
+            play-all => { root.play-all(); }
         }
 
-        HorizontalLayout {
-            height: 120px;
-            spacing: 14px;
-            padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
-            padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
-            cross-axis-alignment: center;
-
-            DetailCover { cover: root.cover; }
-            DetailTitle {
-                horizontal-stretch: 1;
-                title: root.title;
-                desc: root.desc;
-                count: root.songs.length;
-            }
-        }
-
-        HorizontalLayout {
-            height: 44px;
-            padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
-            padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
-
-            DetailPlayAll {
-                horizontal-stretch: 1;
-                clicked => { root.play-all(); }
-            }
-        }
-
-        DetailList {
+        sv := ScrollView {
             vertical-stretch: 1;
-            songs: root.songs;
-            loading: root.loading;
-            error: root.error;
-            song-played(id) => { root.song-played(id); }
+            width: 100%;
+            vertical-scrollbar-policy: always-off;
+            horizontal-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                width: 100%;
+                spacing: 8px;
+                padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
+                padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
+                padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
+
+                // 头部：封面 + 标题
+                HorizontalLayout {
+                    height: 120px;
+                    spacing: 14px;
+                    padding-left: 0;
+                    padding-right: 0;
+                    cross-axis-alignment: center;
+
+                    DetailCover { cover: root.cover; }
+                    DetailTitle {
+                        horizontal-stretch: 1;
+                        title: root.title;
+                        desc: root.desc;
+                        count: root.songs.length;
+                    }
+                }
+
+                // 播放全部按钮
+                DetailPlayAll {
+                    clicked => { root.play-all(); }
+                }
+
+                // 歌曲列表
+                if (root.loading) : Text { text: "加载中…"; color: MobileTheme.text-faint; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+                if (!root.loading && root.error != "") : Text { text: root.error; color: MobileTheme.text-secondary; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+                if (!root.loading && root.error == "" && root.songs.length == 0) : Text { text: "暂无歌曲"; color: MobileTheme.text-faint; font-size: 13px; height: 64px; horizontal-alignment: center; vertical-alignment: center; }
+
+                if (!root.loading && root.error == "") : VerticalLayout {
+                    for s[i] in root.songs : SongRow {
+                        index: i;
+                        song-id: s.id;
+                        rank: "" + (i + 1);
+                        title: s.name;
+                        subtitle: s.artist;
+                        cover: s.cover;
+                        from: Theme.palette.primary;
+                        to: Theme.palette.secondary;
+                        clicked => { root.song-played(s.id); }
+                        more(id) => { root.song-more(id); }
+                    }
+                }
+            }
         }
     }
 }

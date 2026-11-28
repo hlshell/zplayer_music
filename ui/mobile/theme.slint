@@ -11,8 +11,9 @@ export global MobileTheme {
 
     // 运行平台：0 桌面预览 / 1 Android / 2 iOS（由 src/mobile/entry.rs 按编译目标写入）
     in-out property <int> platform: 0;
-    // Android Material：不透明表面 + 无高光；iOS/预览保持玻璃
-    in-out property <bool> is-material: platform == 1;
+    // 统一玻璃 UI：iOS / Android / 预览共用同一套液态玻璃材质，不再按平台切 Material，
+    // 这样无需维护两套 UI，可与 iOS 直接共存。
+    in-out property <bool> is-material: false;
 
     // 安全区 inset：由原生宿主写入，AppWindow 负责转发到本 global
     in-out property <length> safe-top: 0px;
@@ -30,11 +31,23 @@ export global MobileTheme {
     in-out property <length> rail-width: 72px;
     in-out property <length> sidebar-width: 224px;
 
-    // iOS：封面沉浸玻璃 token（Slint 无运行时图层模糊，组件用半透明 + 高光渐变降级）
-    in-out property <length> surface-blur-radius: 18px;
-    in-out property <color> surface-bg: Theme.dark ? rgba(26, 24, 36, 0.58) : rgba(255, 255, 255, 0.68);
-    in-out property <color> surface-border: Theme.dark ? rgba(255, 255, 255, 0.16) : rgba(255, 255, 255, 0.80);
-    in-out property <float> highlight-alpha: Theme.dark ? 0.20 : 0.55;
+    // 液态玻璃（对齐 iOS 26 Liquid Glass，参考稿 .glassy）：1.19+ 用真实 backdrop-blur
+    // 雾化底层内容，填充极通透且平涂（不上下渐变），可读性靠模糊而非高 alpha；装饰只保留
+    // 1px 细描边 + 1px 顶边镜面高光 + 极柔和外投影，不叠色散/折射带/染色层（参考稿均无）。
+    // 注：Slint backdrop-blur 是纯高斯模糊，缺 iOS 的 saturate(1.4)，透出色彩略灰——
+    //    已靠降低填充 alpha 弥补；无 Skia 时 blur 不生效，组件传 0 走静态近似。
+    in-out property <length> glass-blur: 18px;                 // 常驻浮层（底栏/迷你播放条）对齐 iOS blur(18px)
+    in-out property <color> glass-fill: Theme.dark ? rgba(255, 255, 255, 0.15) : rgba(255, 255, 255, 0.58);
+    in-out property <color> glass-stroke: Theme.dark ? rgba(255, 255, 255, 0.28) : rgba(255, 255, 255, 0.60);
+    in-out property <color> glass-shine: Theme.dark ? rgba(255, 255, 255, 0.24) : rgba(255, 255, 255, 0.55);
+    in-out property <color> glass-shade: Theme.dark ? rgba(20, 10, 30, 0.15) : rgba(35, 28, 90, 0.14);
+    in-out property <color> glass-capsule: Theme.dark ? rgba(255, 255, 255, 0.12) : rgba(108, 92, 231, 0.12);
+    in-out property <color> glass-track: Theme.dark ? rgba(255, 255, 255, 0.16) : rgba(90, 80, 140, 0.24);
+
+    // 页面内玻璃卡片/列表项：更通透（对齐参考稿 info-panel .12 / controls .13），模糊半径略小
+    in-out property <length> surface-blur-radius: 14px;
+    in-out property <color> surface-bg: Theme.dark ? rgba(255, 255, 255, 0.13) : rgba(255, 255, 255, 0.55);
+    in-out property <color> surface-border: Theme.dark ? rgba(255, 255, 255, 0.20) : rgba(255, 255, 255, 0.60);
 
     // Android：Material 表面与层级
     in-out property <color> material-surface: Theme.dark ? #1f1c2a : #ffffff;
@@ -52,10 +65,11 @@ export global MobileTheme {
     in-out property <color> icon: Theme.palette.icon;
     in-out property <color> active: Theme.palette.active;
     in-out property <color> hover: Theme.palette.hover;
-    // 导航/播放条表面：Android 用近乎不透明的 Material 表面，iOS/预览保留半透明玻璃
-    in-out property <color> nav-bg: platform == 1
-        ? (Theme.dark ? rgba(31, 28, 42, 0.98) : rgba(255, 255, 255, 0.98))
-        : (Theme.dark ? rgba(18, 17, 24, 0.82) : rgba(255, 255, 255, 0.86));
+    // 错误/失效提示色（无法播放的歌曲、播放失败提示）
+    in-out property <color> danger: #ff5b6e;
+    // 播放页封面沉浸背景的柔和遮罩：保文字可读，又不压死封面色彩（对齐参考稿 --veil）
+    in-out property <color> veil-top: Theme.dark ? rgba(15, 12, 25, 0.10) : rgba(255, 255, 255, 0.08);
+    in-out property <color> veil-bottom: Theme.dark ? rgba(15, 12, 25, 0.52) : rgba(255, 255, 255, 0.32);
 
     // 当前歌曲封面主色（播放层环境背景）：由 Rust 侧取色后写入，取色失败时为主题色
     in-out property <color> cover-color: #6c5ce7;

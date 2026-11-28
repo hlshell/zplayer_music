@@ -130,6 +130,7 @@ fn entries_to_songs(entries: &[HeroEntry]) -> Vec<crate::Song> {
             duration_sec: e.duration_sec,
             url: String::new().into(),
             liked: gd::liked_contains(e.ui_id),
+            bad: false,
         })
         .collect()
 }
@@ -204,6 +205,7 @@ fn rebuild_liked(ui: &slint::Weak<crate::AppWindow>) {
                 duration_sec: dur,
                 url: String::new().into(),
                 liked: true,
+                bad: false,
             })
         })
         .collect();
@@ -229,6 +231,7 @@ fn rebuild_recent(ui: &slint::Weak<crate::AppWindow>) {
                 duration_sec: dur,
                 url: String::new().into(),
                 liked: gd::liked_contains(id),
+                bad: false,
             }
         })
         .collect();
@@ -514,6 +517,7 @@ pub fn setup(ui: &crate::AppWindow) {
                                     duration_sec: t.duration_sec,
                                     url: t.cover_url.clone().into(),
                                     liked: gd::liked_contains(ui_id),
+                                    bad: false,
                                 }
                             })
                             .collect();

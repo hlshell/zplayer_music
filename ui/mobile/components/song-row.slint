@@ -1,12 +1,15 @@
 // ============================================================================
-//  song-row.slint — 歌曲行（热门歌曲列表）
+//  song-row.slint — 歌曲行（热门歌曲 / 搜索 / 详情列表）
 //  左侧排名 + 48px 封面（无图回退 from/to 渐变）+ 标题/副标题 elide。
+//  歌曲行右侧显示 ⋯，且整行长按 450ms 都触发同一操作抽屉（more）。
+//  资源行（歌单/专辑搜索结果）传 song-actions: false，不显示 ⋯ 也不响应长按。
 // ============================================================================
 import { Theme } from "../../shared/theme.slint";
 import { MobileTheme } from "../theme.slint";
 
 export component SongRow inherits Rectangle {
     in property <int> index: 0;
+    in property <int> song-id: 0;
     in property <string> rank: "";
     in property <string> title: "";
     in property <string> subtitle: "";
@@ -14,7 +17,14 @@ export component SongRow inherits Rectangle {
     in property <color> from: transparent;
     in property <color> to: transparent;
     in property <bool> active: false;
+    // 歌曲行：右侧 ⋯ + 长按呼出抽屉；资源行置 false
+    in property <bool> song-actions: true;
     callback clicked();
+    callback more(int);
+
+    // 长按检测：按下启动计时，抬起/取消停止；触发后抑制本次 clicked
+    property <bool> pressing: false;
+    property <bool> long-fired: false;
 
     height: 64px;
     border-radius: 12px;
@@ -25,7 +35,7 @@ export component SongRow inherits Rectangle {
         height: 100%;
         spacing: 10px;
         padding-left: 8px;
-        padding-right: 12px;
+        padding-right: root.song-actions ? 44px : 12px;
         cross-axis-alignment: center;
 
         if (root.rank != "") : Text {
@@ -75,6 +85,63 @@ export component SongRow inherits Rectangle {
 
     ta := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                if (root.song-actions) {
+                    root.pressing = true;
+                    root.long-fired = false;
+                }
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.pressing = false;
+            }
+            EventResult.reject
+        }
+        clicked => {
+            if (root.long-fired) {
+                // 长按已触发抽屉：本次抬起不再当作点播
+                root.long-fired = false;
+            } else {
+                root.clicked();
+            }
+        }
+    }
+
+    // 长按 450ms → 操作抽屉
+    Timer {
+        interval: 450ms;
+        running: root.song-actions && root.pressing && !root.long-fired;
+        triggered => {
+            root.long-fired = true;
+            root.more(root.song-id);
+        }
+    }
+
+    // 三点按钮：与长按同一入口
+    if (root.song-actions) : Rectangle {
+        x: parent.width - 40px;
+        y: (parent.height - 34px) / 2;
+        width: 34px;
+        height: 34px;
+        border-radius: 17px;
+        background: more-ta.has-hover ? Theme.palette.hover : transparent;
+
+        // 手绘三点：不依赖字体字形（嵌入字体缺 U+22EF 会渲染成方框）
+        Rectangle {
+            x: (parent.width - 16px) / 2;
+            y: (parent.height - 4px) / 2;
+            width: 16px;
+            height: 4px;
+            background: transparent;
+
+            Rectangle { x: 0px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 6px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+            Rectangle { x: 12px; y: 0px; width: 4px; height: 4px; border-radius: 2px; background: MobileTheme.text-secondary; }
+        }
+
+        more-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.more(root.song-id); }
+        }
     }
 }

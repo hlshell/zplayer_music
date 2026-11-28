@@ -1,55 +1,103 @@
 // ============================================================================
-//  glass.slint — 移动端表面材质
-//  Slint 没有图层模糊：玻璃用「半透明底色 + 顶部高光渐变 + 细描边 + 柔和投影」静态降级，
-//  blur-radius 作为投影扩散半径使用，保证 token 一致、后续可整体替换。
+//  glass.slint — 移动端 Liquid Glass 材质（对齐 iOS 26 Liquid Glass，参考稿 .glassy）
+//  1.19+ 用真实 backdrop-blur 雾化底层内容，配极通透平涂填充 + 1px 细描边 + 1px 顶边
+//  镜面高光 + 极柔和外投影。刻意不叠光谱色散 / 底部折射带 / 染色层——参考稿均无，
+//  过多装饰正是"不像 iOS"的主因。全站统一由 GlassRectangle 承担，避免各页面各写一套。
+//  无 Skia 时 blur 不生效，靠低 alpha 静态近似降级。
 // ============================================================================
 import { Theme } from "../../shared/theme.slint";
 import { MobileTheme } from "../theme.slint";
 
-// 玻璃/Material 面板：不继承 Rectangle，避免与内置 color / border-width 冲突，
-// 由内部 Rectangle 承担实际绘制。
-// iOS/预览：半透明底色 + 顶部高光 + 细描边 + 投影；
-// Android：默认不透明 material-surface，无高光/描边，改用 1dp 级别柔和投影。
-// 使用方显式传入 color 时按其值绘制（可为半透明），仅材质装饰随平台切换。
+// 液态玻璃面板：不继承 Rectangle（避免与内置 color / border-width 冲突），
+// 由内部 Rectangle 承担绘制，使用方通过 @children 放内容。
+// 1.19+：blur-radius 即真实 backdrop-blur（仅 Skia 渲染器生效），是对齐 iOS
+//        Liquid Glass 的核心——底层内容透上来并雾化，可读性由模糊而非高 alpha 保证；
+//        无 Skia 时传 0 即走纯静态近似。
 export component GlassRectangle {
-    in property <color> color: MobileTheme.is-material
-        ? MobileTheme.material-surface
-        : MobileTheme.surface-bg;
-    in property <length> blur-radius: 18px;
+    in property <color> color: MobileTheme.surface-bg;
+    in property <length> blur-radius: MobileTheme.surface-blur-radius;
     in property <length> border-width: 1px;
-    in property <length> border-radius: 18px;
-    in property <float> highlight-alpha: 0.18;
+    in property <length> border-radius: 20px;
+    in property <length> shadow-blur: 24px;
+    in property <length> shadow-offset-y: 8px;
+    // 图片/封面之上叠放时关掉装饰，避免高光把画面洗白
+    in property <bool> liquid: true;
 
     Rectangle {
         width: 100%;
         height: 100%;
         background: root.color;
-        border-width: MobileTheme.is-material ? 0px : root.border-width;
-        border-color: MobileTheme.is-material
-            ? transparent
-            : rgba(255, 255, 255, min(1.0, max(0.0, root.highlight-alpha + 0.06)));
+        border-width: root.border-width;
+        border-color: MobileTheme.glass-stroke;
         border-radius: root.border-radius;
-        drop-shadow-blur: MobileTheme.is-material
-            ? MobileTheme.material-elevation * 2
-            : root.blur-radius;
-        drop-shadow-color: MobileTheme.is-material
-            ? rgba(0, 0, 0, 0.18)
-            : rgba(0, 0, 0, 0.22);
-        drop-shadow-offset-y: MobileTheme.is-material ? 2px : 4px;
+        backdrop-blur: root.blur-radius;
+        drop-shadow-blur: root.shadow-blur;
+        drop-shadow-color: MobileTheme.glass-shade;
+        drop-shadow-offset-y: root.shadow-offset-y;
         clip: true;
 
-        // 顶部高光：静态渐变代替实时模糊带来的受光感（Material 无高光）
+        // 唯一装饰：顶边 1px 镜面高光（对齐参考稿 inset 0 1px 0 rgba(255,255,255,.24)），
+        // 两端微渐隐避开圆角硬折点；clip + border-radius 自动裁掉角外部分。
         Rectangle {
             x: 0;
             y: 0;
             width: 100%;
-            height: 45%;
-            visible: !MobileTheme.is-material;
-            background: @linear-gradient(180deg, rgba(255, 255, 255, root.highlight-alpha) 0%, rgba(255, 255, 255, 0.0) 100%);
+            height: 1px;
+            visible: root.liquid;
+            background: @linear-gradient(90deg,
+                rgba(255, 255, 255, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(255, 255, 255, 0.0) 100%);
         }
 
-        // 使用方声明的子元素（高光之下，保证内容可读）
         @children
+    }
+}
+
+// ============================================================================
+//  氛围底色：浅色淡紫白 / 深色近纯黑，叠三团大尺寸柔光（紫 / 青 / 粉）。
+//  Android Skia 不支持径向渐变，用大圆角矩形 + 线性渐变模拟柔光晕染。
+// ============================================================================
+export component AuroraBackground inherits Rectangle {
+    // 底色融入原全屏氛围层的主色紫调（顶部偏紫 → 中部紫灰 → 底部近黑），
+    // 不再用独立"颜色→透明"叠加层，根除透明 stop 硬边造成的垂直色带。
+    background: Theme.dark
+        ? @linear-gradient(168deg, #241d3a 0%, #151320 42%, #101014 100%)
+        : @linear-gradient(168deg, #f7f4ff 0%, #f3f1fb 42%, #eef4fc 100%);
+
+    // 左上：紫光
+    Rectangle {
+        x: -parent.width * 0.34;
+        y: -parent.height * 0.16;
+        width: parent.width * 1.00;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @linear-gradient(140deg,
+            rgba(124, 92, 255, Theme.dark ? 0.30 : 0.18) 0%,
+            rgba(124, 92, 255, 0.0) 68%);
+    }
+    // 右上：青光
+    Rectangle {
+        x: parent.width * 0.30;
+        y: -parent.height * 0.06;
+        width: parent.width * 0.88;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @linear-gradient(220deg,
+            rgba(32, 202, 238, Theme.dark ? 0.18 : 0.13) 0%,
+            rgba(32, 202, 238, 0.0) 70%);
+    }
+    // 中下：粉紫，制造色彩流动感
+    Rectangle {
+        x: -parent.width * 0.12;
+        y: parent.height * 0.56;
+        width: parent.width * 0.96;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @linear-gradient(20deg,
+            rgba(255, 120, 200, Theme.dark ? 0.12 : 0.09) 0%,
+            rgba(255, 120, 200, 0.0) 72%);
     }
 }
 

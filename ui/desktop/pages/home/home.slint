@@ -234,6 +234,7 @@ export component HomePage inherits VerticalLayout {
             y: Math.floor(i / grid-columns) * 82px;
             width: grid-card-w;
             height: 72px;
+            song-id: n.id;
             name: n.name; artist: n.artist; cover: n.cover;
             clicked => { root.play-song(n.id); }
         }

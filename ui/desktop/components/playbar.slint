@@ -37,6 +37,7 @@ export component PlayBar inherits Rectangle {
     callback next-clicked();
     callback play-toggle();
     callback cover-clicked();
+    callback lyrics-clicked();
     callback queue-clicked();
     callback volume-changed(float);
     callback mute-toggle();
@@ -294,6 +295,23 @@ export component PlayBar inherits Rectangle {
                     spacing: 6px;
                     cross-axis-alignment: center;
 
+                // 桌面歌词：开/关桌面悬浮歌词窗，位于音量左侧（高亮 = 悬浮窗已开启）
+                Rectangle {
+                    width: 36px; height: 36px;
+                    border-radius: 18px;
+                    background: lyr-ta.has-hover ? Theme.palette.hover : transparent;
+                    Image {
+                        source: @image-url("../../assets/icons/clef-staff.svg");
+                        width: 20px; height: 20px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        colorize: root.lyrics-open ? Theme.palette.primary : Theme.palette.icon;
+                    }
+                    lyr-ta := TouchArea {
+                        clicked => { root.lyrics-clicked(); }
+                        mouse-cursor: pointer;
+                    }
+                }
                 // 音量：点击静音，悬停弹出垂直滑块（弹窗位于 appwindow，置于抽屉之上；
                 // 弹窗通过 vol-btn.absolute-position 动态跟随本按钮，新增按钮无需调整）
                 vol-btn := Rectangle {

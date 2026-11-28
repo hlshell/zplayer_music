@@ -156,6 +156,10 @@ pub fn status() -> (f32, bool) {
     (pos, playing)
 }
 
+pub fn paused() -> bool {
+    audio().map(|el| el.paused()).unwrap_or(true)
+}
+
 pub fn active() -> bool {
     STATE.with(|s| s.borrow().playing)
 }

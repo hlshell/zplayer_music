@@ -1,62 +1,73 @@
 // ============================================================================
-//  home.slint — 移动端首页（真实数据）
-//  Hero 每日精选 / 推荐歌单 / 热门歌曲 / 新歌速递，全部由 AppWindow 属性驱动。
+//  home.slint — 移动端首页（全玻璃液态风）
+//  问候 + 搜索入口 / 圆形快捷入口 / 每日推荐大卡 / 推荐歌单 / 热门榜单 / 新歌速递。
+//  全部由 AppWindow 属性驱动，不改数据模型。
 // ============================================================================
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../../shared/theme.slint";
 import { MobileTheme } from "../theme.slint";
 import { HotSong, NewSong, Playlist, HeroSong } from "../../shared/models.slint";
 import { SongRow } from "../components/song-row.slint";
+import { GlassRectangle } from "../components/glass.slint";
 
 component SectionTitle inherits Text {
     color: MobileTheme.text;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 700;
 }
 
-// Hero 卡内单行（排名 + 歌名 + 歌手），整行可点
-component HeroRow inherits Rectangle {
-    in property <string> rank: "";
-    in property <string> name: "";
-    in property <string> artist: "";
+// 圆形快捷入口：Liquid Glass 圆盘（统一复用 GlassRectangle 材质）+ 主色图标 + 标签
+component QuickEntry inherits Rectangle {
+    in property <image> icon;
+    in property <string> label: "";
     callback clicked();
 
-    height: 44px;
-    border-radius: 8px;
-    background: ta.has-hover ? rgba(255, 255, 255, 0.14) : transparent;
+    background: transparent;
 
-    HorizontalLayout {
+    VerticalLayout {
         width: 100%;
         height: 100%;
         spacing: 8px;
-        padding-left: 6px;
-        padding-right: 6px;
-        cross-axis-alignment: center;
+        alignment: center;
 
-        Text {
-            width: 18px;
-            text: root.rank;
-            color: rgba(255, 255, 255, 0.65);
-            font-size: 11px;
-            horizontal-alignment: center;
+        // 圆盘行：整行全宽 + 圆盘用 x 显式居中。
+        // 注意：VerticalLayout 的 alignment 只作用于主轴（垂直），交叉轴上的固定宽度
+        // 子元素默认靠左，不能用 alignment 居中，必须自己算 x。
+        Rectangle {
+            width: 100%;
+            height: 56px;
+            background: transparent;
+
+            GlassRectangle {
+                x: (parent.width - self.width) / 2;
+                width: 56px;
+                height: 56px;
+                border-radius: 28px;
+                blur-radius: 14px;
+                // 圆盘比大卡片略实，确保 56px 小尺寸下仍能看出玻璃轮廓
+                color: Theme.dark ? rgba(255, 255, 255, 0.18) : rgba(255, 255, 255, 0.72);
+
+                Image {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: root.icon;
+                    colorize: MobileTheme.primary;
+                }
+            }
         }
         Text {
-            text: root.name;
-            color: #ffffff;
+            width: 100%;
+            text: root.label;
+            color: MobileTheme.text-secondary;
             font-size: 12px;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Text {
-            text: root.artist;
-            color: rgba(255, 255, 255, 0.65);
-            font-size: 11px;
+            horizontal-alignment: center;
             overflow: elide;
         }
     }
 
-    ta := TouchArea {
+    TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
@@ -71,7 +82,16 @@ export component HomePage inherits Rectangle {
     in property <int> hero-count: 0;
     in property <bool> loading: false;
     callback song-played(int);
+    callback song-more(int);
     callback playlist-opened(int);
+    // 0=歌单 / 1=专辑 / 2=排行榜 / 3=电台
+    callback browse-opened(int);
+    // 点击搜索框：跳转搜索页
+    callback search-opened();
+    // 点击每日推荐大卡（歌曲行以外区域）：进入每日推荐歌单详情
+    callback hero-opened();
+    // 点击 Hero 卡内某首歌曲：直接播放
+    callback hero-song-played(int);
 
     background: transparent;
 
@@ -83,75 +103,209 @@ export component HomePage inherits Rectangle {
 
         VerticalLayout {
             width: 100%;
-            spacing: 18px;
-            // 侧栏/窄栏已把安全区计入自身宽度，仅竖屏内容区自行让出左右安全区
+            spacing: 22px;
             padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px) + 16px;
             padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right) + 16px;
-            // 平板内容区顶部安全区由 AppWindow 容器补足
-            padding-top: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-top) + 12px;
-            padding-bottom: MobileTheme.safe-bottom + 24px;
+            padding-top: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-top) + 14px;
+            padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 24px);
 
-            if (root.loading) : Text {
-                text: "数据加载中…";
-                color: MobileTheme.text-faint;
-                font-size: 12px;
+            // ===== 问候 =====
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "欢迎回来";
+                    color: MobileTheme.text;
+                    font-size: 26px;
+                    font-weight: 800;
+                }
+                Text {
+                    text: "发现你的专属好声音";
+                    color: MobileTheme.text-secondary;
+                    font-size: 13px;
+                }
             }
 
-            // ===== Hero：每日为你精选 =====
+            // ===== 搜索入口 =====
+            GlassRectangle {
+                height: 50px;
+                border-radius: 16px;
+
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    cross-axis-alignment: center;
+
+                    Image {
+                        width: 20px;
+                        height: 20px;
+                        source: @image-url("../../assets/icons/search-gray.svg");
+                        colorize: MobileTheme.text-faint;
+                    }
+                    Text {
+                        text: "搜索歌曲、歌单、歌手";
+                        color: MobileTheme.text-faint;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.search-opened(); }
+                }
+            }
+
+            // ===== 圆形快捷入口（4 列绝对等宽：中心固定在 12.5/37.5/62.5/87.5%）=====
             Rectangle {
-                height: 216px;
+                height: 84px;
+                background: transparent;
+                property <length> cw: self.width / 4;
+
+                QuickEntry {
+                    x: 0;
+                    width: parent.cw;
+                    height: parent.height;
+                    icon: @image-url("../../assets/icons/playlist-gray.svg");
+                    label: "歌单";
+                    clicked => { root.browse-opened(0); }
+                }
+                QuickEntry {
+                    x: parent.cw;
+                    width: parent.cw;
+                    height: parent.height;
+                    icon: @image-url("../../assets/icons/album-gray.svg");
+                    label: "专辑";
+                    clicked => { root.browse-opened(1); }
+                }
+                QuickEntry {
+                    x: parent.cw * 2;
+                    width: parent.cw;
+                    height: parent.height;
+                    icon: @image-url("../../assets/icons/toplist-gray.svg");
+                    label: "排行榜";
+                    clicked => { root.browse-opened(2); }
+                }
+                QuickEntry {
+                    x: parent.cw * 3;
+                    width: parent.cw;
+                    height: parent.height;
+                    icon: @image-url("../../assets/icons/radio-gray.svg");
+                    label: "电台";
+                    clicked => { root.browse-opened(3); }
+                }
+            }
+
+            // ===== 每日推荐大卡（封面铺满做背景 + 5 首歌曲列表）=====
+            Rectangle {
+                height: 200px;
                 border-radius: 20px;
                 clip: true;
-                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
 
+                // 兜底底色（无封面时）
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+                    background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
+                }
+                // 封面铺满做背景
                 if (root.hero-cover.width > 0) : Image {
                     width: 100%;
                     height: 100%;
                     source: root.hero-cover;
+                    image-fit: cover;
                 }
-                // 半透明遮罩保证文字可读
+                // 渐变遮罩：左深右浅，保证文字可读
                 Rectangle {
                     width: 100%;
                     height: 100%;
-                    background: @linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0.74) 100%);
+                    background: @linear-gradient(90deg, rgba(18, 12, 36, 0.88) 0%, rgba(18, 12, 36, 0.62) 42%, rgba(18, 12, 36, 0.42) 100%);
                 }
 
-                VerticalLayout {
+                HorizontalLayout {
                     width: 100%;
                     height: 100%;
-                    spacing: 4px;
-                    padding: 14px;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-top: 16px;
+                    padding-bottom: 16px;
+                    spacing: 12px;
 
-                    Text {
-                        text: "每日为你精选";
-                        color: #ffffff;
-                        font-size: 17px;
-                        font-weight: 700;
-                    }
-                    Text {
-                        text: root.hero-count > 0 ? ("共 " + root.hero-count + " 首") : "正在为你准备";
-                        color: rgba(255, 255, 255, 0.78);
-                        font-size: 11px;
+                    // 左：标题 + 数量 + 进入提示
+                    VerticalLayout {
+                        width: 116px;
+                        spacing: 6px;
+                        alignment: center;
+                        Text {
+                            text: "每日推荐";
+                            color: #ffffff;
+                            font-size: 20px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.hero-count > 0 ? ("共 " + root.hero-count + " 首") : "为你精选";
+                            color: rgba(255, 255, 255, 0.75);
+                            font-size: 12px;
+                        }
+                        Text {
+                            text: "查看歌单 ›";
+                            color: rgba(255, 255, 255, 0.88);
+                            font-size: 12px;
+                            font-weight: 600;
+                        }
                     }
 
-                    if (root.hero-songs.length > 0) : HeroRow {
-                        rank: root.hero-songs[0].rank;
-                        name: root.hero-songs[0].name;
-                        artist: root.hero-songs[0].artist;
-                        clicked => { root.song-played(root.hero-songs[0].id); }
+                    // 右：歌曲列表（前 5 首，每首独立可点）
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 6px;
+                        alignment: center;
+                        for h[i] in root.hero-songs : Rectangle {
+                            visible: i < 5;
+                            height: i < 5 ? 28px : 0px;
+                            HorizontalLayout {
+                                width: 100%;
+                                height: 100%;
+                                spacing: 8px;
+                                Text {
+                                    text: h.rank;
+                                    color: rgba(255, 255, 255, 0.55);
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    width: 18px;
+                                    vertical-alignment: center;
+                                }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 1px;
+                                    Text {
+                                        text: h.name;
+                                        color: #ffffff;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: h.artist;
+                                        color: rgba(255, 255, 255, 0.60);
+                                        font-size: 10px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                            // 每首独立 TouchArea（在整卡 TouchArea 之上，优先捕获）
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.hero-song-played(h.id); }
+                            }
+                        }
                     }
-                    if (root.hero-songs.length > 1) : HeroRow {
-                        rank: root.hero-songs[1].rank;
-                        name: root.hero-songs[1].name;
-                        artist: root.hero-songs[1].artist;
-                        clicked => { root.song-played(root.hero-songs[1].id); }
-                    }
-                    if (root.hero-songs.length > 2) : HeroRow {
-                        rank: root.hero-songs[2].rank;
-                        name: root.hero-songs[2].name;
-                        artist: root.hero-songs[2].artist;
-                        clicked => { root.song-played(root.hero-songs[2].id); }
-                    }
+                }
+                // 整卡点击（非歌曲区域）：进入歌单详情
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.hero-opened(); }
                 }
             }
 
@@ -159,7 +313,7 @@ export component HomePage inherits Rectangle {
             SectionTitle { text: "推荐歌单"; }
             ScrollView {
                 width: 100%;
-                height: 152px;
+                height: 176px;
                 vertical-scrollbar-policy: always-off;
                 horizontal-scrollbar-policy: always-off;
 
@@ -168,24 +322,20 @@ export component HomePage inherits Rectangle {
                     spacing: 12px;
 
                     for p in root.recommend-playlists : Rectangle {
-                        width: 112px;
-                        height: 148px;
-                        border-radius: 14px;
-                        background: pl-ta.has-hover ? Theme.palette.hover : transparent;
+                        width: 124px;
+                        height: 172px;
 
                         VerticalLayout {
                             width: 100%;
                             height: 100%;
-                            spacing: 6px;
-                            padding: 2px;
+                            spacing: 8px;
 
                             Rectangle {
-                                width: 108px;
-                                height: 108px;
-                                border-radius: 12px;
+                                width: 124px;
+                                height: 124px;
+                                border-radius: 14px;
                                 clip: true;
                                 background: @linear-gradient(135deg, p.from 0%, p.to 100%);
-
                                 if (p.cover.width > 0) : Image {
                                     width: 100%;
                                     height: 100%;
@@ -193,7 +343,7 @@ export component HomePage inherits Rectangle {
                                 }
                             }
                             Text {
-                                width: 108px;
+                                width: 124px;
                                 text: p.name;
                                 color: MobileTheme.text;
                                 font-size: 12px;
@@ -202,8 +352,7 @@ export component HomePage inherits Rectangle {
                                 overflow: elide;
                             }
                         }
-
-                        pl-ta := TouchArea {
+                        TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.playlist-opened(p.id); }
                         }
@@ -211,18 +360,26 @@ export component HomePage inherits Rectangle {
                 }
             }
 
-            // ===== 热门歌曲 =====
-            SectionTitle { text: "热门歌曲"; }
-            VerticalLayout {
-                for h[i] in root.hot-songs : SongRow {
-                    index: i;
-                    rank: h.rank;
-                    title: h.name;
-                    subtitle: h.artist;
-                    cover: h.cover;
-                    from: h.from;
-                    to: h.to;
-                    clicked => { root.song-played(h.id); }
+            // ===== 热门榜单 =====
+            SectionTitle { text: "热门榜单"; }
+            GlassRectangle {
+                border-radius: 16px;
+
+                VerticalLayout {
+                    width: 100%;
+                    padding: 6px;
+                    for h[i] in root.hot-songs : SongRow {
+                        index: i;
+                        song-id: h.id;
+                        rank: h.rank;
+                        title: h.name;
+                        subtitle: h.artist;
+                        cover: h.cover;
+                        from: h.from;
+                        to: h.to;
+                        clicked => { root.song-played(h.id); }
+                        more(id) => { root.song-more(id); }
+                    }
                 }
             }
 
@@ -230,7 +387,7 @@ export component HomePage inherits Rectangle {
             SectionTitle { text: "新歌速递"; }
             ScrollView {
                 width: 100%;
-                height: 168px;
+                height: 196px;
                 vertical-scrollbar-policy: always-off;
                 horizontal-scrollbar-policy: always-off;
 
@@ -239,24 +396,20 @@ export component HomePage inherits Rectangle {
                     spacing: 12px;
 
                     for n in root.new-songs : Rectangle {
-                        width: 112px;
-                        height: 164px;
-                        border-radius: 14px;
-                        background: ns-ta.has-hover ? Theme.palette.hover : transparent;
+                        width: 128px;
+                        height: 192px;
 
                         VerticalLayout {
                             width: 100%;
                             height: 100%;
                             spacing: 6px;
-                            padding: 2px;
 
                             Rectangle {
-                                width: 108px;
-                                height: 108px;
-                                border-radius: 12px;
+                                width: 128px;
+                                height: 128px;
+                                border-radius: 14px;
                                 clip: true;
-                                background: @linear-gradient(135deg, Theme.palette.primary 0%, Theme.palette.secondary 100%);
-
+                                background: @linear-gradient(135deg, MobileTheme.primary 0%, MobileTheme.secondary 100%);
                                 if (n.cover.width > 0) : Image {
                                     width: 100%;
                                     height: 100%;
@@ -264,22 +417,21 @@ export component HomePage inherits Rectangle {
                                 }
                             }
                             Text {
-                                width: 108px;
+                                width: 128px;
                                 text: n.name;
                                 color: MobileTheme.text;
                                 font-size: 12px;
                                 overflow: elide;
                             }
                             Text {
-                                width: 108px;
+                                width: 128px;
                                 text: n.artist;
                                 color: MobileTheme.text-faint;
-                                font-size: 10px;
+                                font-size: 11px;
                                 overflow: elide;
                             }
                         }
-
-                        ns-ta := TouchArea {
+                        TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.song-played(n.id); }
                         }

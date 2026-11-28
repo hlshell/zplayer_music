@@ -8,19 +8,28 @@
 //! 音频解码线程内创建；MvAudioClock（Arc 共享核心）可先行创建并跨线程传递。
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use crate::core::audio_ring::SpscRing;
 use crate::core::mv_state::MvPlaybackState;
+
+/// 环容量（样本数，交错）：48k/立体声约 2s。
+/// 旧实现用 `Mutex<VecDeque>`，解码线程持锁/被抢占时回调会阻塞在锁上 →
+/// 实时线程被饿死（优先级反转）。换成无锁 SPSC 后回调永不阻塞。
+const RING_SAMPLES: usize = 192_000;
 
 /// 时钟基准哨兵（尚未写入任何样本）。
 const BASE_UNSET: u64 = u64::MAX;
 
 struct MvAudioCore {
-    /// f32 交错采样环。
-    ring: Mutex<VecDeque<f32>>,
+    /// f32 交错采样环：解码线程 push、回调 pop，无锁。
+    ring: SpscRing,
+    /// seek 清环请求/确认序号：解码线程递增 req 并等待回调 ack 后再写新数据，
+    /// 否则新数据可能被随后的清环动作一并丢掉（seek 后短暂静音）。
+    flush_req: AtomicU64,
+    flush_seen: AtomicU64,
     /// 时钟基准：会话首个音频样本的容器绝对 PTS（us）。
     /// 固定后不随 seek 变化——与视频 ts_us（abs - 会话首帧）保持同一起点。
     base_abs_us: AtomicU64,
@@ -45,7 +54,9 @@ impl MvAudioClock {
     /// 预创建时钟（设备参数未就绪，now_rel_us 返回 None 直到 sink 写入）。
     pub fn new() -> Self {
         Self(Arc::new(MvAudioCore {
-            ring: Mutex::new(VecDeque::new()),
+            ring: SpscRing::with_capacity(RING_SAMPLES),
+            flush_req: AtomicU64::new(0),
+            flush_seen: AtomicU64::new(0),
             base_abs_us: AtomicU64::new(BASE_UNSET),
             base_rel_us: AtomicU64::new(0),
             rendered_samples: AtomicU64::new(0),
@@ -84,7 +95,6 @@ impl MvAudioClock {
 /// cpal 输出流 + 采样环。**非 Send**：必须在音频解码线程内创建并持有；drop 即停止输出。
 pub struct MvAudioSink {
     core: Arc<MvAudioCore>,
-    cap_samples: usize,
     sample_rate: u32,
     channels: u16,
     _stream: cpal::Stream,
@@ -99,43 +109,52 @@ impl MvAudioSink {
         let supported = dev.default_output_config().ok()?;
         let sample_rate = supported.sample_rate().0;
         let channels = supported.channels();
-        let cfg = cpal::StreamConfig {
-            channels,
-            sample_rate: cpal::SampleRate(sample_rate),
-            // 固定 512 帧（@48k ≈ 10.7ms）：Default 在 Windows WASAPI 上可能选到
-            // 100ms+ 的大 buffer，导致音频延迟大、音画同步滞后；固定小 buffer 延迟低。
-            buffer_size: cpal::BufferSize::Fixed(512),
-        };
         let core = clock.0.clone();
         core.sample_rate.store(sample_rate, Ordering::Release);
         core.channels.store(channels as u32, Ordering::Release);
         let cb_core = core.clone();
         let cb_state = state.clone();
-        let stream = dev
-            .build_output_stream(
+
+        // 缓冲从 512 帧（~10.7ms）提到 1024 帧（~21ms）：系统满载时多出一倍容错；
+        // 设备拒绝固定尺寸时逐级回退，避免直接判定"无音频"。
+        let mut stream = None;
+        for buffer_size in [
+            cpal::BufferSize::Fixed(1024),
+            cpal::BufferSize::Fixed(512),
+            cpal::BufferSize::Default,
+        ] {
+            let cfg = cpal::StreamConfig {
+                channels,
+                sample_rate: cpal::SampleRate(sample_rate),
+                buffer_size,
+            };
+            let cb_core = cb_core.clone();
+            let cb_state = cb_state.clone();
+            let built = dev.build_output_stream(
                 &cfg,
                 move |data: &mut [f32], _| {
+                    // seek 清环请求：先丢弃残环再应答，保证解码线程写新数据时环已干净
+                    let req = cb_core.flush_req.load(Ordering::Acquire);
+                    if req != cb_core.flush_seen.load(Ordering::Relaxed) {
+                        cb_core.ring.discard();
+                        cb_core.flush_seen.store(req, Ordering::Release);
+                        data.fill(0.0);
+                        return;
+                    }
                     // 暂停 / 缓冲中：输出静音且不消费环（时钟冻结，恢复后音视频仍同步）
                     if cb_state.paused() || cb_state.buffering() {
                         data.fill(0.0);
                         return;
                     }
                     let vol = cb_state.volume() as f32 / 100.0;
-                    // 批量 drain：锁内只做一次连续内存搬移（微秒级），立刻放锁再做音量乘法。
-                    // 旧实现锁内逐样本 pop 整段回调 → 与解码线程 push 的锁竞争阻塞实时线程，产生爆音。
-                    let mut consumed = 0usize;
-                    if let Ok(mut ring) = cb_core.ring.lock() {
-                        let n = ring.len().min(data.len());
-                        for (i, s) in ring.drain(..n).enumerate() {
-                            data[i] = s;
-                        }
-                        consumed = n;
-                    }
+                    // 无锁取样本：回调绝不等待解码线程（旧实现锁环，满载时会被饿死 → 爆音）
+                    let consumed = cb_core.ring.pop(data);
                     // 已交付样本计数：时钟据此推进（只计真实取到的，underrun 补零不计）
                     if consumed > 0 {
-                        cb_core.rendered_samples.fetch_add(consumed as u64, Ordering::Release);
+                        cb_core
+                            .rendered_samples
+                            .fetch_add(consumed as u64, Ordering::Release);
                     }
-                    // 音量乘法 + underrun 部分填零（锁外执行，不阻塞解码线程）
                     for s in data[..consumed].iter_mut() {
                         *s *= vol;
                     }
@@ -143,15 +162,20 @@ impl MvAudioSink {
                 },
                 |e| log::warn!(target: "mv_audio", "output error: {e}"),
                 None,
-            )
-            .ok()?;
+            );
+            match built {
+                Ok(s) => {
+                    stream = Some(s);
+                    break;
+                }
+                Err(e) => log::warn!(target: "mv_audio", "输出流配置不被接受：{e}"),
+            }
+        }
+        let stream = stream?;
         stream.play().ok()?;
         log::info!(target: "mv_audio", "output opened: {sample_rate}Hz {channels}ch");
         Some(Self {
             core,
-            // 环容量 2s：足以吸收网络 jitter；过大会拉长 push 阻塞唤醒周期，
-            // 且远超缓冲门控 4s 恢复阈值没有意义（门控卡住时环照样停）
-            cap_samples: (sample_rate as usize) * (channels as usize) * 2,
             sample_rate,
             channels,
             _stream: stream,
@@ -195,14 +219,10 @@ impl MvAudioSink {
             if state.epoch() != epoch {
                 return true;
             }
-            {
-                let Ok(mut ring) = c.ring.lock() else { return false };
-                let n = self.cap_samples.saturating_sub(ring.len()).min(samples.len() - i);
-                if n > 0 {
-                    ring.extend(samples[i..i + n].iter().copied());
-                    i += n;
-                    c.valid.store(true, Ordering::Release);
-                }
+            let n = c.ring.push(&samples[i..]);
+            if n > 0 {
+                i += n;
+                c.valid.store(true, Ordering::Release);
             }
             if i < samples.len() {
                 std::thread::sleep(Duration::from_millis(5));
@@ -212,10 +232,19 @@ impl MvAudioSink {
     }
 
     /// seek 时清空采样环、渲染计数归零并使时钟失效（由下一次首块写入重新标定基准）。
+    /// 清环由消费者（回调）执行：这里递增请求序号并等待它确认，
+    /// 否则紧随其后的新数据可能被回调节流到同一批清掉（seek 后静音）。
     pub fn flush(&self) {
         let c = &self.core;
-        if let Ok(mut ring) = c.ring.lock() {
-            ring.clear();
+        let req = c.flush_req.fetch_add(1, Ordering::SeqCst) + 1;
+        let deadline = Instant::now() + Duration::from_millis(300);
+        while c.flush_seen.load(Ordering::Acquire) != req {
+            if Instant::now() > deadline {
+                // 回调没在跑（设备丢失等）：不越权碰环（SPSC 只允许消费者清环），
+                // 仅复位时钟；此时本来也没有输出，残留数据无影响。
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
         c.valid.store(false, Ordering::Release);
         c.rendered_samples.store(0, Ordering::Release);

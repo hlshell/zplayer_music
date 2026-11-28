@@ -2,6 +2,7 @@
 //  media.slint — 通用媒体展示组件（已接入主题）
 // ============================================================================
 import { Theme } from "../../shared/theme.slint";
+import { SongMenuState } from "song-menu.slint";
 
 // ---- 方形封面卡片（热歌 / 专辑 / MV 共用：封面 + 角标 + 悬停播放）----
 export component MediaCard inherits Rectangle {
@@ -112,6 +113,7 @@ export component ArtistAvatar inherits Rectangle {
 
 // ---- 横向歌曲条目（新歌速递 / 搜索结果等小卡片）----
 export component NewSongRow inherits Rectangle {
+    in property <int> song-id: 0;
     in property <string> name;
     in property <string> artist;
     in property <image> cover;
@@ -159,5 +161,25 @@ export component NewSongRow inherits Rectangle {
             Rectangle { vertical-stretch: 1; }
         }
     }
-    hover-ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+    hover-ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                SongMenuState.song-id = root.song-id;
+                SongMenuState.song-name = root.name;
+                SongMenuState.song-artist = root.artist;
+                SongMenuState.song-cover = root.cover;
+                SongMenuState.liked = false;
+                SongMenuState.show-at(
+                    hover-ta.absolute-position.x + hover-ta.mouse-x,
+                    hover-ta.absolute-position.y + hover-ta.mouse-y,
+                    false
+                );
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+    }
 }

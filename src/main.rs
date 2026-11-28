@@ -77,21 +77,55 @@ use std::time::Duration;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 use crate::network::netease::client::NeteaseClient;
 
-// 运行时窗口图标（任务栏/标题栏/Alt+Tab）：无边框窗口默认任务栏图标空白，
-// 解码编译期嵌入的 logo 为 RGBA 设置 winit 窗口图标。
+// 运行时窗口图标（任务栏/标题栏/Alt+Tab/任务管理器窗口条目）。
 // 必须在事件循环启动后调用 —— 事件循环未跑时 with_winit_window 静默失败
 // （回调永不执行），曾导致任务栏/Alt+Tab 图标空白。仅桌面（web 无 winit）。
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mobile")))]
 fn set_runtime_icon(ui: &AppWindow) {
-    use image::GenericImageView;
-    let Ok(dyn_img) = image::load_from_memory(include_bytes!("../ui/assets/app-icon.png")) else { return };
-    let (w, h) = dyn_img.dimensions();
-    let rgba = dyn_img.to_rgba8().into_raw();
-    let _ = ui.window().with_winit_window(move |win: &slint::winit_030::winit::window::Window| {
-        if let Ok(icon) = slint::winit_030::winit::window::Icon::from_rgba(rgba, w, h) {
-            win.set_window_icon(Some(icon));
-        }
-    });
+    use slint::winit_030::winit::window::Window as WinitWindow;
+
+    // Windows：直接按目标像素尺寸从 exe 内嵌 ICO 资源取帧（WM_SETICON）。
+    // 不要用 32x32 PNG 转 HICON：任务管理器窗口条目的小图标是 16px，系统只能把
+    // 32px 位图缩放出来，实测呈花屏噪点。app.ico 自带 16/20/24/32/48... 各档帧，
+    // 指定尺寸由系统取对应帧，不缩放、不发虚。
+    // 只设 ICON_SMALL/ICON_SMALL2：大图标（任务栏/Alt+Tab）继续用 exe 自带图标，
+    // 由系统按 DPI 选帧，比在这里固定一张位图更清晰。
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let _ = ui.window().with_winit_window(move |win: &WinitWindow| {
+            let Ok(handle) = win.window_handle() else { return };
+            let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
+            let hwnd = h.hwnd.get() as winapi::shared::windef::HWND;
+            unsafe {
+                use winapi::um::libloaderapi::GetModuleHandleW;
+                use winapi::um::winuser::{
+                    LoadImageW, SendMessageW, ICON_SMALL, ICON_SMALL2, IMAGE_ICON, WM_SETICON,
+                };
+                // 资源 ID 1 = build.rs 中 winres::set_icon 写入的图标组
+                let inst = GetModuleHandleW(std::ptr::null());
+                let small = LoadImageW(inst, 1 as *const u16, IMAGE_ICON, 16, 16, 0) as isize;
+                if small != 0 {
+                    SendMessageW(hwnd, WM_SETICON, ICON_SMALL2 as usize, small);
+                    SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, small);
+                }
+            }
+        });
+    }
+
+    // macOS/Linux：winit 只接受 RGBA 位图，由系统按需缩放
+    #[cfg(not(windows))]
+    {
+        use image::GenericImageView;
+        let Ok(dyn_img) = image::load_from_memory(include_bytes!("../ui/assets/app-icon.png")) else { return };
+        let (w, h) = dyn_img.dimensions();
+        let rgba = dyn_img.to_rgba8().into_raw();
+        let _ = ui.window().with_winit_window(move |win: &WinitWindow| {
+            if let Ok(icon) = slint::winit_030::winit::window::Icon::from_rgba(rgba, w, h) {
+                win.set_window_icon(Some(icon));
+            }
+        });
+    }
 }
 
 
@@ -138,6 +172,10 @@ fn main() -> Result<(), slint::PlatformError> {
     // 会把部分 GPU 静默回退到软件渲染，全窗口 60fps 软件光栅化实测空闲 CPU 15%+；
     // 强制 GL 后空闲 CPU 降至 0.3%。GL 不可用的机器回落默认选择（软件渲染兜底）。
     let hook = move |attrs: winit::window::WindowAttributes| {
+        // 桌面歌词悬浮窗豁免主窗口属性（desktop_lyrics.rs 在 DesktopLyrics::new() 前置位标志）
+        if crate::platform::desktop_lyrics::take_desktop_lyrics_flag() {
+            return crate::platform::desktop_lyrics::apply_desktop_lyrics_attrs(attrs);
+        }
         // 托盘菜单窗口豁免主窗口属性（tray.rs 在 TrayMenu::new() 前置位标志）
         #[cfg(any(target_os = "windows", target_os = "macos"))]
         if crate::platform::tray::take_tray_flag() {
@@ -171,6 +209,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let hook_pos = saved_pos;
             slint::BackendSelector::new()
                 .with_winit_window_attributes_hook(move |attrs: winit::window::WindowAttributes| {
+                    if crate::platform::desktop_lyrics::take_desktop_lyrics_flag() {
+                        return crate::platform::desktop_lyrics::apply_desktop_lyrics_attrs(attrs);
+                    }
                     #[cfg(any(target_os = "windows", target_os = "macos"))]
                     if crate::platform::tray::take_tray_flag() {
                         return crate::platform::tray::apply_tray_attrs(attrs);
@@ -212,6 +253,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // 初始音量（读配置；跨播放持久）
     crate::platform::audio::set_volume(cfg.app.volume);
+    // 进程级抗抢占调优（关闭 EcoQoS 电源节流 + AboveNormal 优先级）：
+    // 系统被其他进程占满 CPU 时，音频线程仍能按时拿到调度。
+    #[cfg(feature = "desktop")]
+    crate::platform::audio::init_process_tuning();
     ui.set_volume(cfg.app.volume);
     // 音量变化即时落盘：滑块回调同时更新配置并 save，避免异常退出丢失音量设置
     {
@@ -294,6 +339,11 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     ui.set_theme_color_index(cfg.ui.theme_color_index);
     ui.set_lyrics_style(cfg.ui.lyrics_style);
+    ui.set_desktop_lyrics(cfg.ui.desktop_lyrics);
+    ui.set_desktop_lyrics_lock(cfg.ui.desktop_lyrics_locked);
+    ui.set_desktop_lyrics_sung(cfg.ui.desktop_lyrics_sung_index);
+    ui.set_desktop_lyrics_unsung(cfg.ui.desktop_lyrics_unsung_index);
+    ui.set_desktop_lyrics_outline(cfg.ui.desktop_lyrics_outline);
     ui.set_close_behavior_index(cfg.ui.close_behavior_index);
     ui.set_threads_index(cfg.network.threads_index);
     ui.set_buffer_index(cfg.network.buffer_index);
@@ -353,6 +403,7 @@ fn main() -> Result<(), slint::PlatformError> {
             duration_sec: dur,
             url: cfg.last_song.cover_url.clone().into(),
             liked: crate::persist::liked::is_liked(cfg.last_song.id),
+            bad: false,
         });
         liked::sync_liked(&ui);
         if dur > 0.0 {
@@ -455,6 +506,17 @@ fn main() -> Result<(), slint::PlatformError> {
     // 系统托盘（桌面三平台）：常驻图标 + 左键显隐切换 + 右键 Slint 自绘菜单
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     crate::platform::tray::init(ui.as_weak());
+    // 桌面歌词悬浮窗：按配置恢复（事件循环内创建），锁定态一并恢复
+    crate::platform::desktop_lyrics::init(
+        ui.as_weak(),
+        cfg.ui.desktop_lyrics,
+        cfg.ui.desktop_lyrics_locked,
+        cfg.ui.desktop_lyrics_font_size,
+        cfg.ui.desktop_lyrics_font_index,
+        cfg.ui.desktop_lyrics_sung_index,
+        cfg.ui.desktop_lyrics_unsung_index,
+        cfg.ui.desktop_lyrics_outline,
+    );
     handlers::browse::setup(&ctx);
     handlers::fav::setup(&ctx);
     handlers::local::setup(&ctx);

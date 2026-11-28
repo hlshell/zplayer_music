@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ZPlayer Music
+Comment=基于 Slint 的桌面音乐播放器
+Exec=zplayer-music
+Icon=zplayer-music
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=music;player;audio;zplayer;

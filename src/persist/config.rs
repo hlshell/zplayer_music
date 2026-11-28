@@ -14,16 +14,30 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// 平台注入的数据根（移动端在入口写入应用私有目录）。
+/// Android 上 dirs::data_dir() 返回 None，会退化成相对路径导致配置/收藏无法落盘。
+static DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// 入口注入平台数据根（仅首次生效）。
+pub fn set_data_root(p: PathBuf) {
+    let _ = DATA_ROOT.set(p);
+}
 
 /// 应用数据根目录（跨平台）。
-/// 可用环境变量 `ZPLAYER_DATA_DIR` 覆盖（便携版 / 自定义位置）。
+/// 优先级：`ZPLAYER_DATA_DIR` 环境变量 → 平台注入目录 → dirs crate。
 pub fn data_dir() -> PathBuf {
     if let Ok(d) = std::env::var("ZPLAYER_DATA_DIR") {
         if !d.trim().is_empty() {
             return PathBuf::from(d);
         }
     }
-    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let base = DATA_ROOT
+        .get()
+        .cloned()
+        .or_else(dirs::data_dir)
+        .unwrap_or_else(|| PathBuf::from("."));
     base.join("ZPlayerMusic")
 }
 
@@ -318,11 +332,36 @@ pub struct UiSection {
     pub lyrics_style: bool,
     /// 关闭行为（0=每次询问 1=最小化到托盘 2=直接退出）
     pub close_behavior_index: i32,
+    /// 桌面歌词悬浮窗开关（仅桌面端）
+    pub desktop_lyrics: bool,
+    /// 桌面歌词锁定（= 鼠标点击穿透，仅桌面端）
+    pub desktop_lyrics_locked: bool,
+    /// 桌面歌词字号（px）
+    pub desktop_lyrics_font_size: i32,
+    /// 桌面歌词字体风格索引（0=微软雅黑 1=宋体 2=楷体 3=黑体）
+    pub desktop_lyrics_font_index: i32,
+    /// 桌面歌词已唱配色预设索引（见 ui/desktop/components/lyrics-ink.slint）
+    pub desktop_lyrics_sung_index: i32,
+    /// 桌面歌词未唱配色预设索引（见 ui/desktop/components/lyrics-ink.slint）
+    pub desktop_lyrics_unsung_index: i32,
+    /// 桌面歌词字体黑色描边（增强复杂背景下的可读性）
+    pub desktop_lyrics_outline: bool,
 }
 
 impl Default for UiSection {
     fn default() -> Self {
-        Self { theme_color_index: 0, lyrics_style: true, close_behavior_index: 0 }
+        Self {
+            theme_color_index: 0,
+            lyrics_style: true,
+            close_behavior_index: 0,
+            desktop_lyrics: false,
+            desktop_lyrics_locked: false,
+            desktop_lyrics_font_size: 24,
+            desktop_lyrics_font_index: 0,
+            desktop_lyrics_sung_index: 0,
+            desktop_lyrics_unsung_index: 0,
+            desktop_lyrics_outline: true,
+        }
     }
 }
 

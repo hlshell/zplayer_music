@@ -15,10 +15,38 @@ component GroupTitle inherits Text {
     font-weight: 600;
 }
 
-// 分组卡片：圆角 16px 的 surface，内部间距与内边距由使用处的布局提供
+// 分组卡片：液态玻璃圆角卡，内部间距与内边距由使用处的布局提供
 component GroupCard inherits Rectangle {
     border-radius: 16px;
-    background: MobileTheme.surface;
+    background: transparent;
+
+    // 液态玻璃底：页面内卡片用更通透的 surface-bg（氛围渐层可透出），
+    // 与底栏/迷你条的防叠字高不透填充区分
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 16px;
+        background: MobileTheme.surface-bg;
+        border-width: 1px;
+        border-color: MobileTheme.glass-stroke;
+        backdrop-blur: MobileTheme.surface-blur-radius;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MobileTheme.glass-shade;
+        clip: true;
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 }
 
 // 选项 chip：视觉高 36px / 圆角 18px，命中区补足到 44px（触控目标下限）
@@ -35,15 +63,17 @@ component Chip inherits Rectangle {
         width: 100%;
         height: 36px;
         border-radius: 18px;
+        border-width: root.selected ? 1px : 0px;
+        border-color: MobileTheme.glass-stroke;
         background: root.selected
-            ? MobileTheme.primary
-            : (chip-ta.has-hover ? MobileTheme.active : MobileTheme.hover);
+            ? MobileTheme.glass-capsule
+            : (chip-ta.has-hover ? rgba(255, 255, 255, 0.14) : MobileTheme.hover);
 
         Text {
             width: 100%;
             height: 100%;
             text: root.text;
-            color: root.selected ? Theme.palette.icon-white : MobileTheme.text-secondary;
+            color: root.selected ? MobileTheme.text : MobileTheme.text-secondary;
             font-size: 13px;
             font-weight: root.selected ? 600 : 400;
             horizontal-alignment: center;
@@ -62,7 +92,6 @@ component Chip inherits Rectangle {
 
 export component SettingsPage inherits Rectangle {
     in property <bool> dark: false;
-    in property <int> theme-color: 0;
     in property <int> language: 0;
     in property <int> quality: 0;
     in property <int> source: 0;
@@ -70,7 +99,6 @@ export component SettingsPage inherits Rectangle {
     in property <string> data-dir: "";
 
     callback dark-changed(bool);
-    callback theme-changed(int);
     callback language-changed(int);
     callback quality-changed(int);
     callback source-changed(int);
@@ -89,7 +117,7 @@ export component SettingsPage inherits Rectangle {
             spacing: 16px;
             // 平板内容区顶部/右侧安全区由 AppWindow 容器补足，避免重复叠加
             padding-top: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-top) + 12px;
-            padding-bottom: MobileTheme.safe-bottom + 28px;
+            padding-bottom: MobileTheme.safe-bottom + (MobileTheme.layout-kind == 0 ? 176px : 28px);
             padding-left: (MobileTheme.layout-kind == 0 ? MobileTheme.safe-left : 0px)
                 + max(16px, (root.width - 640px) / 2);
             padding-right: (MobileTheme.layout-kind == 2 ? 0px : MobileTheme.safe-right)
@@ -151,54 +179,6 @@ export component SettingsPage inherits Rectangle {
                             height: 100%;
                             mouse-cursor: pointer;
                             clicked => { root.dark-changed(!root.dark); }
-                        }
-                    }
-
-                    // 主题色：4 个 40px 圆形色块（选中加白色描边）
-                    Rectangle {
-                        height: 44px;
-                        background: transparent;
-
-                        HorizontalLayout {
-                            width: 100%;
-                            height: 100%;
-                            spacing: 10px;
-
-                            Text {
-                                text: "主题色";
-                                horizontal-stretch: 1;
-                                color: MobileTheme.text;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 4px;
-
-                                for c[idx] in [#6c5ce7, #0ea371, #ea580c, #3b82f6] : Rectangle {
-                                    width: 44px;
-                                    height: 44px;
-                                    background: transparent;
-
-                                    Rectangle {
-                                        x: 2px;
-                                        y: 2px;
-                                        width: 40px;
-                                        height: 40px;
-                                        border-radius: 20px;
-                                        background: c;
-                                        border-width: idx == root.theme-color ? 2px : 0px;
-                                        border-color: Theme.palette.icon-white;
-                                    }
-
-                                    TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        mouse-cursor: pointer;
-                                        clicked => { root.theme-changed(idx); }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -315,13 +295,15 @@ export component SettingsPage inherits Rectangle {
                     Rectangle {
                         height: 44px;
                         border-radius: 12px;
-                        background: clear-ta.has-hover ? MobileTheme.active : MobileTheme.hover;
+                        border-width: 1px;
+                        border-color: MobileTheme.glass-stroke;
+                        background: clear-ta.has-hover ? rgba(255, 255, 255, 0.20) : MobileTheme.glass-capsule;
 
                         Text {
                             width: 100%;
                             height: 100%;
                             text: "清空缓存";
-                            color: MobileTheme.primary;
+                            color: MobileTheme.text;
                             font-size: 14px;
                             font-weight: 600;
                             horizontal-alignment: center;

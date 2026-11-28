@@ -69,6 +69,9 @@ component MenuRow inherits Rectangle {
             // 跑马灯：clip 容器 + Text 横向往返位移，两端各停留 hold 时长
             if root.marquee: Rectangle {
                 horizontal-stretch: 1;
+                // 必须显式绑高度：Rectangle 在 HorizontalLayout 中高度默认推导为 0，
+                // 配合 clip 会把整行文字裁掉（歌名标题行空白但行高仍在）
+                height: parent.height;
                 clip: true;
                 Text {
                     text: root.label;
@@ -76,7 +79,11 @@ component MenuRow inherits Rectangle {
                     font-size: 13px;
                     font-weight: root.bold ? 700 : 400;
                     vertical-alignment: center;
+                    // 显式自然宽度 + 不换行：Text 未指定宽度时默认宽度与下面 over 里的
+                    // self.preferred-width 存在绑定歧义，可能塌陷为 0 导致整行文字不可见。
+                    width: self.preferred-width;
                     height: parent.height;
+                    wrap: no-wrap;
                     // 超出部分宽度；<=0 时静止不滚动
                     property <length> over: max(0px, self.preferred-width - parent.width);
                     property <duration> hold: 1.4s;                     // 两端停留
@@ -125,6 +132,9 @@ export component TrayMenu inherits Window {
     // 右键点击点（窗口内逻辑坐标，Rust 已做物理→逻辑 + 显示器原点换算）
     in property <length> click-x: 0;
     in property <length> click-y: 0;
+    // 桌面歌词悬浮窗状态（开启时才显示「锁定/解锁」行）
+    in property <bool> desktop-lyrics-on: false;
+    in property <bool> desktop-lyrics-locked: false;
 
     // ---- 动作回调（Rust 接线到 AppWindow）----
     callback action-show();
@@ -132,6 +142,8 @@ export component TrayMenu inherits Window {
     callback action-prev();
     callback action-play();
     callback action-next();
+    callback action-desktop-lyrics-lock();
+    callback action-desktop-lyrics-toggle();
     callback action-lang(int);
     callback action-quit();
     callback dismiss();
@@ -155,8 +167,9 @@ export component TrayMenu inherits Window {
     private property <length> pad-v: 6px;          // 菜单上下内边距
     private property <length> sep-h: 9px;
     private property <length> row-h: 32px;
-    // 10 行（标题/显示/收藏/上一首/播放暂停/下一首/语言/退出 = 8 行）+ 3 分隔
-    private property <length> menu-h: pad-v * 2 + row-h * 8 + sep-h * 3;
+    // 9 行（标题/显示/收藏/上一首/播放暂停/下一首/显示桌面歌词/语言/退出）+ 3 分隔；
+    // 桌面歌词开启时多一行锁定/解锁
+    private property <length> menu-h: pad-v * 2 + row-h * (root.desktop-lyrics-on ? 10 : 9) + sep-h * 3;
     private property <length> sub-w: 132px;
     private property <length> sub-h: pad-v * 2 + row-h * lang-names.length;
     private property <length> edge: 8px;
@@ -166,8 +179,8 @@ export component TrayMenu inherits Window {
     private property <length> fy: click-y + menu-h > root.height - edge
         ? max(edge, click-y - menu-h)
         : min(click-y, max(edge, root.height - menu-h - edge));
-    // 语言行在主菜单内的 y（标题/显示/收藏/分隔/上一首/播放/下一首/分隔 之后）
-    private property <length> lang-row-y: pad-v + row-h * 6 + sep-h * 2;
+    // 语言行在主菜单内的 y（标题/显示/收藏/分隔/上一首/播放/下一首[/桌面歌词]/分隔 之后）
+    private property <length> lang-row-y: pad-v + row-h * (root.desktop-lyrics-on ? 8 : 7) + sep-h * 2;
     // 子菜单位置：默认贴右缘，越界改贴左缘；纵向与语言行对齐并钳制
     private property <bool> sub-on-left: fx + menu-w + sub-w > root.width - edge;
     private property <length> sub-x: sub-on-left ? fx - sub-w : fx + menu-w;
@@ -248,6 +261,18 @@ export component TrayMenu inherits Window {
                 MenuRow {
                     label: Language.tray-next;
                     clicked => { root.dismiss(); root.action-next(); }
+                    entered => { root.sub-open = false; }
+                }
+                // 显示/隐藏桌面歌词（与设置页开关共用同一状态与持久化）
+                MenuRow {
+                    label: root.desktop-lyrics-on ? Language.tray-dl-hide : Language.tray-dl-show;
+                    clicked => { root.dismiss(); root.action-desktop-lyrics-toggle(); }
+                    entered => { root.sub-open = false; }
+                }
+                // 桌面歌词锁定后鼠标穿透，需托盘/设置页提供解锁入口
+                if root.desktop-lyrics-on: MenuRow {
+                    label: root.desktop-lyrics-locked ? Language.tray-dl-unlock : Language.tray-dl-lock;
+                    clicked => { root.dismiss(); root.action-desktop-lyrics-lock(); }
                     entered => { root.sub-open = false; }
                 }
                 MenuSep {}

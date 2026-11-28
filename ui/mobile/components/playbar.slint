@@ -47,7 +47,34 @@ export component PlayBar inherits Rectangle {
     callback mode();
 
     height: 88px + MobileTheme.safe-bottom;
-    background: MobileTheme.nav-bg;
+    background: transparent;
+
+    // 液态玻璃底座：顶边镜面 + 中段微透 + 底部染色
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: MobileTheme.glass-fill;
+        border-width: 1px;
+        border-color: MobileTheme.glass-stroke;
+        backdrop-blur: MobileTheme.glass-blur;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MobileTheme.glass-shade;
+        clip: true;
+
+        // 顶边镜面高光：两端渐隐，避免在圆角处形成一条贯穿的硬直线
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 
     // 顶部完整进度条
     Rectangle {

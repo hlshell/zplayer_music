@@ -73,6 +73,7 @@ impl Entry {
             // url 存本地文件绝对路径，播放时判断 local 标记走本地读取
             url: self.path.clone().into(),
             liked: false,
+            bad: false,
         }
     }
 
@@ -92,6 +93,7 @@ impl Entry {
             duration_sec: 0.0,
             url: self.path.clone().into(),
             liked: false,
+            bad: false,
         }
     }
 }

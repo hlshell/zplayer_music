@@ -98,6 +98,22 @@ pub(crate) fn setup_like(ctx: &Ctx) {
             }
             if meta.is_some() { break; }
         }
+        if meta.is_none() {
+            // 首页新歌速递可直接右键收藏，无需先加入播放队列
+            let pool = crate::load::NEW_SONG_POOL.lock().unwrap().clone();
+            if let Some(s) = pool.iter().find(|s| s.id == id) {
+                meta = Some(liked::LikedSong {
+                    id: uid,
+                    name: s.name.to_string(),
+                    artist: s.artist.to_string(),
+                    album: s.album.to_string(),
+                    cover: s.url.clone(),
+                    duration: s.duration.to_string(),
+                    duration_sec: s.duration_sec,
+                    ts: 0,
+                });
+            }
+        }
         let now_liked = liked::toggle_liked(uid, meta);
         let client_c = client_like2.clone();
         rt_like2.spawn(async move {
@@ -120,5 +136,13 @@ pub(crate) fn setup_like(ctx: &Ctx) {
         if u.get_current_nav() == 7 {
             super::super::fav::fill_liked(&u);
         }
+    });
+
+    // ---- 右键菜单打开：用收藏库校准红心状态（列表行数据可能未同步收藏结果）----
+    let ui_weak = ctx.ui.clone();
+    ctx.app.clone_strong().on_song_menu_opened(move |id| {
+        let Some(u) = ui_weak.upgrade() else { return; };
+        u.global::<crate::SongMenuState>()
+            .set_liked(liked::is_liked(id as u32 as i64));
     });
 }

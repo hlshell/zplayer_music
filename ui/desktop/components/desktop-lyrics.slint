@@ -1,0 +1,398 @@
+// ============================================================================
+//  desktop-lyrics.slint — 桌面歌词悬浮窗（独立置顶 / 透明 / 无边框）
+//  由 Rust 侧 crate::DesktopLyrics 实例化（platform/desktop_lyrics.rs），仅桌面端使用。
+//
+//  视觉参考 QQ 音乐桌面歌词：未唱为浅色、已唱按进度从左向右逐字点亮；
+//  两层的颜色都由「已唱 / 未唱」配色预设决定（可在设置页菜单里选，含渐变）。
+//  交互：
+//   - 未锁定：可拖动整窗；悬停时顶部居中显示控制条（锁定 / 字号 / 字体 / 配色），
+//     关闭按钮固定在右上角；
+//   - 锁定：背景完全透明、禁止拖动、鼠标点击穿透；
+//   - 悬停状态统一由 Rust 轮询鼠标屏幕坐标写入（hover-controls），
+//     不用 TouchArea.has-hover 驱动显隐，避免鼠标移到按钮上时控制条消失导致点击失效。
+// ============================================================================
+import { LyricsInk } from "lyrics-ink.slint";
+
+// 渐变色带数量：6 段（每段颜色 = from.mix(to, i/5)）
+
+// 带进度揭示的渐变文字。
+// 实现要点：
+//  1. 用不可见 Text 取文本自然宽度，气球宽度 = min(可用宽, 自然宽)，按中心对齐；
+//  2. 文字按 6 段水平裁切，每段颜色 = from.mix(to, i/5)，得到渐变观感；
+//  3. 最外层再按 reveal 裁切，得到卡拉 OK 式从左到右的点亮；
+//  4. 换行时由调用方用两个交替实例承载，避免宽度从满值补间回 0 的「反向收起」。
+component GradientLine inherits Rectangle {
+    in property <string> text: "";
+    in property <color> from: #ffffff;
+    in property <color> to: #ffffff;
+    in property <float> reveal: 1.0;
+    in property <int> font-size-px: 24;
+    in property <string> family: "Microsoft YaHei UI";
+
+    function band-ink(i: int) -> color {
+        root.from.mix(root.to, (i * 1.0) / 5.0)
+    }
+
+    // 不可见度量：仅用于读取 preferred-width（绝对定位，不参与布局）
+    measure := Text {
+        x: 0;
+        y: 0;
+        text: root.text;
+        color: transparent;
+        font-size: root.font-size-px * 1px;
+        font-family: root.family;
+        font-weight: 700;
+        opacity: 0;
+    }
+
+    private property <length> glyph-w: min(root.width, measure.preferred-width);
+    private property <length> band-w: root.glyph-w / 6;
+
+    // 揭示裁剪：宽度随进度增长，内部色带固定不动，所以是「逐字点亮」而不是扫光
+    Rectangle {
+        x: (root.width - root.glyph-w) / 2;
+        y: 0;
+        width: root.glyph-w * max(0.0, min(1.0, root.reveal));
+        height: root.height;
+        clip: true;
+        animate width { duration: 40ms; easing: linear; }
+
+        for i in [0, 1, 2, 3, 4, 5] : Rectangle {
+            x: root.band-w * (i * 1.0);
+            width: root.band-w + 0.5px;   // 多 0.5px 消除色带接缝
+            height: 100%;
+            clip: true;
+
+            Text {
+                x: -root.band-w * (i * 1.0);
+                y: max(0px, (parent.height - measure.preferred-height) / 2);
+                width: root.glyph-w;
+                height: measure.preferred-height;
+                text: root.text;
+                color: root.band-ink(i);
+                font-size: root.font-size-px * 1px;
+                font-family: root.family;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// 整行黑色描边：Slint Text 没有 stroke，用 8 个方向的偏移副本模拟。
+// 描边始终绘制完整歌词，已唱层只覆盖文字内部，因此已唱/未唱都保留清晰轮廓。
+component OutlineLine inherits Rectangle {
+    in property <string> text: "";
+    in property <int> font-size-px: 24;
+    in property <string> family: "Microsoft YaHei UI";
+
+    private property <length> stroke: max(1px, root.font-size-px * 1px * 0.06);
+
+    function ox(i: int) -> length {
+        (i == 0 || i == 3 || i == 5) ? -root.stroke
+            : ((i == 2 || i == 4 || i == 7) ? root.stroke : 0px)
+    }
+    function oy(i: int) -> length {
+        i <= 2 ? -root.stroke : (i >= 5 ? root.stroke : 0px)
+    }
+
+    measure := Text {
+        x: 0; y: 0;
+        text: root.text;
+        color: transparent;
+        font-size: root.font-size-px * 1px;
+        font-family: root.family;
+        font-weight: 700;
+        opacity: 0;
+    }
+
+    for i in [0, 1, 2, 3, 4, 5, 6, 7] : Text {
+        x: root.ox(i);
+        y: max(0px, (parent.height - measure.preferred-height) / 2) + root.oy(i);
+        width: root.width;
+        height: measure.preferred-height;
+        text: root.text;
+        color: rgba(0, 0, 0, 0.86);
+        font-size: root.font-size-px * 1px;
+        font-family: root.family;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// 统一的立体控制按钮：金属渐变 + 顶部高光 + 下投影 + 图标/文字双层雕刻阴影。
+component ChromeButton inherits Rectangle {
+    in property <string> label: "";
+    in property <image> icon;
+    in property <bool> use-icon: false;
+    in property <bool> swatch: false;
+    in property <color> from: #ffffff;
+    in property <color> to: #ffffff;
+    in property <bool> active: false;
+    in property <int> label-size: 12;
+    callback clicked();
+
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.active ? rgba(116, 255, 190, 0.72) : rgba(255, 255, 255, 0.20);
+    background: ta.has-hover
+        ? @linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0.12) 46%, rgba(0, 0, 0, 0.40) 100%)
+        : @linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.07) 46%, rgba(0, 0, 0, 0.42) 100%);
+    drop-shadow-blur: 5px;
+    drop-shadow-color: rgba(0, 0, 0, 0.48);
+    drop-shadow-offset-y: 2px;
+
+    // 顶部内高光，强化浮雕边缘
+    Rectangle {
+        x: 2px; y: 1px;
+        width: parent.width - 4px; height: 1px;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.38);
+    }
+
+    if (root.use-icon) : Image {
+        x: (parent.width - 16px) / 2;
+        y: (parent.height - 16px) / 2 + 1px;
+        width: 16px; height: 16px;
+        source: root.icon;
+        colorize: rgba(0, 0, 0, 0.72);
+    }
+    if (root.use-icon) : Image {
+        x: (parent.width - 16px) / 2;
+        y: (parent.height - 16px) / 2;
+        width: 16px; height: 16px;
+        source: root.icon;
+        colorize: rgba(255, 255, 255, 0.96);
+    }
+
+    if (!root.use-icon && !root.swatch) : Text {
+        x: 0; y: 1px;
+        width: 100%; height: 100%;
+        text: root.label;
+        color: rgba(0, 0, 0, 0.72);
+        font-size: root.label-size * 1px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if (!root.use-icon && !root.swatch) : Text {
+        x: 0; y: 0;
+        width: 100%; height: 100%;
+        text: root.label;
+        color: rgba(255, 255, 255, 0.96);
+        font-size: root.label-size * 1px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if (root.swatch) : Rectangle {
+        x: (parent.width - 15px) / 2;
+        y: (parent.height - 15px) / 2;
+        width: 15px; height: 15px;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: rgba(255, 255, 255, 0.72);
+        background: @linear-gradient(135deg, root.from 0%, root.to 100%);
+        drop-shadow-blur: 2px;
+        drop-shadow-color: rgba(0, 0, 0, 0.55);
+        drop-shadow-offset-y: 1px;
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+export component DesktopLyrics inherits Window {
+    // ---- Rust 每次推进行歌词时同步的状态 ----
+    in property <string> song: "";
+    in property <string> text: "";
+    in property <int> start-ms: 0;      // 当前行起始毫秒
+    in property <int> end-ms: 0;        // 当前行结束毫秒（下一行时间或 +5s）
+    in property <int> pos-ms: 0;        // 当前播放位置毫秒（Rust 端 30ms 平滑推进）
+    in-out property <bool> locked: false;          // 锁定 = 背景透明 + 鼠标穿透
+    in-out property <bool> hover-controls: false;  // 由 Rust 轮询鼠标位置写入
+    in-out property <int> font-size-px: 24;
+    in-out property <int> font-index: 0;
+    in-out property <int> sung-index: 0;           // 已唱配色预设
+    in-out property <int> unsung-index: 0;         // 未唱配色预设
+    in-out property <bool> outline: true;          // 字体黑色描边（复杂背景下增强可读性）
+
+    callback drag-start(length, length);
+    callback lock-clicked();                          // 锁定 / 解锁（新状态由 Rust 决定）
+    callback close-clicked();
+    callback font-changed(int, int);                  // 字号(px) / 字体索引
+    callback color-changed(int, int);                 // 已唱预设 / 未唱预设
+
+    private property <[string]> families: ["Microsoft YaHei UI", "SimSun", "KaiTi", "SimHei"];
+    private property <[string]> family-labels: ["雅黑", "宋体", "楷体", "黑体"];
+
+    // 行内进度（0..1）：分母预留 350ms 收尾，避免最后一字只亮一半
+    private property <float> progress: root.start-ms <= 0 ? 0.0
+        : min(1.0, max(0.0,
+            (root.pos-ms - root.start-ms) * 1.0
+            / max(1, root.end-ms - root.start-ms - 350)));
+
+    // 每次换行序号 +1，让已唱层重建（新实例从当前进度开始，不会反向补间）。
+    // 以行起始时间判断：连续两句相同歌词也必须切换实例。
+    private property <int> seq: 0;
+    changed start-ms => { root.seq += 1; }
+
+    private property <bool> show-controls: root.hover-controls;
+    private property <bool> plain: root.locked && !root.hover-controls;   // 纯歌词（无背景）
+
+    background: transparent;
+    no-frame: true;
+    preferred-width: 760px;
+    preferred-height: 76px;
+
+    // 交互状态：拖动阈值（>4px 才交给系统拖拽，避免误触）
+    private property <length> press-x: 0;
+    private property <length> press-y: 0;
+    private property <bool> drag-fired: false;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 12px;
+        background: root.plain ? transparent : rgba(0, 0, 0, 0.42);
+        border-width: root.plain ? 0px : 1px;
+        border-color: rgba(255, 255, 255, 0.10);
+        clip: true;
+
+        // ---- 拖动层（整窗；放在按钮之前，按钮在上层可正常点击）----
+        ta := TouchArea {
+            width: 100%; height: 100%;
+            enabled: !root.locked;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.press-x = ta.mouse-x;
+                    root.press-y = ta.mouse-y;
+                    root.drag-fired = false;
+                }
+            }
+            moved => {
+                if (!root.drag-fired
+                    && Math.abs(ta.mouse-x - root.press-x)
+                        + Math.abs(ta.mouse-y - root.press-y) > 4px) {
+                    root.drag-fired = true;
+                    root.drag-start(ta.mouse-x, ta.mouse-y);
+                }
+            }
+        }
+
+        // ---- 描边层：完整歌词轮廓，位于未唱和已唱文字下方 ----
+        if (root.outline && root.text != "") : OutlineLine {
+            x: 16px;
+            y: 0;
+            width: parent.width - 32px;
+            height: parent.height;
+            text: root.text;
+            font-size-px: root.font-size-px;
+            family: root.families[root.font-index];
+        }
+
+        // ---- 未唱层：整行浅色 ----
+        GradientLine {
+            x: 16px;
+            y: 0;
+            width: parent.width - 32px;
+            height: parent.height;
+            text: root.text;
+            from: LyricsInk.unsung-from[root.unsung-index];
+            to: LyricsInk.unsung-to[root.unsung-index];
+            reveal: 1.0;
+            font-size-px: root.font-size-px;
+            family: root.families[root.font-index];
+        }
+
+        // ---- 已唱层：按进度点亮，奇偶交替实例（换行不反向收起）----
+        if (root.text != "" && root.progress > 0.0 && Math.mod(root.seq, 2) == 0) : GradientLine {
+            x: 16px;
+            y: 0;
+            width: parent.width - 32px;
+            height: parent.height;
+            text: root.text;
+            from: LyricsInk.sung-from[root.sung-index];
+            to: LyricsInk.sung-to[root.sung-index];
+            reveal: root.progress;
+            font-size-px: root.font-size-px;
+            family: root.families[root.font-index];
+        }
+        if (root.text != "" && root.progress > 0.0 && Math.mod(root.seq, 2) == 1) : GradientLine {
+            x: 16px;
+            y: 0;
+            width: parent.width - 32px;
+            height: parent.height;
+            text: root.text;
+            from: LyricsInk.sung-from[root.sung-index];
+            to: LyricsInk.sung-to[root.sung-index];
+            reveal: root.progress;
+            font-size-px: root.font-size-px;
+            family: root.families[root.font-index];
+        }
+
+        // ---- 悬停控制条：水平居中（锁定/解锁、字号、字体、配色）----
+        if (root.show-controls) : HorizontalLayout {
+            x: (parent.width - 162px) / 2;
+            y: 3px;
+            width: 162px;
+            height: 26px;
+            spacing: 4px;
+
+            ChromeButton {
+                use-icon: true;
+                active: root.locked;
+                icon: root.locked
+                    ? @image-url("../../assets/icons/unlock.svg")
+                    : @image-url("../../assets/icons/lock.svg");
+                clicked => { root.lock-clicked(); }
+            }
+            ChromeButton {
+                label: "A−";
+                label-size: 11;
+                clicked => { root.font-changed(max(14, root.font-size-px - 2), root.font-index); }
+            }
+            ChromeButton {
+                label: "A+";
+                label-size: 11;
+                clicked => { root.font-changed(min(44, root.font-size-px + 2), root.font-index); }
+            }
+            ChromeButton {
+                width: 42px;
+                label: root.family-labels[root.font-index];
+                label-size: 11;
+                clicked => {
+                    root.font-changed(root.font-size-px, Math.mod(root.font-index + 1, 4));
+                }
+            }
+            ChromeButton {
+                swatch: true;
+                from: LyricsInk.sung-from[root.sung-index];
+                to: LyricsInk.sung-to[root.sung-index];
+                clicked => {
+                    root.color-changed(
+                        Math.mod(root.sung-index + 1, LyricsInk.sung-count),
+                        root.unsung-index);
+                }
+            }
+        }
+
+        // ---- 关闭按钮：独立固定在右上角 ----
+        if (root.show-controls) : ChromeButton {
+            x: parent.width - 30px;
+            y: 3px;
+            label: "×";
+            label-size: 16;
+            clicked => { root.close-clicked(); }
+        }
+    }
+}

@@ -17,11 +17,17 @@ component NavCell inherits Rectangle {
     in property <length> label-size: 12px;
     callback clicked;
 
+    // 选中用主色、未选中用次要文字色：浅色/深色下均清晰可读，靠玻璃胶囊区分选中态
+    in property <color> fg: root.active ? MobileTheme.primary : MobileTheme.text-secondary;
+
     min-width: MobileTheme.touch-target;
     min-height: MobileTheme.touch-target;
-    border-radius: 12px;
+    border-radius: root.horizontal ? 12px : 26px;
+    // 选中统一用玻璃胶囊：半透白填充 + 细描边，不再用主题色染图标
+    border-width: root.active ? 1px : 0px;
+    border-color: MobileTheme.glass-stroke;
     background: root.active
-        ? Theme.palette.active
+        ? MobileTheme.glass-capsule
         : (ta.has-hover ? Theme.palette.hover : transparent);
 
     if (root.horizontal) : HorizontalLayout {
@@ -36,11 +42,11 @@ component NavCell inherits Rectangle {
             source: root.icon;
             width: 20px;
             height: 20px;
-            colorize: root.active ? Theme.palette.primary : Theme.palette.icon;
+            colorize: root.fg;
         }
         Text {
             text: root.label;
-            color: root.active ? Theme.palette.text : Theme.palette.text-secondary;
+            color: root.fg;
             font-size: root.label-size;
             font-weight: root.active ? 600 : 400;
             vertical-alignment: center;
@@ -51,18 +57,26 @@ component NavCell inherits Rectangle {
     if (!root.horizontal) : VerticalLayout {
         width: 100%;
         height: 100%;
-        spacing: 2px;
+        spacing: 3px;
         alignment: center;
 
-        Image {
-            source: root.icon;
-            width: 22px;
-            height: 22px;
-            colorize: root.active ? Theme.palette.primary : Theme.palette.icon;
+        // 图标单独包一层并显式水平居中，避免布局交叉轴默认起点对齐导致图标偏左
+        Rectangle {
+            height: 24px;
+            background: transparent;
+
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 24px;
+                height: 24px;
+                source: root.icon;
+                colorize: root.fg;
+            }
         }
         Text {
             text: root.label;
-            color: root.active ? Theme.palette.primary : Theme.palette.text-faint;
+            color: root.fg;
             font-size: root.label-size;
             font-weight: root.active ? 600 : 400;
             horizontal-alignment: center;
@@ -70,22 +84,14 @@ component NavCell inherits Rectangle {
         }
     }
 
-    // 选中指示条：侧栏为左侧竖条，底部/窄栏为顶部小横条
+    // 选中指示条：仅侧栏保留左侧竖条；底部导航不画横条
     if (root.active && root.horizontal) : Rectangle {
         x: 0;
         y: (parent.height - self.height) / 2;
         width: 3px;
         height: 22px;
         border-radius: 1.5px;
-        background: Theme.palette.primary;
-    }
-    if (root.active && !root.horizontal) : Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: 0;
-        width: 20px;
-        height: 3px;
-        border-radius: 1.5px;
-        background: Theme.palette.primary;
+        background: MobileTheme.primary;
     }
 
     ta := TouchArea {
@@ -96,25 +102,52 @@ component NavCell inherits Rectangle {
 
 export component NavBottomBar inherits Rectangle {
     in-out property <int> current: 0;
-    in property <[string]> labels: ["首页", "搜索", "设置"];
+    in property <[string]> labels: ["首页", "搜索", "最近", "设置"];
     callback selected(int);
 
-    height: MobileTheme.bottom-bar-height + MobileTheme.safe-bottom;
-    background: MobileTheme.nav-bg;
+    // 浮层胶囊：由 AppWindow 绝对定位（左右 14px / 高 62px / 底部让出安全区）
+    height: 62px;
+    background: transparent;
+
+    // 液态玻璃底：极低白度渐变 + 1px 镜面描边 + 顶边高光 + 底部反光 + 外投影
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 31px;
+        background: MobileTheme.glass-fill;
+        border-width: 1px;
+        border-color: MobileTheme.glass-stroke;
+        backdrop-blur: MobileTheme.glass-blur;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MobileTheme.glass-shade;
+        clip: true;
+
+        // 顶边镜面高光：两端渐隐，避免在圆角处形成一条贯穿的硬直线
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 
     HorizontalLayout {
         width: 100%;
         height: 100%;
-        spacing: 4px;
-        padding-top: 4px;
-        padding-bottom: MobileTheme.safe-bottom + 4px;
-        padding-left: MobileTheme.safe-left + 8px;
-        padding-right: MobileTheme.safe-right + 8px;
+        spacing: 2px;
+        padding: 6px;
 
         NavCell {
             icon: @image-url("../../assets/icons/home-gray.svg");
             label: root.labels[0];
             active: root.current == 0;
+            label-size: 10px;
             horizontal-stretch: 1;
             clicked => { root.current = 0; root.selected(0); }
         }
@@ -122,36 +155,67 @@ export component NavBottomBar inherits Rectangle {
             icon: @image-url("../../assets/icons/search-gray.svg");
             label: root.labels[1];
             active: root.current == 1;
+            label-size: 10px;
             horizontal-stretch: 1;
             clicked => { root.current = 1; root.selected(1); }
         }
         NavCell {
-            icon: @image-url("../../assets/icons/settings-gray.svg");
+            icon: @image-url("../../assets/icons/recent-gray.svg");
             label: root.labels[2];
             active: root.current == 2;
+            label-size: 10px;
             horizontal-stretch: 1;
             clicked => { root.current = 2; root.selected(2); }
         }
-    }
-
-    // 顶部细分割线
-    Rectangle {
-        x: 0;
-        y: 0;
-        width: 100%;
-        height: 1px;
-        background: MobileTheme.divider;
+        NavCell {
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[3];
+            active: root.current == 3;
+            label-size: 10px;
+            horizontal-stretch: 1;
+            clicked => { root.current = 3; root.selected(3); }
+        }
     }
 }
 
 export component NavRail inherits Rectangle {
     in-out property <int> current: 0;
-    in property <[string]> labels: ["首页", "搜索", "设置"];
+    in property <[string]> labels: ["首页", "搜索", "最近", "设置"];
     callback selected(int);
 
     width: MobileTheme.rail-width + MobileTheme.safe-left;
     height: 100%;
-    background: MobileTheme.nav-bg;
+    background: transparent;
+
+    // 液态玻璃：整条 rail 右侧渐变变暗，视觉上"沉"进内容区
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: MobileTheme.glass-fill;
+        backdrop-blur: MobileTheme.glass-blur;
+        clip: true;
+
+        // 右侧 1px 镜面描边
+        Rectangle {
+            x: parent.width - 1px;
+            y: 0;
+            width: 1px;
+            height: 100%;
+            background: MobileTheme.glass-stroke;
+        }
+        // 顶边高光：两端渐隐，避免贯穿硬直线
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 
     VerticalLayout {
         width: 100%;
@@ -180,33 +244,62 @@ export component NavRail inherits Rectangle {
         }
         NavCell {
             height: 64px;
-            icon: @image-url("../../assets/icons/settings-gray.svg");
+            icon: @image-url("../../assets/icons/recent-gray.svg");
             label: root.labels[2];
             active: root.current == 2;
             label-size: 10px;
             clicked => { root.current = 2; root.selected(2); }
         }
+        NavCell {
+            height: 64px;
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[3];
+            active: root.current == 3;
+            label-size: 10px;
+            clicked => { root.current = 3; root.selected(3); }
+        }
         Rectangle { vertical-stretch: 1; }
-    }
-
-    // 右侧分割线
-    Rectangle {
-        x: parent.width - self.width;
-        y: 0;
-        width: 1px;
-        height: 100%;
-        background: MobileTheme.divider;
     }
 }
 
 export component NavSidebar inherits Rectangle {
     in-out property <int> current: 0;
-    in property <[string]> labels: ["首页", "搜索", "设置"];
+    in property <[string]> labels: ["首页", "搜索", "最近", "设置"];
     callback selected(int);
 
     width: MobileTheme.sidebar-width + MobileTheme.safe-left;
     height: 100%;
-    background: MobileTheme.nav-bg;
+    background: transparent;
+
+    // 液态玻璃：sidebar 从左到右透明度过渡，右侧沉进内容区
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: MobileTheme.glass-fill;
+        backdrop-blur: MobileTheme.glass-blur;
+        clip: true;
+
+        // 右侧 1px 镜面描边
+        Rectangle {
+            x: parent.width - 1px;
+            y: 0;
+            width: 1px;
+            height: 100%;
+            background: MobileTheme.glass-stroke;
+        }
+        // 顶边高光：两端渐隐，避免贯穿硬直线
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 100%;
+            height: 1px;
+            background: @linear-gradient(90deg,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 0%,
+                MobileTheme.glass-shine 12%,
+                MobileTheme.glass-shine 88%,
+                rgba(MobileTheme.glass-shine.red, MobileTheme.glass-shine.green, MobileTheme.glass-shine.blue, 0.0) 100%);
+        }
+    }
 
     VerticalLayout {
         width: 100%;
@@ -273,10 +366,19 @@ export component NavSidebar inherits Rectangle {
             height: MobileTheme.touch-target;
             horizontal: true;
             label-size: 14px;
-            icon: @image-url("../../assets/icons/settings-gray.svg");
+            icon: @image-url("../../assets/icons/recent-gray.svg");
             label: root.labels[2];
             active: root.current == 2;
             clicked => { root.current = 2; root.selected(2); }
+        }
+        NavCell {
+            height: MobileTheme.touch-target;
+            horizontal: true;
+            label-size: 14px;
+            icon: @image-url("../../assets/icons/settings-gray.svg");
+            label: root.labels[3];
+            active: root.current == 3;
+            clicked => { root.current = 3; root.selected(3); }
         }
 
         Rectangle { vertical-stretch: 1; }
@@ -292,14 +394,5 @@ export component NavSidebar inherits Rectangle {
                 vertical-alignment: center;
             }
         }
-    }
-
-    // 右侧分割线
-    Rectangle {
-        x: parent.width - self.width;
-        y: 0;
-        width: 1px;
-        height: 100%;
-        background: MobileTheme.divider;
     }
 }

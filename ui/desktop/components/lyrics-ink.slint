@@ -1,0 +1,32 @@
+// ============================================================================
+//  lyrics-ink.slint — 桌面歌词配色预设（悬浮窗渲染 + 设置页菜单共用）
+//
+//  每个预设是一对颜色（from → to）：from == to 即纯色，否则在文字上做
+//  水平分段渐变（GradientLine 按 6 段插值）。索引由 config 持久化。
+// ============================================================================
+
+export global LyricsInk {
+    // 已唱：纯色 6 个 + 渐变 3 个
+    out property <[color]> sung-from: [
+        #31c27c, #4aa8ff, #b78cff, #ff9f43, #ff5c7a, #ffffff,
+        #38f9d7, #a18cd1, #4facfe,
+    ];
+    out property <[color]> sung-to: [
+        #31c27c, #4aa8ff, #b78cff, #ff9f43, #ff5c7a, #ffffff,
+        #ffe45e, #ffa36c, #a38bff,
+    ];
+    // 未唱：以中性白灰为主，另含彩色与渐变
+    out property <[color]> unsung-from: [
+        rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.58),
+        rgba(255, 255, 255, 0.34), #7fb8ff, #7fe0b0, #c4a8ff,
+        rgba(255, 255, 255, 0.90),
+    ];
+    out property <[color]> unsung-to: [
+        rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.58),
+        rgba(255, 255, 255, 0.34), #7fb8ff, #7fe0b0, #c4a8ff,
+        rgba(127, 184, 255, 0.85),
+    ];
+    // 预设数量（Rust 侧索引取模用，须与上面数组长度一致）
+    out property <int> sung-count: 9;
+    out property <int> unsung-count: 7;
+}

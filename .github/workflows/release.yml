@@ -163,6 +163,9 @@ jobs:
           mkdir -p dist
           cp target/release/zplayer-music dist/
           strip dist/zplayer-music
+          # 桌面入口与 hicolor 主题图标：安装到 ~/.local/share 后应用菜单/任务栏才能显示 logo
+          cp linux/zplayer-music.desktop dist/
+          cp -r linux/icons dist/
           echo "=== 动态依赖（应只剩系统图形库，不含 libav*/libsw*）==="
           ldd dist/zplayer-music || true
           tar -C dist -czf zplayer-music-linux-x64.tar.gz .
@@ -344,7 +347,8 @@ jobs:
           mkdir -p dist
           wasm-bindgen --target web --no-typescript \
             --out-dir dist target/wasm32-unknown-unknown/release/zplayer-music.wasm
-          cp web/index.html dist/
+          cp web/index.html web/manifest.webmanifest dist/
+          cp -r web/icons dist/
           cd dist && zip -r ../zplayer-music-web.zip .
 
       - uses: actions/upload-artifact@v4

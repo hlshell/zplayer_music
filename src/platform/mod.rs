@@ -7,6 +7,9 @@ pub mod storage;
 // 窗口外壳（winit_030）仅桌面（web 无原生窗口）
 #[cfg(not(target_arch = "wasm32"))]
 pub mod winshell;
+// 桌面歌词悬浮窗（独立置顶透明窗口）仅桌面（web 无原生窗口）
+#[cfg(not(target_arch = "wasm32"))]
+pub mod desktop_lyrics;
 // 系统托盘（Windows/macOS；Linux 不启用：tray-icon 需动态链接 gtk3/glib/appindicator，
 // 破坏单 ELF 发布物纯净性，且 Linux 桌面托盘环境碎片化严重）
 #[cfg(any(target_os = "windows", target_os = "macos"))]

@@ -93,6 +93,15 @@ pub fn setup(ctx: &Ctx) {
             25 => c.network.proxy_enabled = on,
             26 => c.lx.fallback_enabled = on,
             27 => c.lx.auto_update = on,
+            28 => {
+                c.ui.desktop_lyrics = on;
+                // 关闭桌面歌词时一并解除锁定，避免隐藏后残留穿透状态
+                if !on {
+                    c.ui.desktop_lyrics_locked = false;
+                }
+            }
+            29 => c.ui.desktop_lyrics_locked = on,
+            30 => c.ui.desktop_lyrics_outline = on,
             _ => {}
         }
         c.save();
@@ -111,6 +120,96 @@ pub fn setup(ctx: &Ctx) {
                 realip_addr: c.network.realip_addr.clone(),
             });
         }
+        // 桌面歌词：同步悬浮窗（建窗/显隐）与锁定（鼠标穿透）
+        if id == 28 || id == 29 {
+            let enabled = c.ui.desktop_lyrics;
+            let locked = c.ui.desktop_lyrics_locked;
+            drop(c);
+            u.set_desktop_lyrics(enabled);
+            u.set_desktop_lyrics_lock(locked);
+            crate::platform::desktop_lyrics::set_enabled(ui.clone(), enabled);
+            crate::platform::desktop_lyrics::set_locked(locked);
+        }
+        if id == 30 {
+            u.set_desktop_lyrics_outline(on);
+            crate::platform::desktop_lyrics::set_outline(on);
+        }
+    });
+
+    // 桌面歌词悬浮窗内「锁定」/「×」→ 持久化并回写主窗口开关
+    let ui = ctx.ui.clone();
+    let shared_dl = ctx.shared.clone();
+    ctx.app.clone_strong().on_desktop_lyrics_lock_changed(move |locked| {
+        {
+            let mut c = shared_dl.borrow_mut();
+            c.ui.desktop_lyrics_locked = locked;
+            c.save();
+        }
+        if let Some(u) = ui.upgrade() {
+            u.set_desktop_lyrics_lock(locked);
+        }
+    });
+    let ui = ctx.ui.clone();
+    let shared_dlc = ctx.shared.clone();
+    ctx.app.clone_strong().on_desktop_lyrics_close_requested(move || {
+        {
+            let mut c = shared_dlc.borrow_mut();
+            c.ui.desktop_lyrics = false;
+            c.ui.desktop_lyrics_locked = false;
+            c.save();
+        }
+        if let Some(u) = ui.upgrade() {
+            u.set_desktop_lyrics(false);
+            u.set_desktop_lyrics_lock(false);
+        }
+    });
+
+    // 播放栏 / 歌词抽屉的桌面歌词图标：开关悬浮窗（与设置页 id=28 同逻辑）
+    let ui = ctx.ui.clone();
+    let shared_dlt = ctx.shared.clone();
+    ctx.app.clone_strong().on_desktop_lyrics_toggle_requested(move || {
+        let (enabled, locked) = {
+            let mut c = shared_dlt.borrow_mut();
+            c.ui.desktop_lyrics = !c.ui.desktop_lyrics;
+            // 关闭时一并解除锁定，避免下次打开残留穿透状态
+            if !c.ui.desktop_lyrics {
+                c.ui.desktop_lyrics_locked = false;
+            }
+            c.save();
+            (c.ui.desktop_lyrics, c.ui.desktop_lyrics_locked)
+        };
+        if let Some(u) = ui.upgrade() {
+            u.set_desktop_lyrics(enabled);
+            u.set_desktop_lyrics_lock(locked);
+        }
+        crate::platform::desktop_lyrics::set_enabled(ui.clone(), enabled);
+        crate::platform::desktop_lyrics::set_locked(locked);
+    });
+
+    // 悬浮窗内调整字号 / 字体风格 → 持久化
+    let shared_dlf = ctx.shared.clone();
+    ctx.app.clone_strong().on_desktop_lyrics_font_changed(move |px, fi| {
+        let mut c = shared_dlf.borrow_mut();
+        c.ui.desktop_lyrics_font_size = px;
+        c.ui.desktop_lyrics_font_index = fi;
+        c.save();
+    });
+
+    // 设置页配色菜单 / 悬浮窗配色按钮：已唱与未唱预设 → 持久化并立即应用
+    let ui = ctx.ui.clone();
+    let shared_dlc2 = ctx.shared.clone();
+    ctx.app.clone_strong().on_desktop_lyrics_color_changed(move |si, ui_idx| {
+        {
+            let mut c = shared_dlc2.borrow_mut();
+            c.ui.desktop_lyrics_sung_index = si;
+            c.ui.desktop_lyrics_unsung_index = ui_idx;
+            c.save();
+        }
+        if let Some(u) = ui.upgrade() {
+            u.set_desktop_lyrics_sung(si);
+            u.set_desktop_lyrics_unsung(ui_idx);
+        }
+        crate::platform::desktop_lyrics::set_colors(si, ui_idx);
     });
 
     // 设置页多 Tab：输入（缓存上限 / realip 地址）
